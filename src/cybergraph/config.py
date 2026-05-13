@@ -71,6 +71,8 @@ def _parse_simple_value(value: str) -> Any:
         if not inner:
             return []
         return [item.strip().strip("\"'") for item in inner.split(",")]
+    if value == "{}":
+        return {}
     return value.strip("\"'")
 
 
