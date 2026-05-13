@@ -17,6 +17,7 @@ from .security import (
 from .security.review import format_security_review, review_security_delta
 from .security.layers import format_layer_summary, summarize_layers
 from .security.vulnerabilities import import_vulnerability_report
+from .visualize import generate_html_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,8 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     review.add_argument("--repo", default=".", help="Repository root to review")
 
-    visualize = sub.add_parser("visualize", help="Print graph summary for now")
+    visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
 
     return parser
 
@@ -97,11 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "visualize":
-        store = GraphStore.open_for_repo(repo)
-        counts = store.counts()
-        store.close()
-        print(f"CyberGraph summary for {repo}")
-        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+        output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
+        print(f"Wrote CyberGraph HTML report: {output}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
