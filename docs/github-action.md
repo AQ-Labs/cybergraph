@@ -14,6 +14,8 @@ On pull requests and pushes to `main`, the workflow:
 6. Uploads SARIF to GitHub code scanning.
 7. Uploads the SARIF, HTML report, and review summary as workflow artifacts.
 
+If code scanning is not enabled for the repository, the SARIF upload step is allowed to fail without failing the workflow. The SARIF file is still preserved as an artifact, so private repositories can use the workflow before code scanning is enabled.
+
 ## Required permissions
 
 The workflow uses:

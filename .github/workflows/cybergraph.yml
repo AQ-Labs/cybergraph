@@ -10,6 +10,9 @@ permissions:
   security-events: write
   actions: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   security-graph:
     name: Build security graph
@@ -17,10 +20,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -41,12 +44,13 @@ jobs:
         run: cybergraph visualize . --output cybergraph-report.html
 
       - name: Upload SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: cybergraph.sarif
 
       - name: Upload CyberGraph artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cybergraph-report
           path: |
