@@ -49,6 +49,31 @@ def retrieve_evidence(repo_root: Path, question: str, limit: int = 8) -> list[Ev
 
         for row in store.conn.execute(
             """
+            SELECT v.name AS vulnerability, d.name AS dependency, e.properties AS properties
+            FROM edges e
+            JOIN nodes v ON v.key = e.source
+            JOIN nodes d ON d.key = e.target
+            WHERE e.kind = 'AFFECTS_DEPENDENCY'
+            ORDER BY v.name, d.name
+            LIMIT 50
+            """
+        ):
+            haystack = " ".join(str(row[key]) for key in row.keys()).lower()
+            if not terms or any(term in haystack for term in terms):
+                evidence.append(
+                    Evidence(
+                        "vulnerability",
+                        row["vulnerability"],
+                        "",
+                        0,
+                        f"affects dependency {row['dependency']} ({row['properties']})",
+                    )
+                )
+            if len(evidence) >= limit:
+                return evidence
+
+        for row in store.conn.execute(
+            """
             SELECT kind, name, file_path, line_start, properties
             FROM nodes
             WHERE kind != 'File'

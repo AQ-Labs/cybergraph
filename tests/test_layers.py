@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from cybergraph.build import build_graph
+from cybergraph.graph import Edge, GraphStore, Node
 from cybergraph.security.layers import format_layer_summary, summarize_layers
 
 
@@ -34,3 +35,23 @@ def test_layer_summary_counts_dependencies(tmp_path: Path) -> None:
     summary = summarize_layers(repo)
 
     assert any(item.key == "dependency" and item.node_count >= 2 for item in summary)
+
+
+def test_layer_summary_counts_vulnerability_edges(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = GraphStore.open_for_repo(repo)
+    try:
+        store.upsert_nodes([
+            Node("Dependency", "requirements.txt::fastapi", "fastapi"),
+            Node("Vulnerability", "vulnerability::GHSA-demo", "GHSA-demo"),
+        ])
+        store.add_edges([Edge("AFFECTS_DEPENDENCY", "vulnerability::GHSA-demo", "requirements.txt::fastapi")])
+    finally:
+        store.close()
+
+    summary = summarize_layers(repo)
+
+    dependency = next(item for item in summary if item.key == "dependency")
+    assert dependency.node_count == 2
+    assert dependency.edge_count == 1

@@ -35,6 +35,7 @@ EDGE_TO_LAYER = {
     "SANITIZES": "validation",
     "REACHES_SINK": "sink",
     "USES_SECRET": "secrets",
+    "AFFECTS_DEPENDENCY": "dependency",
 }
 
 
@@ -47,7 +48,7 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
 
         for row in store.conn.execute("SELECT kind, properties FROM nodes WHERE kind != 'File'"):
             props = json.loads(row["properties"] or "{}")
-            if row["kind"] in {"Dependency", "DependencyManifest"}:
+            if row["kind"] in {"Dependency", "DependencyManifest", "Vulnerability"}:
                 node_counts["dependency"] += 1
             for prop, layer in PROPERTY_TO_LAYER.items():
                 if props.get(prop):
@@ -67,6 +68,8 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
                 finding_counts["sink"] += 1
             if "secret" in text or "password" in text or "token" in text:
                 finding_counts["secrets"] += 1
+            if "osv" in text or "npm" in text or "vulnerability" in text or "affected by" in text:
+                finding_counts["dependency"] += 1
 
         return [
             LayerSummary(
