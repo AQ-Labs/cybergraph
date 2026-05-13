@@ -45,8 +45,10 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
         edge_counts = dict.fromkeys([layer.key for layer in LAYERS], 0)
         finding_counts = dict.fromkeys([layer.key for layer in LAYERS], 0)
 
-        for row in store.conn.execute("SELECT properties FROM nodes WHERE kind != 'File'"):
+        for row in store.conn.execute("SELECT kind, properties FROM nodes WHERE kind != 'File'"):
             props = json.loads(row["properties"] or "{}")
+            if row["kind"] in {"Dependency", "DependencyManifest"}:
+                node_counts["dependency"] += 1
             for prop, layer in PROPERTY_TO_LAYER.items():
                 if props.get(prop):
                     node_counts[layer] += 1

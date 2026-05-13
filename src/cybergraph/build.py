@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cybergraph.analysis import analyze_javascript_file, analyze_python_file, iter_source_files
+from cybergraph.analysis import (
+    analyze_dependency_manifest,
+    analyze_javascript_file,
+    analyze_python_file,
+    is_dependency_manifest,
+    iter_source_files,
+)
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 
 
@@ -18,7 +24,11 @@ def build_graph(repo_root: Path) -> dict[str, int]:
     findings: list[Finding] = []
 
     for path in iter_source_files(repo_root):
-        if path.suffix == ".py":
+        if is_dependency_manifest(path):
+            file_nodes, file_edges = analyze_dependency_manifest(path, repo_root)
+            nodes.extend(file_nodes)
+            edges.extend(file_edges)
+        elif path.suffix == ".py":
             file_nodes, file_edges, file_findings = analyze_python_file(path, repo_root)
             nodes.extend(file_nodes)
             edges.extend(file_edges)
