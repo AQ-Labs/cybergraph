@@ -4,12 +4,41 @@ Security review for codebases, powered by knowledge graphs.
 
 CyberGraph maps a repository into a cybersecurity knowledge graph so developers can inspect security layers, risky code paths, scanner findings, and evidence-backed answers without reading the whole codebase by hand.
 
-## Early goals
+## Why this exists
 
-- Build a local graph of files, symbols, security controls, findings, and attack-relevant paths.
-- Answer security review questions with file and line evidence.
-- Connect scanner findings to reachable code instead of leaving them as flat reports.
-- Provide a CLI first, then MCP tools for AI coding assistants.
+Security scanners are useful, but their output is usually flat: a file, a line, a rule, and a warning. Developers still have to answer the hard questions:
+
+- Is this issue reachable from production code?
+- Is there authentication before this sensitive action?
+- Did this pull request affect a security boundary?
+- Which scanner findings matter first?
+
+CyberGraph is designed to connect those dots.
+
+## Current capabilities
+
+- Builds a local SQLite graph in `.cybergraph/graph.db`.
+- Extracts Python files, functions, calls, route-like entrypoints, and sensitive sink calls.
+- Stores built-in findings with file and line evidence.
+- Imports Semgrep JSON, SARIF, and Gitleaks JSON reports.
+- Answers basic security questions from graph evidence.
+- Exposes optional MCP tools for AI coding assistants.
+
+## Quick start
+
+```bash
+python -m pip install -e ".[dev]"
+cybergraph build path/to/repo
+cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
+cybergraph paths --repo path/to/repo
+```
+
+Import scanner results:
+
+```bash
+cybergraph import-report semgrep.json --repo path/to/repo
+cybergraph ask "Which high severity findings involve secrets?" --repo path/to/repo
+```
 
 ## Example questions
 
@@ -18,8 +47,34 @@ Which endpoints can reach SQL execution?
 What changed in this PR that affects authentication?
 Where are secrets loaded and passed into network clients?
 Which vulnerable dependency is reachable from production code?
+Are there route handlers that reach shell or file writes?
 ```
+
+## MCP tools
+
+Install with the optional MCP extra and run the server:
+
+```bash
+python -m pip install -e ".[mcp]"
+cybergraph-mcp
+```
+
+Initial tools:
+
+- `build_security_graph_tool`
+- `query_security_graph_tool`
+- `explain_attack_path_tool`
+
+## Project direction
+
+CyberGraph is intentionally security-first. It is not trying to be a general code graph with security keywords sprinkled on top. The goal is to model controls, attack paths, trust boundaries, scanner findings, and code evidence as one graph.
+
+See:
+
+- [Architecture](docs/architecture.md)
+- [Security ontology](docs/security-ontology.md)
+- [Product plan](docs/product-plan.md)
 
 ## Status
 
-Private bootstrap. The initial version focuses on a small, inspectable Python package with a SQLite graph store and security-first analyzers.
+Private bootstrap. The first version is small on purpose: it establishes the package, graph store, Python analyzer, scanner import path, evidence retrieval, and MCP surface.
