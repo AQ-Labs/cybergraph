@@ -9,7 +9,12 @@ from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
 from .rag import answer_question
-from .security import find_attack_paths, format_attack_paths, load_scanner_findings
+from .security import (
+    find_attack_paths,
+    format_attack_paths,
+    load_scanner_findings,
+)
+from .security.review import format_security_review, review_security_delta
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "paths":
         print(format_attack_paths(find_attack_paths(repo, max_depth=args.max_depth)))
     elif args.command == "review":
-        print(f"Review security delta from {args.base}: {repo}")
+        print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "visualize":
         store = GraphStore.open_for_repo(repo)
         counts = store.counts()
