@@ -34,7 +34,12 @@ SINK_CALLS = {
 SECRET_MARKERS = {"process.env", "secret", "password", "token", "api_key", "apikey"}
 
 
-def analyze_javascript_file(path: Path, repo_root: Path) -> tuple[list[Node], list[Edge], list[Finding]]:
+def analyze_javascript_file(
+    path: Path,
+    repo_root: Path,
+    custom_sinks: tuple[str, ...] = (),
+    secret_markers: tuple[str, ...] = (),
+) -> tuple[list[Node], list[Edge], list[Finding]]:
     source = path.read_text(encoding="utf-8", errors="ignore")
     rel = path.relative_to(repo_root).as_posix()
     lines = source.splitlines()
@@ -77,7 +82,7 @@ def analyze_javascript_file(path: Path, repo_root: Path) -> tuple[list[Node], li
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
-            if _is_sink(call_name):
+            if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
                 findings.append(
                     Finding(
@@ -90,7 +95,7 @@ def analyze_javascript_file(path: Path, repo_root: Path) -> tuple[list[Node], li
                         evidence=line.strip(),
                     )
                 )
-            if any(marker in line.lower() for marker in SECRET_MARKERS):
+            if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
                 edges.append(Edge(EDGE_USES_SECRET, rel, call_name, rel, line_no))
 
     return nodes, edges, findings
@@ -117,9 +122,9 @@ def _classify_js_name(name: str) -> dict[str, bool]:
     }
 
 
-def _is_sink(call_name: str) -> bool:
+def _is_sink(call_name: str, custom_sinks: tuple[str, ...] = ()) -> bool:
     lowered = call_name.lower()
-    return any(sink.lower() in lowered for sink in SINK_CALLS)
+    return any(sink.lower() in lowered for sink in SINK_CALLS | set(custom_sinks))
 
 
 def _language(path: Path) -> str:

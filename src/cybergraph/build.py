@@ -31,12 +31,24 @@ def build_graph(repo_root: Path) -> dict[str, int]:
             nodes.extend(file_nodes)
             edges.extend(file_edges)
         elif path.suffix == ".py":
-            file_nodes, file_edges, file_findings = analyze_python_file(path, repo_root)
+            file_nodes, file_edges, file_findings = analyze_python_file(
+                path,
+                repo_root,
+                custom_sinks=config.custom_sinks,
+                auth_markers=config.auth_markers,
+                validation_markers=config.validation_markers,
+                secret_markers=config.secret_markers,
+            )
             nodes.extend(file_nodes)
             edges.extend(file_edges)
             findings.extend(file_findings)
         elif path.suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
-            file_nodes, file_edges, file_findings = analyze_javascript_file(path, repo_root)
+            file_nodes, file_edges, file_findings = analyze_javascript_file(
+                path,
+                repo_root,
+                custom_sinks=config.custom_sinks,
+                secret_markers=config.secret_markers,
+            )
             nodes.extend(file_nodes)
             edges.extend(file_edges)
             findings.extend(file_findings)

@@ -21,7 +21,14 @@ from cybergraph.security.ontology import (
 )
 
 
-def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[Edge], list[Finding]]:
+def analyze_python_file(
+    path: Path,
+    repo_root: Path,
+    custom_sinks: tuple[str, ...] = (),
+    auth_markers: tuple[str, ...] = (),
+    validation_markers: tuple[str, ...] = (),
+    secret_markers: tuple[str, ...] = (),
+) -> tuple[list[Node], list[Edge], list[Finding]]:
     source = path.read_text(encoding="utf-8", errors="ignore")
     rel = path.relative_to(repo_root).as_posix()
     try:
@@ -44,7 +51,7 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
     for item in ast.walk(tree):
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
             key = f"{rel}::{item.name}"
-            props = classify_name(item.name)
+            props = classify_name(item.name, auth_markers, validation_markers, secret_markers, custom_sinks)
             decorators = _decorator_texts(item)
             props["decorators"] = decorators
             route = _route_metadata(item)
@@ -66,7 +73,7 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
                 edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, item.lineno))
             for decorator in decorators:
                 lowered_decorator = decorator.lower()
-                if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS):
+                if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)):
                     edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
 
             for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
@@ -75,7 +82,7 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
                     continue
                 edges.append(Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno)))
                 lowered = call_name.lower()
-                if any(kw in lowered for kw in SINK_KEYWORDS):
+                if any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)):
                     edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, getattr(call, "lineno", item.lineno)))
                     findings.append(
                         Finding(
@@ -88,23 +95,29 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
                             evidence=call_name,
                         )
                     )
-                if any(kw in lowered for kw in SECRET_KEYWORDS):
+                if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
                     edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, getattr(call, "lineno", item.lineno)))
-                if any(kw in lowered for kw in VALIDATION_KEYWORDS):
+                if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
                     edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
 
     return nodes, edges, findings
 
 
-def classify_name(name: str) -> dict[str, bool]:
+def classify_name(
+    name: str,
+    auth_markers: tuple[str, ...] = (),
+    validation_markers: tuple[str, ...] = (),
+    secret_markers: tuple[str, ...] = (),
+    custom_sinks: tuple[str, ...] = (),
+) -> dict[str, bool]:
     lowered = name.lower()
     return {
-        "auth_related": any(kw in lowered for kw in AUTH_KEYWORDS),
+        "auth_related": any(kw in lowered for kw in AUTH_KEYWORDS | set(auth_markers)),
         "authorization_related": any(kw in lowered for kw in AUTHZ_KEYWORDS),
-        "validation_related": any(kw in lowered for kw in VALIDATION_KEYWORDS),
-        "secret_related": any(kw in lowered for kw in SECRET_KEYWORDS),
+        "validation_related": any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)),
+        "secret_related": any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)),
         "crypto_related": any(kw in lowered for kw in CRYPTO_KEYWORDS),
-        "sink_related": any(kw in lowered for kw in SINK_KEYWORDS),
+        "sink_related": any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)),
     }
 
 

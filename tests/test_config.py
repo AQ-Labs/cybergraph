@@ -42,3 +42,28 @@ def test_build_graph_respects_ignored_paths(tmp_path: Path) -> None:
     finally:
         store.close()
     assert ignored == 0
+
+
+def test_build_graph_applies_custom_sink(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".cybergraph.toml").write_text(
+        "[security]\nsinks = ['dangerous_call']\n",
+        encoding="utf-8",
+    )
+    (repo / "app.py").write_text(
+        "def handler():\n"
+        "    return dangerous_call()\n",
+        encoding="utf-8",
+    )
+
+    build_graph(repo)
+
+    store = GraphStore.open_for_repo(repo)
+    try:
+        sink_edges = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE kind = 'REACHES_SINK'"
+        ).fetchone()[0]
+    finally:
+        store.close()
+    assert sink_edges == 1
