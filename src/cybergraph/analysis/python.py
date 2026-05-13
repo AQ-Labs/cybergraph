@@ -11,7 +11,9 @@ from cybergraph.security.ontology import (
     AUTHZ_KEYWORDS,
     CRYPTO_KEYWORDS,
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_GUARDS,
     EDGE_REACHES_SINK,
+    EDGE_SANITIZES,
     EDGE_USES_SECRET,
     SECRET_KEYWORDS,
     SINK_KEYWORDS,
@@ -43,6 +45,12 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
             key = f"{rel}::{item.name}"
             props = classify_name(item.name)
+            decorators = _decorator_texts(item)
+            props["decorators"] = decorators
+            route = _route_metadata(item)
+            if route:
+                props["entrypoint"] = True
+                props["route"] = route
             nodes.append(
                 Node(
                     "Function",
@@ -54,8 +62,12 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
                     props,
                 )
             )
-            if _looks_like_route(item):
+            if route:
                 edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, item.lineno))
+            for decorator in decorators:
+                lowered_decorator = decorator.lower()
+                if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS):
+                    edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
 
             for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
@@ -78,6 +90,8 @@ def analyze_python_file(path: Path, repo_root: Path) -> tuple[list[Node], list[E
                     )
                 if any(kw in lowered for kw in SECRET_KEYWORDS):
                     edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, getattr(call, "lineno", item.lineno)))
+                if any(kw in lowered for kw in VALIDATION_KEYWORDS):
+                    edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
 
     return nodes, edges, findings
 
@@ -94,16 +108,41 @@ def classify_name(name: str) -> dict[str, bool]:
     }
 
 
-def _looks_like_route(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _decorator_texts(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    return [ast.unparse(decorator) for decorator in node.decorator_list if hasattr(ast, "unparse")]
+
+
+def _route_metadata(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, str]:
     for decorator in node.decorator_list:
         text = ast.unparse(decorator).lower() if hasattr(ast, "unparse") else ""
-        if any(marker in text for marker in ("route", "get", "post", "put", "delete", "patch")):
-            return True
-    return False
+        func_name = ""
+        route_path = ""
+        if isinstance(decorator, ast.Call):
+            func_name = _callable_name(decorator.func)
+            if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                route_path = str(decorator.args[0].value)
+        else:
+            func_name = _callable_name(decorator)
+        lowered_func = func_name.lower()
+        framework_route = (
+            lowered_func.endswith(".route")
+            or lowered_func in {"route", "app.route"}
+            or any(
+                lowered_func.endswith(f".{method}")
+                for method in ("get", "post", "put", "delete", "patch", "head", "options")
+            )
+            or text.startswith("@require_")
+        )
+        if framework_route:
+            return {"decorator": func_name or text, "path": route_path}
+    return {}
 
 
 def _call_name(call: ast.Call) -> str:
-    func = call.func
+    return _callable_name(call.func)
+
+
+def _callable_name(func: ast.AST) -> str:
     if isinstance(func, ast.Name):
         return func.id
     if isinstance(func, ast.Attribute):
