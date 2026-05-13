@@ -14,7 +14,15 @@ On pull requests and pushes to `main`, the workflow:
 6. Uploads SARIF to GitHub code scanning.
 7. Uploads the SARIF, HTML report, and review summary as workflow artifacts.
 
-If code scanning is not enabled for the repository, the SARIF upload step is allowed to fail without failing the workflow. The SARIF file is still preserved as an artifact, so private repositories can use the workflow before code scanning is enabled.
+For private repositories, the SARIF upload step is skipped by default because code scanning may not be enabled. The SARIF file is still preserved as an artifact, so private repositories can use the workflow immediately.
+
+To upload SARIF from a private repository after enabling code scanning, add a repository variable:
+
+```text
+CYBERGRAPH_UPLOAD_SARIF=true
+```
+
+The upload step is still marked non-blocking so a code-scanning configuration problem does not hide the generated CyberGraph report artifacts.
 
 ## Required permissions
 
