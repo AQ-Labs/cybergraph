@@ -31,6 +31,8 @@ CyberGraph is designed to connect those dots.
 
 ```bash
 python -m pip install -e ".[dev]"
+cybergraph init .
+cybergraph doctor .
 cybergraph build path/to/repo
 cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
 cybergraph paths --repo path/to/repo
@@ -59,6 +61,14 @@ Which vulnerable dependency is reachable from production code?
 Are there route handlers that reach shell or file writes?
 ```
 
+## Try the demo
+
+```bash
+cybergraph build examples/vulnerable-fastapi
+cybergraph ask "Which routes reach SQL execution?" --repo examples/vulnerable-fastapi
+cybergraph visualize examples/vulnerable-fastapi --output cybergraph-report.html
+```
+
 ## MCP tools
 
 Install with the optional MCP extra and run the server:
@@ -81,6 +91,7 @@ CyberGraph is intentionally security-first. It is not trying to be a general cod
 See:
 
 - [Architecture](docs/architecture.md)
+- [Getting started](docs/getting-started.md)
 - [Security ontology](docs/security-ontology.md)
 - [Product plan](docs/product-plan.md)
 - [GitHub Action](docs/github-action.md)
