@@ -15,6 +15,7 @@ from .security import (
     load_scanner_findings,
 )
 from .security.review import format_security_review, review_security_delta
+from .security.layers import format_layer_summary, summarize_layers
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     paths = sub.add_parser("paths", help="Explain entrypoint-to-sink attack paths")
     paths.add_argument("--repo", default=".", help="Repository root containing the graph")
     paths.add_argument("--max-depth", type=int, default=5, help="Maximum traversal depth")
+
+    layers = sub.add_parser("layers", help="Summarize detected security layers")
+    layers.add_argument("--repo", default=".", help="Repository root containing the graph")
 
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
@@ -77,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         print(answer_question(repo, args.question))
     elif args.command == "paths":
         print(format_attack_paths(find_attack_paths(repo, max_depth=args.max_depth)))
+    elif args.command == "layers":
+        print(format_layer_summary(summarize_layers(repo)))
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "visualize":
