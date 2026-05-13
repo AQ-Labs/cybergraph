@@ -1,4 +1,4 @@
-﻿from flask import Flask, request
+from flask import Flask, request
 import sqlite3
 
 app = Flask(__name__)

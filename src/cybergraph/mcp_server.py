@@ -1,4 +1,4 @@
-﻿"""Optional MCP server for CyberGraph."""
+"""Optional MCP server for CyberGraph."""
 
 from __future__ import annotations
 

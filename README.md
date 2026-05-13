@@ -1,4 +1,4 @@
-﻿# CyberGraph
+# CyberGraph
 
 Security review for codebases, powered by knowledge graphs.
 

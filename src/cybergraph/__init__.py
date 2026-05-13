@@ -1,4 +1,4 @@
-﻿"""CyberGraph: cybersecurity knowledge graph tooling for code review."""
+"""CyberGraph: cybersecurity knowledge graph tooling for code review."""
 
 from __future__ import annotations
 

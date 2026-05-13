@@ -1,4 +1,4 @@
-﻿# Security Ontology
+# Security Ontology
 
 CyberGraph uses a security-first vocabulary so evidence is not just a bag of scanner messages.
 

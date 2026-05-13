@@ -1,4 +1,4 @@
-﻿"""Command-line interface for CyberGraph."""
+"""Command-line interface for CyberGraph."""
 
 from __future__ import annotations
 

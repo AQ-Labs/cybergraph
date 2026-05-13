@@ -1,4 +1,4 @@
-﻿"""Graph domain objects."""
+"""Graph domain objects."""
 
 from __future__ import annotations
 

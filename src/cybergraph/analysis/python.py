@@ -1,4 +1,4 @@
-﻿"""Python AST security analyzer."""
+"""Python AST security analyzer."""
 
 from __future__ import annotations
 

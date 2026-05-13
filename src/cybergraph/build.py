@@ -1,4 +1,4 @@
-﻿"""Build orchestration for CyberGraph."""
+"""Build orchestration for CyberGraph."""
 
 from __future__ import annotations
 

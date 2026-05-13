@@ -1,4 +1,4 @@
-﻿# Product Plan
+# Product Plan
 
 ## Wedge
 

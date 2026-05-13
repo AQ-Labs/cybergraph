@@ -1,4 +1,4 @@
-﻿"""Security package exports."""
+"""Security package exports."""
 
 from .attack_paths import find_attack_paths, format_attack_paths
 from .ontology import LAYERS

@@ -1,4 +1,4 @@
-﻿"""Import findings from common security scanner report formats."""
+"""Import findings from common security scanner report formats."""
 
 from __future__ import annotations
 

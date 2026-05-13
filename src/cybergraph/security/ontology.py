@@ -1,4 +1,4 @@
-﻿"""Security ontology used by CyberGraph analyzers and answers."""
+"""Security ontology used by CyberGraph analyzers and answers."""
 
 from __future__ import annotations
 

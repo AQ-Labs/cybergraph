@@ -1,4 +1,4 @@
-﻿"""Simple evidence retrieval over the local CyberGraph database."""
+"""Simple evidence retrieval over the local CyberGraph database."""
 
 from __future__ import annotations
 

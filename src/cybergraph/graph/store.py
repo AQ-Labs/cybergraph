@@ -1,4 +1,4 @@
-﻿"""SQLite storage for CyberGraph."""
+"""SQLite storage for CyberGraph."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-﻿"""Analysis package exports."""
+"""Analysis package exports."""
 
 from .collector import iter_source_files
 from .python import analyze_python_file

@@ -1,4 +1,4 @@
-﻿"""Graph package exports."""
+"""Graph package exports."""
 
 from .models import Edge, Finding, Node
 from .store import GraphStore

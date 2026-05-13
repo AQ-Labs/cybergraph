@@ -1,4 +1,4 @@
-﻿"""Attack-path analysis over CyberGraph edges."""
+"""Attack-path analysis over CyberGraph edges."""
 
 from __future__ import annotations
 

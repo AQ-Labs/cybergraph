@@ -1,4 +1,4 @@
-﻿"""Repository file collection."""
+"""Repository file collection."""
 
 from __future__ import annotations
 

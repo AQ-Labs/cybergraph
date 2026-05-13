@@ -1,4 +1,4 @@
-﻿# CyberGraph Architecture
+# CyberGraph Architecture
 
 CyberGraph is built around one idea: security review should be graph-first, not report-first.
 

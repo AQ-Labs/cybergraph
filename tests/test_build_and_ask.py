@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from cybergraph.build import build_graph
 from cybergraph.rag import answer_question
