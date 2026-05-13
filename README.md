@@ -19,6 +19,8 @@ CyberGraph is designed to connect those dots.
 
 - Builds a local SQLite graph in `.cybergraph/graph.db`.
 - Extracts Python files, functions, calls, route-like entrypoints, and sensitive sink calls.
+- Extracts JavaScript/TypeScript Express and Next.js-style entrypoints and common sinks.
+- Maps dependency manifests from `package.json`, `requirements.txt`, and `pyproject.toml`.
 - Stores built-in findings with file and line evidence.
 - Imports Semgrep JSON, SARIF, and Gitleaks JSON reports.
 - Answers basic security questions from graph evidence.
@@ -31,6 +33,8 @@ python -m pip install -e ".[dev]"
 cybergraph build path/to/repo
 cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
 cybergraph paths --repo path/to/repo
+cybergraph layers --repo path/to/repo
+cybergraph review --base main --repo path/to/repo
 ```
 
 Import scanner results:
