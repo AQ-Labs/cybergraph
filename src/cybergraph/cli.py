@@ -9,7 +9,7 @@ from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
 from .rag import answer_question
-from .security import load_scanner_findings
+from .security import find_attack_paths, format_attack_paths, load_scanner_findings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
     ask.add_argument("--repo", default=".", help="Repository root containing the graph")
+
+    paths = sub.add_parser("paths", help="Explain entrypoint-to-sink attack paths")
+    paths.add_argument("--repo", default=".", help="Repository root containing the graph")
+    paths.add_argument("--max-depth", type=int, default=5, help="Maximum traversal depth")
 
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Imported {len(findings)} finding(s) into {repo / '.cybergraph' / 'graph.db'}")
     elif args.command == "ask":
         print(answer_question(repo, args.question))
+    elif args.command == "paths":
+        print(format_attack_paths(find_attack_paths(repo, max_depth=args.max_depth)))
     elif args.command == "review":
         print(f"Review security delta from {args.base}: {repo}")
     elif args.command == "visualize":
@@ -81,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
 
