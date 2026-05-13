@@ -16,6 +16,7 @@ from .security import (
 )
 from .security.review import format_security_review, review_security_delta
 from .security.layers import format_layer_summary, summarize_layers
+from .security.vulnerabilities import import_vulnerability_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
     import_report = sub.add_parser("import-report", help="Import findings from Semgrep, SARIF, or Gitleaks JSON")
     import_report.add_argument("report", help="Path to scanner report JSON")
     import_report.add_argument("--repo", default=".", help="Repository root containing the graph")
+
+    import_vulns = sub.add_parser("import-vulns", help="Import OSV Scanner or npm audit vulnerability JSON")
+    import_vulns.add_argument("report", help="Path to vulnerability report JSON")
+    import_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
 
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
@@ -77,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         store.add_findings(findings)
         store.close()
         print(f"Imported {len(findings)} finding(s) into {repo / '.cybergraph' / 'graph.db'}")
+    elif args.command == "import-vulns":
+        counts = import_vulnerability_report(repo, Path(args.report).resolve())
+        print(
+            f"Imported {counts['vulnerabilities']} vulnerabilit(y/ies); "
+            f"matched {counts['matched_dependencies']} dependency node(s)"
+        )
     elif args.command == "ask":
         print(answer_question(repo, args.question))
     elif args.command == "paths":
