@@ -1,0 +1,11 @@
+[ignore]
+paths = []
+
+[security]
+sinks = ["raw_sql"]
+auth_markers = ["require_admin"]
+validation_markers = ["validate_name"]
+secret_markers = ["DATABASE_URL"]
+
+[severity]
+overrides = {}
