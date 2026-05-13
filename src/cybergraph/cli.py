@@ -8,6 +8,7 @@ from pathlib import Path
 from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
+from .rag import answer_question
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,8 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Scanned {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
     elif args.command == "ask":
-        print(f"Question: {args.question}")
-        print(f"Graph repo: {repo}")
+        print(answer_question(repo, args.question))
     elif args.command == "review":
         print(f"Review security delta from {args.base}: {repo}")
     elif args.command == "visualize":
@@ -70,4 +70,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
