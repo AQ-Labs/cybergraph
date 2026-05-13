@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cybergraph.analysis import analyze_python_file, iter_source_files
+from cybergraph.analysis import analyze_javascript_file, analyze_python_file, iter_source_files
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 
 
@@ -20,6 +20,11 @@ def build_graph(repo_root: Path) -> dict[str, int]:
     for path in iter_source_files(repo_root):
         if path.suffix == ".py":
             file_nodes, file_edges, file_findings = analyze_python_file(path, repo_root)
+            nodes.extend(file_nodes)
+            edges.extend(file_edges)
+            findings.extend(file_findings)
+        elif path.suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
+            file_nodes, file_edges, file_findings = analyze_javascript_file(path, repo_root)
             nodes.extend(file_nodes)
             edges.extend(file_edges)
             findings.extend(file_findings)

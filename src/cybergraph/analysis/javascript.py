@@ -1,0 +1,126 @@
+"""Lightweight JavaScript and TypeScript security analyzer."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from cybergraph.graph import Edge, Finding, Node
+from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REACHES_SINK, EDGE_USES_SECRET
+
+FUNCTION_RE = re.compile(
+    r"(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)\s*\(|"
+    r"(?:const|let|var)\s+(?P<var>[A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
+)
+ROUTE_RE = re.compile(
+    r"(?P<router>\b(?:app|router|server)\s*\.\s*(?:get|post|put|patch|delete|all|use))"
+    r"\s*\(\s*['\"](?P<path>[^'\"]+)['\"]"
+)
+NEXT_EXPORT_RE = re.compile(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(")
+CALL_RE = re.compile(r"(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(")
+
+SINK_CALLS = {
+    "db.query",
+    "client.query",
+    "connection.query",
+    "pool.query",
+    "exec",
+    "child_process.exec",
+    "eval",
+    "fs.writeFile",
+    "fs.readFile",
+    "res.render",
+}
+SECRET_MARKERS = {"process.env", "secret", "password", "token", "api_key", "apikey"}
+
+
+def analyze_javascript_file(path: Path, repo_root: Path) -> tuple[list[Node], list[Edge], list[Finding]]:
+    source = path.read_text(encoding="utf-8", errors="ignore")
+    rel = path.relative_to(repo_root).as_posix()
+    lines = source.splitlines()
+    nodes: list[Node] = [Node("File", rel, rel, rel, 1, len(lines), {"language": _language(path)})]
+    edges: list[Edge] = []
+    findings: list[Finding] = []
+
+    functions = _function_lines(lines)
+    for name, line_no in functions:
+        key = f"{rel}::{name}"
+        nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_js_name(name)))
+
+    for line_no, line in enumerate(lines, start=1):
+        route_match = ROUTE_RE.search(line)
+        if route_match:
+            key = f"{rel}::route:{route_match.group('path')}:{line_no}"
+            nodes.append(
+                Node(
+                    "Entrypoint",
+                    key,
+                    route_match.group("path"),
+                    rel,
+                    line_no,
+                    line_no,
+                    {"framework": "express", "method": route_match.group("router").split(".")[-1]},
+                )
+            )
+            edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+
+        if NEXT_EXPORT_RE.search(line):
+            method = NEXT_EXPORT_RE.search(line).group(1)
+            key = f"{rel}::route:{method}:{line_no}"
+            nodes.append(
+                Node("Entrypoint", key, key.rsplit(":", 2)[1], rel, line_no, line_no, {"framework": "nextjs"})
+            )
+            edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+
+        if any(marker in line.lower() for marker in SECRET_MARKERS):
+            edges.append(Edge(EDGE_USES_SECRET, rel, "secret", rel, line_no))
+
+        for call in CALL_RE.finditer(line):
+            call_name = call.group("name")
+            if _is_sink(call_name):
+                edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
+                findings.append(
+                    Finding(
+                        rule_id="CG-JS-SINK-CALL",
+                        severity="medium",
+                        message=f"JavaScript/TypeScript file reaches sensitive sink `{call_name}`",
+                        file_path=rel,
+                        line_start=line_no,
+                        cwe="CWE-20",
+                        evidence=line.strip(),
+                    )
+                )
+            if any(marker in line.lower() for marker in SECRET_MARKERS):
+                edges.append(Edge(EDGE_USES_SECRET, rel, call_name, rel, line_no))
+
+    return nodes, edges, findings
+
+
+def _function_lines(lines: list[str]) -> list[tuple[str, int]]:
+    found: list[tuple[str, int]] = []
+    for line_no, line in enumerate(lines, start=1):
+        match = FUNCTION_RE.search(line)
+        if match:
+            found.append((match.group("name") or match.group("var"), line_no))
+    return found
+
+
+def _classify_js_name(name: str) -> dict[str, bool]:
+    lowered = name.lower()
+    return {
+        "auth_related": "auth" in lowered or "login" in lowered,
+        "authorization_related": "permission" in lowered or "role" in lowered,
+        "validation_related": "validate" in lowered or "sanitize" in lowered,
+        "secret_related": "secret" in lowered or "token" in lowered or "password" in lowered,
+        "crypto_related": "hash" in lowered or "encrypt" in lowered or "sign" in lowered,
+        "sink_related": "query" in lowered or "exec" in lowered,
+    }
+
+
+def _is_sink(call_name: str) -> bool:
+    lowered = call_name.lower()
+    return any(sink.lower() in lowered for sink in SINK_CALLS)
+
+
+def _language(path: Path) -> str:
+    return "typescript" if path.suffix.lower() in {".ts", ".tsx"} else "javascript"
