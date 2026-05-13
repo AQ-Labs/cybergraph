@@ -1,0 +1,153 @@
+﻿"""SQLite storage for CyberGraph."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Iterable
+
+from .models import Edge, Finding, Node
+
+
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    file_path TEXT DEFAULT '',
+    line_start INTEGER DEFAULT 0,
+    line_end INTEGER DEFAULT 0,
+    properties TEXT DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    file_path TEXT DEFAULT '',
+    line INTEGER DEFAULT 0,
+    properties TEXT DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    line_start INTEGER DEFAULT 0,
+    line_end INTEGER DEFAULT 0,
+    cwe TEXT DEFAULT '',
+    owasp TEXT DEFAULT '',
+    tool TEXT DEFAULT 'cybergraph',
+    evidence TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
+CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
+"""
+
+
+class GraphStore:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(SCHEMA)
+
+    @classmethod
+    def open_for_repo(cls, repo_root: Path) -> "GraphStore":
+        return cls(repo_root / ".cybergraph" / "graph.db")
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def clear(self) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM edges")
+            self.conn.execute("DELETE FROM nodes")
+            self.conn.execute("DELETE FROM findings")
+
+    def upsert_nodes(self, nodes: Iterable[Node]) -> None:
+        with self.conn:
+            self.conn.executemany(
+                """
+                INSERT INTO nodes(kind, key, name, file_path, line_start, line_end, properties)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    kind=excluded.kind,
+                    name=excluded.name,
+                    file_path=excluded.file_path,
+                    line_start=excluded.line_start,
+                    line_end=excluded.line_end,
+                    properties=excluded.properties
+                """,
+                [
+                    (
+                        n.kind,
+                        n.key,
+                        n.name,
+                        n.file_path,
+                        n.line_start,
+                        n.line_end,
+                        json.dumps(n.properties, sort_keys=True),
+                    )
+                    for n in nodes
+                ],
+            )
+
+    def add_edges(self, edges: Iterable[Edge]) -> None:
+        with self.conn:
+            self.conn.executemany(
+                """
+                INSERT INTO edges(kind, source, target, file_path, line, properties)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        e.kind,
+                        e.source,
+                        e.target,
+                        e.file_path,
+                        e.line,
+                        json.dumps(e.properties, sort_keys=True),
+                    )
+                    for e in edges
+                ],
+            )
+
+    def add_findings(self, findings: Iterable[Finding]) -> None:
+        with self.conn:
+            self.conn.executemany(
+                """
+                INSERT INTO findings(rule_id, severity, message, file_path, line_start,
+                                     line_end, cwe, owasp, tool, evidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        f.rule_id,
+                        f.severity,
+                        f.message,
+                        f.file_path,
+                        f.line_start,
+                        f.line_end,
+                        f.cwe,
+                        f.owasp,
+                        f.tool,
+                        f.evidence,
+                    )
+                    for f in findings
+                ],
+            )
+
+    def counts(self) -> dict[str, int]:
+        return {
+            "nodes": self.conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0],
+            "edges": self.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0],
+            "findings": self.conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0],
+        }
