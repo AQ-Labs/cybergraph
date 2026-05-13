@@ -9,6 +9,7 @@ from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
 from .rag import answer_question
+from .security import load_scanner_findings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="Run built-in lightweight security analyzers")
     scan.add_argument("repo", nargs="?", default=".", help="Repository root to scan")
+
+    import_report = sub.add_parser("import-report", help="Import findings from Semgrep, SARIF, or Gitleaks JSON")
+    import_report.add_argument("report", help="Path to scanner report JSON")
+    import_report.add_argument("--repo", default=".", help="Repository root containing the graph")
 
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
@@ -53,6 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         counts = scan_repo(repo)
         print(f"Scanned {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+    elif args.command == "import-report":
+        store = GraphStore.open_for_repo(repo)
+        findings = load_scanner_findings(Path(args.report).resolve())
+        store.add_findings(findings)
+        store.close()
+        print(f"Imported {len(findings)} finding(s) into {repo / '.cybergraph' / 'graph.db'}")
     elif args.command == "ask":
         print(answer_question(repo, args.question))
     elif args.command == "review":
@@ -70,5 +81,6 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 
