@@ -1,0 +1,21 @@
+﻿# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+.env
+
+# CyberGraph local data
+.cybergraph/
+*.db
+*.sqlite
+
+# Build output
+dist/
+build/
+*.egg-info/
