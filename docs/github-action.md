@@ -9,10 +9,11 @@ On pull requests and pushes to `main`, the workflow:
 1. Installs CyberGraph from the repository checkout.
 2. Builds the local security graph.
 3. Runs `cybergraph review` for pull requests.
-4. Exports `cybergraph.sarif`.
-5. Generates `cybergraph-report.html`.
-6. Uploads SARIF to GitHub code scanning.
-7. Uploads the SARIF, HTML report, and review summary as workflow artifacts.
+4. Posts or updates a CyberGraph pull request comment.
+5. Exports `cybergraph.sarif`.
+6. Generates `cybergraph-report.html`.
+7. Uploads SARIF to GitHub code scanning when enabled.
+8. Uploads the SARIF, HTML report, review summary, and PR comment as workflow artifacts.
 
 For private repositories, the SARIF upload step is skipped by default because code scanning may not be enabled. The SARIF file is still preserved as an artifact, so private repositories can use the workflow immediately.
 
@@ -31,6 +32,7 @@ The workflow uses:
 ```yaml
 permissions:
   contents: read
+  pull-requests: write
   security-events: write
   actions: read
 ```

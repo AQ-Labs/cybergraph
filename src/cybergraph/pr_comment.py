@@ -32,6 +32,7 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
 
     risk = _risk(review)
     lines = [
+        "<!-- cybergraph-pr-comment -->",
         "## CyberGraph Security Review",
         "",
         f"**Risk:** `{risk}`",

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
   security-events: write
   actions: read
 
@@ -37,6 +38,16 @@ jobs:
         if: github.event_name == 'pull_request'
         run: cybergraph review --base origin/${{ github.base_ref }} --repo . | tee cybergraph-review.txt
 
+      - name: Generate PR comment
+        if: github.event_name == 'pull_request'
+        run: cybergraph pr-comment --base origin/${{ github.base_ref }} --repo . --output cybergraph-pr-comment.md
+
+      - name: Comment on pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file cybergraph-pr-comment.md
+
       - name: Export SARIF
         run: cybergraph sarif --repo . --output cybergraph.sarif
 
@@ -58,4 +69,5 @@ jobs:
             cybergraph.sarif
             cybergraph-report.html
             cybergraph-review.txt
+            cybergraph-pr-comment.md
           if-no-files-found: ignore

@@ -7,6 +7,9 @@ def test_cybergraph_workflow_exists() -> None:
     text = workflow.read_text(encoding="utf-8")
 
     assert "cybergraph build ." in text
+    assert "pull-requests: write" in text
+    assert "cybergraph pr-comment" in text
+    assert "gh pr comment" in text
     assert "cybergraph sarif" in text
     assert "github/codeql-action/upload-sarif@v4" in text
     assert "CYBERGRAPH_UPLOAD_SARIF" in text

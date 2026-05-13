@@ -36,6 +36,7 @@ cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
 cybergraph paths --repo path/to/repo
 cybergraph layers --repo path/to/repo
 cybergraph review --base main --repo path/to/repo
+cybergraph pr-comment --base main --repo path/to/repo --output cybergraph-pr-comment.md
 cybergraph visualize path/to/repo
 cybergraph sarif --repo path/to/repo --output cybergraph.sarif
 ```
