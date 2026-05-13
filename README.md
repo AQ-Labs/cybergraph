@@ -21,6 +21,7 @@ CyberGraph is designed to connect those dots.
 - Extracts Python files, functions, calls, route-like entrypoints, and sensitive sink calls.
 - Extracts JavaScript/TypeScript Express and Next.js-style entrypoints and common sinks.
 - Maps dependency manifests from `package.json`, `requirements.txt`, and `pyproject.toml`.
+- Imports OSV Scanner and npm audit vulnerability reports into dependency graph nodes.
 - Stores built-in findings with file and line evidence.
 - Imports Semgrep JSON, SARIF, and Gitleaks JSON reports.
 - Answers basic security questions from graph evidence.
@@ -35,12 +36,14 @@ cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
 cybergraph paths --repo path/to/repo
 cybergraph layers --repo path/to/repo
 cybergraph review --base main --repo path/to/repo
+cybergraph visualize path/to/repo
 ```
 
 Import scanner results:
 
 ```bash
 cybergraph import-report semgrep.json --repo path/to/repo
+cybergraph import-vulns osv-results.json --repo path/to/repo
 cybergraph ask "Which high severity findings involve secrets?" --repo path/to/repo
 ```
 
