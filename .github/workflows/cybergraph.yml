@@ -1,0 +1,56 @@
+name: CyberGraph
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  security-graph:
+    name: Build security graph
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CyberGraph
+        run: python -m pip install -e .
+
+      - name: Build graph
+        run: cybergraph build .
+
+      - name: Review security delta
+        if: github.event_name == 'pull_request'
+        run: cybergraph review --base origin/${{ github.base_ref }} --repo . | tee cybergraph-review.txt
+
+      - name: Export SARIF
+        run: cybergraph sarif --repo . --output cybergraph.sarif
+
+      - name: Generate HTML report
+        run: cybergraph visualize . --output cybergraph-report.html
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: cybergraph.sarif
+
+      - name: Upload CyberGraph artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cybergraph-report
+          path: |
+            cybergraph.sarif
+            cybergraph-report.html
+            cybergraph-review.txt
+          if-no-files-found: ignore
