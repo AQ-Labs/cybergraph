@@ -37,6 +37,7 @@ cybergraph paths --repo path/to/repo
 cybergraph layers --repo path/to/repo
 cybergraph review --base main --repo path/to/repo
 cybergraph visualize path/to/repo
+cybergraph sarif --repo path/to/repo --output cybergraph.sarif
 ```
 
 Import scanner results:
@@ -81,6 +82,7 @@ See:
 - [Architecture](docs/architecture.md)
 - [Security ontology](docs/security-ontology.md)
 - [Product plan](docs/product-plan.md)
+- [GitHub Action](docs/github-action.md)
 
 ## Status
 
