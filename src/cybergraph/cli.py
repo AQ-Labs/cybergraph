@@ -6,6 +6,8 @@ import argparse
 from pathlib import Path
 
 from . import __version__
+from .build import build_graph, scan_repo
+from .graph import GraphStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,16 +45,24 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path(getattr(args, "repo", ".")).resolve()
 
     if args.command == "build":
-        print(f"Build security graph: {repo}")
+        counts = build_graph(repo)
+        print(f"Built security graph for {repo}")
+        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
     elif args.command == "scan":
-        print(f"Run security analyzers: {repo}")
+        counts = scan_repo(repo)
+        print(f"Scanned {repo}")
+        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
     elif args.command == "ask":
         print(f"Question: {args.question}")
         print(f"Graph repo: {repo}")
     elif args.command == "review":
         print(f"Review security delta from {args.base}: {repo}")
     elif args.command == "visualize":
-        print(f"Visualize graph summary: {repo}")
+        store = GraphStore.open_for_repo(repo)
+        counts = store.counts()
+        store.close()
+        print(f"CyberGraph summary for {repo}")
+        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
@@ -60,3 +70,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
