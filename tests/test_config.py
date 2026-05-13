@@ -1,0 +1,44 @@
+from pathlib import Path
+
+from cybergraph.build import build_graph
+from cybergraph.config import load_config
+from cybergraph.graph import GraphStore
+
+
+def test_load_config_reads_ignored_paths_and_markers(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".cybergraph.toml").write_text(
+        "[ignore]\n"
+        "paths = ['vendor/**']\n\n"
+        "[security]\n"
+        "sinks = ['dangerous_call']\n"
+        "auth_markers = ['require_admin']\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(repo)
+
+    assert config.ignored_paths == ("vendor/**",)
+    assert config.custom_sinks == ("dangerous_call",)
+    assert config.auth_markers == ("require_admin",)
+
+
+def test_build_graph_respects_ignored_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    vendor = repo / "vendor"
+    vendor.mkdir(parents=True)
+    (repo / ".cybergraph.toml").write_text("[ignore]\npaths = ['vendor/**']\n", encoding="utf-8")
+    (repo / "app.py").write_text("def app():\n    return 1\n", encoding="utf-8")
+    (vendor / "ignored.py").write_text("def ignored():\n    return 1\n", encoding="utf-8")
+
+    build_graph(repo)
+
+    store = GraphStore.open_for_repo(repo)
+    try:
+        ignored = store.conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE file_path = 'vendor/ignored.py'"
+        ).fetchone()[0]
+    finally:
+        store.close()
+    assert ignored == 0
