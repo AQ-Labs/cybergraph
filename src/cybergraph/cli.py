@@ -8,6 +8,7 @@ from pathlib import Path
 from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
+from .pr_comment import write_pr_comment
 from .rag import answer_question
 from .security import (
     find_attack_paths,
@@ -59,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     review.add_argument("--repo", default=".", help="Repository root to review")
 
+    comment = sub.add_parser("pr-comment", help="Generate a markdown PR security review comment")
+    comment.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
+    comment.add_argument("--repo", default=".", help="Repository root to review")
+    comment.add_argument("--output", default="cybergraph-pr-comment.md", help="Output markdown path")
+
     sarif = sub.add_parser("sarif", help="Export CyberGraph findings as SARIF")
     sarif.add_argument("--repo", default=".", help="Repository root containing the graph")
     sarif.add_argument("--output", default="cybergraph.sarif", help="Output SARIF path")
@@ -103,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
         print(format_layer_summary(summarize_layers(repo)))
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
+    elif args.command == "pr-comment":
+        output = write_pr_comment(repo, Path(args.output).resolve(), base=args.base)
+        print(f"Wrote PR comment markdown: {output}")
     elif args.command == "sarif":
         output = export_sarif(repo, Path(args.output).resolve())
         print(f"Wrote SARIF report: {output}")
