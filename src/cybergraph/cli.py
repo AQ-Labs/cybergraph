@@ -17,6 +17,7 @@ from .security import (
 from .security.review import format_security_review, review_security_delta
 from .security.layers import format_layer_summary, summarize_layers
 from .security.vulnerabilities import import_vulnerability_report
+from .sarif import export_sarif
 from .visualize import generate_html_report
 
 
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     review.add_argument("--repo", default=".", help="Repository root to review")
 
+    sarif = sub.add_parser("sarif", help="Export CyberGraph findings as SARIF")
+    sarif.add_argument("--repo", default=".", help="Repository root containing the graph")
+    sarif.add_argument("--output", default="cybergraph.sarif", help="Output SARIF path")
+
     visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
@@ -98,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
         print(format_layer_summary(summarize_layers(repo)))
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
+    elif args.command == "sarif":
+        output = export_sarif(repo, Path(args.output).resolve())
+        print(f"Wrote SARIF report: {output}")
     elif args.command == "visualize":
         output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
         print(f"Wrote CyberGraph HTML report: {output}")
