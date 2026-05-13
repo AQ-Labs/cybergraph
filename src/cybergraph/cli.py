@@ -8,6 +8,7 @@ from pathlib import Path
 from . import __version__
 from .build import build_graph, scan_repo
 from .graph import GraphStore
+from .init_project import format_init_result, init_project
 from .pr_comment import write_pr_comment
 from .rag import answer_question
 from .security import (
@@ -30,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"cybergraph {__version__}")
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    init = sub.add_parser("init", help="Create CyberGraph config and GitHub Actions workflow")
+    init.add_argument("repo", nargs="?", default=".", help="Repository root to initialize")
+    init.add_argument("--force", action="store_true", help="Overwrite existing CyberGraph files")
 
     build = sub.add_parser("build", help="Build the local security knowledge graph")
     build.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
@@ -81,7 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = Path(getattr(args, "repo", ".")).resolve()
 
-    if args.command == "build":
+    if args.command == "init":
+        print(format_init_result(init_project(repo, force=args.force)))
+    elif args.command == "build":
         counts = build_graph(repo)
         print(f"Built security graph for {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
