@@ -43,6 +43,23 @@ cybergraph visualize path/to/repo
 cybergraph sarif --repo path/to/repo --output cybergraph.sarif
 ```
 
+Typical build output:
+
+```text
+Built graph for examples/vulnerable-fastapi
+nodes: 18
+edges: 24
+findings: 3
+```
+
+Typical PR comment sections:
+
+```text
+Risk: medium
+What Changed: CyberGraph detected 2 entrypoints, 1 sensitive sink edge, 1 finding in changed files.
+What To Check Next: Confirm changed entrypoints require authentication or authorization when needed.
+```
+
 Import scanner results:
 
 ```bash
@@ -50,6 +67,24 @@ cybergraph import-report semgrep.json --repo path/to/repo
 cybergraph import-vulns osv-results.json --repo path/to/repo
 cybergraph ask "Which high severity findings involve secrets?" --repo path/to/repo
 ```
+
+Suppress accepted findings:
+
+```python
+def test_fixture():
+    # cybergraph: ignore CG-SINK-CALL accepted test-only query
+    return db.execute("select 1")
+```
+
+Or configure repository-level suppressions:
+
+```toml
+[suppressions]
+rules = ["CG-SINK-CALL"]
+paths = ["legacy/**"]
+```
+
+Suppressions hide findings, but the graph still keeps edges such as `REACHES_SINK` so reviewers can inspect the real code path.
 
 ## Example questions
 
