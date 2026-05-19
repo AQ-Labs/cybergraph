@@ -6,6 +6,7 @@ import ast
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
+from cybergraph.suppressions import is_inline_suppressed
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
     AUTHZ_KEYWORDS,
@@ -30,6 +31,7 @@ def analyze_python_file(
     secret_markers: tuple[str, ...] = (),
 ) -> tuple[list[Node], list[Edge], list[Finding]]:
     source = path.read_text(encoding="utf-8", errors="ignore")
+    lines = source.splitlines()
     rel = path.relative_to(repo_root).as_posix()
     try:
         tree = ast.parse(source)
@@ -42,9 +44,9 @@ def analyze_python_file(
             line_start=exc.lineno or 0,
             evidence=str(exc),
         )
-        return [Node("File", rel, rel, rel, 1, len(source.splitlines()))], [], [finding]
+        return [Node("File", rel, rel, rel, 1, len(lines))], [], [finding]
 
-    nodes: list[Node] = [Node("File", rel, rel, rel, 1, len(source.splitlines()), {"language": "python"})]
+    nodes: list[Node] = [Node("File", rel, rel, rel, 1, len(lines), {"language": "python"})]
     edges: list[Edge] = []
     findings: list[Finding] = []
 
@@ -83,17 +85,19 @@ def analyze_python_file(
                 edges.append(Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno)))
                 lowered = call_name.lower()
                 if any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)):
-                    edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, getattr(call, "lineno", item.lineno)))
-                    findings.append(
-                        Finding(
-                            rule_id="CG-SINK-CALL",
-                            severity="medium",
-                            message=f"Function reaches sensitive sink `{call_name}`",
-                            file_path=rel,
-                            line_start=getattr(call, "lineno", item.lineno),
-                            cwe="CWE-20",
-                            evidence=call_name,
-                        )
+                    line_no = getattr(call, "lineno", item.lineno)
+                    edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, line_no))
+                    if not is_inline_suppressed(lines, line_no, "CG-SINK-CALL"):
+                        findings.append(
+                            Finding(
+                                rule_id="CG-SINK-CALL",
+                                severity="medium",
+                                message=f"Function reaches sensitive sink `{call_name}`",
+                                file_path=rel,
+                                line_start=line_no,
+                                cwe="CWE-20",
+                                evidence=call_name,
+                            )
                     )
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
                     edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, getattr(call, "lineno", item.lineno)))

@@ -25,3 +25,21 @@ def test_javascript_analyzer_detects_express_routes_and_sinks(tmp_path: Path) ->
     assert any(edge.kind == "REACHES_SINK" for edge in edges)
     assert any(edge.kind == "USES_SECRET" for edge in edges)
     assert any(finding.rule_id == "CG-JS-SINK-CALL" for finding in findings)
+
+
+def test_javascript_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.js"
+    app.write_text(
+        "function handler(req) {\n"
+        "  // cybergraph: ignore CG-JS-SINK-CALL accepted fixture query\n"
+        "  return db.query(req.body.name);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    _nodes, edges, findings = analyze_javascript_file(app, repo)
+
+    assert any(edge.kind == "REACHES_SINK" for edge in edges)
+    assert findings == []

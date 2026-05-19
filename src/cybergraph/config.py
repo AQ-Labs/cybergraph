@@ -22,6 +22,8 @@ class CyberGraphConfig:
     auth_markers: tuple[str, ...] = ()
     validation_markers: tuple[str, ...] = ()
     secret_markers: tuple[str, ...] = ()
+    suppressed_rules: tuple[str, ...] = ()
+    suppressed_paths: tuple[str, ...] = ()
     severity_overrides: dict[str, str] = field(default_factory=dict)
 
 
@@ -36,6 +38,8 @@ def load_config(repo_root: Path) -> CyberGraphConfig:
         auth_markers=tuple(_list(data, "security", "auth_markers")),
         validation_markers=tuple(_list(data, "security", "validation_markers")),
         secret_markers=tuple(_list(data, "security", "secret_markers")),
+        suppressed_rules=tuple(_list(data, "suppressions", "rules")),
+        suppressed_paths=tuple(_list(data, "suppressions", "paths")),
         severity_overrides=dict(data.get("severity", {}).get("overrides", {})),
     )
 

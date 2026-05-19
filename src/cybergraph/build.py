@@ -13,6 +13,7 @@ from cybergraph.analysis import (
     iter_source_files,
 )
 from cybergraph.graph import Edge, Finding, GraphStore, Node
+from cybergraph.suppressions import filter_suppressed_findings
 
 
 def build_graph(repo_root: Path) -> dict[str, int]:
@@ -55,6 +56,8 @@ def build_graph(repo_root: Path) -> dict[str, int]:
         else:
             rel = path.relative_to(repo_root).as_posix()
             nodes.append(Node("File", rel, rel, rel, 1, len(path.read_text(errors="ignore").splitlines())))
+
+    findings = filter_suppressed_findings(findings, config)
 
     store.upsert_nodes(nodes)
     store.add_edges(edges)

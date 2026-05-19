@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REACHES_SINK, EDGE_USES_SECRET
+from cybergraph.suppressions import is_inline_suppressed
 
 FUNCTION_RE = re.compile(
     r"(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)\s*\(|"
@@ -84,17 +85,18 @@ def analyze_javascript_file(
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
-                findings.append(
-                    Finding(
-                        rule_id="CG-JS-SINK-CALL",
-                        severity="medium",
-                        message=f"JavaScript/TypeScript file reaches sensitive sink `{call_name}`",
-                        file_path=rel,
-                        line_start=line_no,
-                        cwe="CWE-20",
-                        evidence=line.strip(),
+                if not is_inline_suppressed(lines, line_no, "CG-JS-SINK-CALL"):
+                    findings.append(
+                        Finding(
+                            rule_id="CG-JS-SINK-CALL",
+                            severity="medium",
+                            message=f"JavaScript/TypeScript file reaches sensitive sink `{call_name}`",
+                            file_path=rel,
+                            line_start=line_no,
+                            cwe="CWE-20",
+                            evidence=line.strip(),
+                        )
                     )
-                )
             if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
                 edges.append(Edge(EDGE_USES_SECRET, rel, call_name, rel, line_no))
 

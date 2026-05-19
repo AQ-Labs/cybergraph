@@ -29,3 +29,20 @@ def test_python_analyzer_maps_routes_guards_and_sanitizers(tmp_path: Path) -> No
     assert any(edge.kind == "GUARDS" for edge in edges)
     assert any(edge.kind == "SANITIZES" for edge in edges)
     assert any(finding.rule_id == "CG-SINK-CALL" for finding in findings)
+
+
+def test_python_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.py"
+    app.write_text(
+        "def handler():\n"
+        "    # cybergraph: ignore CG-SINK-CALL accepted in test fixture\n"
+        "    return db.execute('select 1')\n",
+        encoding="utf-8",
+    )
+
+    _nodes, edges, findings = analyze_python_file(app, repo)
+
+    assert any(edge.kind == "REACHES_SINK" for edge in edges)
+    assert findings == []
