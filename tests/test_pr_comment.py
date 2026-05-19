@@ -11,6 +11,9 @@ def test_generate_pr_comment_returns_markdown_for_non_git_repo(tmp_path: Path) -
     comment = generate_pr_comment(repo)
 
     assert "CyberGraph Security Review" in comment
+    assert "What Changed" in comment
+    assert "Why It Matters" in comment
+    assert "What To Check Next" in comment
     assert "| Changed files | 0 |" in comment
     assert "Layer Summary" in comment
 

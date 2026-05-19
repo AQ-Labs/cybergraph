@@ -37,6 +37,18 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
         "",
         f"**Risk:** `{risk}`",
         "",
+        "### What Changed",
+        "",
+        _change_summary(review),
+        "",
+        "### Why It Matters",
+        "",
+        _risk_summary(review),
+        "",
+        "### What To Check Next",
+        "",
+        *_checklist(review),
+        "",
         "| Metric | Count |",
         "|---|---:|",
         f"| Changed files | {len(review.changed_files)} |",
@@ -96,3 +108,41 @@ def _risk(review) -> str:
     if review.finding_count or review.changed_sink_edges or review.changed_entrypoints:
         return "medium"
     return "low"
+
+
+def _change_summary(review) -> str:
+    parts: list[str] = []
+    if review.changed_files:
+        parts.append(f"{len(review.changed_files)} changed file(s)")
+    if review.changed_entrypoints:
+        parts.append(f"{len(review.changed_entrypoints)} entrypoint(s)")
+    if review.changed_sink_edges:
+        parts.append(f"{len(review.changed_sink_edges)} sensitive sink edge(s)")
+    if review.finding_count:
+        parts.append(f"{review.finding_count} finding(s) in changed files")
+    if not parts:
+        return "No security-relevant graph changes were detected in this diff."
+    return "CyberGraph detected " + ", ".join(parts) + "."
+
+
+def _risk_summary(review) -> str:
+    if review.attack_path_count:
+        return "Changed code is connected to potential attack paths. Review the route, guard, validation, and sink chain before merging."
+    if review.changed_sink_edges and review.changed_entrypoints:
+        return "The diff touches both externally reachable code and sensitive operations, which is where security review usually pays off most."
+    if review.changed_sink_edges:
+        return "The diff reaches sensitive operations such as database, file, command, rendering, or deserialization calls."
+    if review.finding_count:
+        return "Findings are present in changed files. Confirm whether they are exploitable, already guarded, or intentionally suppressed."
+    return "No immediate security review hotspot was found, but generated artifacts can still help reviewers inspect the graph context."
+
+
+def _checklist(review) -> list[str]:
+    checks = [
+        "- Confirm changed entrypoints require authentication or authorization when needed.",
+        "- Check that user-controlled input is validated before reaching sensitive sinks.",
+        "- Open `cybergraph-report.html` and inspect any attack paths touching changed files.",
+    ]
+    if review.finding_count:
+        checks.append("- Triage top findings; suppress only accepted risk with `cybergraph: ignore` or `.cybergraph.toml`.")
+    return checks
