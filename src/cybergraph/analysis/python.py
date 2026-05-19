@@ -77,6 +77,8 @@ def analyze_python_file(
                 lowered_decorator = decorator.lower()
                 if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)):
                     edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
+            for dependency in _fastapi_depends_guards(item, auth_markers):
+                edges.append(Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"}))
 
             for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
@@ -157,6 +159,23 @@ def _route_metadata(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, s
 
 def _call_name(call: ast.Call) -> str:
     return _callable_name(call.func)
+
+
+def _fastapi_depends_guards(node: ast.FunctionDef | ast.AsyncFunctionDef, auth_markers: tuple[str, ...]) -> list[str]:
+    guards: list[str] = []
+    defaults = list(node.args.defaults) + [default for default in node.args.kw_defaults if default is not None]
+    for default in defaults:
+        if not isinstance(default, ast.Call):
+            continue
+        if _callable_name(default.func).lower() != "depends" or not default.args:
+            continue
+        dependency = _callable_name(default.args[0])
+        if not dependency:
+            continue
+        lowered = dependency.lower()
+        if any(kw in lowered for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)):
+            guards.append(dependency)
+    return guards
 
 
 def _callable_name(func: ast.AST) -> str:

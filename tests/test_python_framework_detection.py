@@ -46,3 +46,22 @@ def test_python_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> 
 
     assert any(edge.kind == "REACHES_SINK" for edge in edges)
     assert findings == []
+
+
+def test_python_analyzer_maps_fastapi_depends_guards(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.py"
+    app.write_text(
+        "from fastapi import Depends\n\n"
+        "def require_admin():\n"
+        "    return True\n\n"
+        "@app.get('/admin')\n"
+        "def admin_panel(allowed = Depends(require_admin)):\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+
+    _nodes, edges, _findings = analyze_python_file(app, repo)
+
+    assert any(edge.kind == "GUARDS" and edge.target == "require_admin" for edge in edges)
