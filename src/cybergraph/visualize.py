@@ -77,6 +77,9 @@ def _render_html(repo_root, counts, layers, findings, vulnerable_dependencies, a
     tr:last-child td {{ border-bottom: 0; }}
     .pill {{ display: inline-block; padding: 3px 8px; border-radius: 999px; background: #eef6ff; color: #075985; font-size: 12px; }}
     .path {{ background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-bottom: 10px; }}
+    .toolbar {{ display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }}
+    .toolbar input, .toolbar select {{ border: 1px solid #b6c2cf; border-radius: 6px; padding: 9px 10px; background: white; color: #161b22; }}
+    .toolbar input {{ min-width: min(420px, 100%); flex: 1; }}
     code {{ color: #7c2d12; }}
   </style>
 </head>
@@ -101,6 +104,21 @@ def _render_html(repo_root, counts, layers, findings, vulnerable_dependencies, a
     <h2>Potential Attack Paths</h2>
     {_attack_paths(attack_paths)}
   </main>
+  <script>
+    const findingSearch = document.querySelector('[data-filter="findings-search"]');
+    const findingSeverity = document.querySelector('[data-filter="findings-severity"]');
+    function filterFindings() {{
+      const query = (findingSearch?.value || '').toLowerCase();
+      const severity = findingSeverity?.value || '';
+      document.querySelectorAll('[data-finding-row]').forEach((row) => {{
+        const matchesText = row.dataset.search.includes(query);
+        const matchesSeverity = !severity || row.dataset.severity === severity;
+        row.hidden = !(matchesText && matchesSeverity);
+      }});
+    }}
+    findingSearch?.addEventListener('input', filterFindings);
+    findingSeverity?.addEventListener('change', filterFindings);
+  </script>
 </body>
 </html>
 """
@@ -124,7 +142,9 @@ def _findings_table(findings) -> str:
     if not findings:
         return "<p class='muted'>No findings stored yet.</p>"
     rows = "".join(
-        "<tr>"
+        "<tr data-finding-row "
+        f"data-severity='{html.escape(row['severity'])}' "
+        f"data-search='{html.escape(_finding_search_text(row))}'>"
         f"<td><span class='pill'>{html.escape(row['severity'])}</span></td>"
         f"<td>{html.escape(row['rule_id'])}</td>"
         f"<td>{html.escape(row['message'])}</td>"
@@ -133,7 +153,25 @@ def _findings_table(findings) -> str:
         "</tr>"
         for row in findings
     )
-    return f"<table><thead><tr><th>Severity</th><th>Rule</th><th>Message</th><th>Location</th><th>Tool</th></tr></thead><tbody>{rows}</tbody></table>"
+    return (
+        "<div class='toolbar'>"
+        "<input data-filter='findings-search' type='search' placeholder='Search findings by rule, file, message, or tool'>"
+        "<select data-filter='findings-severity' aria-label='Filter findings by severity'>"
+        "<option value=''>All severities</option>"
+        "<option value='critical'>Critical</option>"
+        "<option value='high'>High</option>"
+        "<option value='medium'>Medium</option>"
+        "<option value='low'>Low</option>"
+        "<option value='info'>Info</option>"
+        "</select>"
+        "</div>"
+        f"<table><thead><tr><th>Severity</th><th>Rule</th><th>Message</th><th>Location</th><th>Tool</th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _finding_search_text(row) -> str:
+    parts = [row["severity"], row["rule_id"], row["message"], row["file_path"] or "", row["tool"]]
+    return " ".join(str(part).lower() for part in parts)
 
 
 def _vulnerable_dependencies_table(rows) -> str:
