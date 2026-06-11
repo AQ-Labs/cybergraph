@@ -73,7 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     paths = sub.add_parser("paths", help="Explain entrypoint-to-sink attack paths")
     paths.add_argument("--repo", default=".", help="Repository root containing the graph")
-    paths.add_argument("--max-depth", type=int, default=5, help="Maximum traversal depth")
+    paths.add_argument("--max-depth", type=int, default=8, help="Maximum traversal depth")
+    paths.add_argument(
+        "--shallow",
+        action="store_true",
+        help="Disable interprocedural traversal (intra-function only; for ablation)",
+    )
 
     layers = sub.add_parser("layers", help="Summarize detected security layers")
     layers.add_argument("--repo", default=".", help="Repository root containing the graph")
@@ -151,7 +156,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(format_grounded_answer(answer))
     elif args.command == "paths":
-        print(format_attack_paths(find_attack_paths(repo, max_depth=args.max_depth)))
+        print(
+            format_attack_paths(
+                find_attack_paths(
+                    repo, max_depth=args.max_depth, interprocedural=not args.shallow
+                )
+            )
+        )
     elif args.command == "layers":
         print(format_layer_summary(summarize_layers(repo)))
     elif args.command == "review":
