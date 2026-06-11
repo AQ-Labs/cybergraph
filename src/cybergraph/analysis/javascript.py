@@ -53,7 +53,12 @@ def analyze_javascript_file(
         key = f"{rel}::{name}"
         nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_js_name(name)))
 
+    current_function: str | None = None
     for line_no, line in enumerate(lines, start=1):
+        fn_match = FUNCTION_RE.search(line)
+        if fn_match:
+            current_function = f"{rel}::{fn_match.group('name') or fn_match.group('var')}"
+
         route_match = ROUTE_RE.search(line)
         if route_match:
             key = f"{rel}::route:{route_match.group('path')}:{line_no}"
@@ -78,13 +83,14 @@ def analyze_javascript_file(
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
 
+        sink_source = current_function or rel
         if any(marker in line.lower() for marker in SECRET_MARKERS):
-            edges.append(Edge(EDGE_USES_SECRET, rel, "secret", rel, line_no))
+            edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
-                edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
+                edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if not is_inline_suppressed(lines, line_no, "CG-JS-SINK-CALL"):
                     findings.append(
                         Finding(
@@ -98,7 +104,7 @@ def analyze_javascript_file(
                         )
                     )
             if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
-                edges.append(Edge(EDGE_USES_SECRET, rel, call_name, rel, line_no))
+                edges.append(Edge(EDGE_USES_SECRET, sink_source, call_name, rel, line_no))
 
     return nodes, edges, findings
 

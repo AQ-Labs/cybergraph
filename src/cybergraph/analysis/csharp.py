@@ -56,6 +56,7 @@ def analyze_csharp_file(
     findings: list[Finding] = []
 
     pending_route: dict | None = None
+    current_function: str | None = None
     for line_no, line in enumerate(lines, start=1):
         attr_match = ATTR_ROUTE_RE.search(line)
         if attr_match:
@@ -80,6 +81,7 @@ def analyze_csharp_file(
         if method_match:
             name = method_match.group("name")
             key = f"{rel}::{name}"
+            current_function = key
             nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_csharp_name(name)))
             if pending_route is not None:
                 route_key = f"{rel}::route:{pending_route['path']}:{pending_route['line']}"
@@ -94,14 +96,15 @@ def analyze_csharp_file(
                 edges.append(Edge("CALLS", route_key, name, rel, line_no))
                 pending_route = None
 
+        sink_source = current_function or rel
         lowered_line = line.lower()
         if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)):
-            edges.append(Edge(EDGE_USES_SECRET, rel, "secret", rel, line_no))
+            edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
-                edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
+                edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if not is_inline_suppressed(lines, line_no, "CG-CSHARP-SINK-CALL"):
                     findings.append(
                         Finding(
