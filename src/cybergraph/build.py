@@ -12,6 +12,7 @@ from cybergraph.analysis import (
     is_dependency_manifest,
     iter_source_files,
 )
+from cybergraph.analysis.resolve import resolve_calls
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 from cybergraph.suppressions import filter_suppressed_findings
 
@@ -58,6 +59,10 @@ def build_graph(repo_root: Path) -> dict[str, int]:
             nodes.append(Node("File", rel, rel, rel, 1, len(path.read_text(errors="ignore").splitlines())))
 
     findings = filter_suppressed_findings(findings, config)
+
+    # Link call sites to function definitions across files for interprocedural
+    # reachability. Non-destructive: original CALLS edges are preserved.
+    edges.extend(resolve_calls(nodes, edges))
 
     store.upsert_nodes(nodes)
     store.add_edges(edges)
