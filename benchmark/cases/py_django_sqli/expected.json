@@ -1,0 +1,8 @@
+{
+  "language": "python",
+  "framework": "django",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "route:users/", "sink": "raw"}],
+  "min_findings": 1,
+  "note": "Django URLconf route reaches a raw() SQL sink in the view, across files"
+}

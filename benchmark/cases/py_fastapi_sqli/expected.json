@@ -1,0 +1,8 @@
+{
+  "language": "python",
+  "framework": "fastapi",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "list_users", "sink": "execute"}],
+  "min_findings": 1,
+  "note": "FastAPI route reaches a SQL sink via raw_sql() with concatenated input"
+}

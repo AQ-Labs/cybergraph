@@ -1,0 +1,8 @@
+{
+  "language": "go",
+  "framework": "net/http",
+  "vulnerable": false,
+  "expected_paths": [],
+  "max_findings": 0,
+  "note": "Secure baseline: handler writes a constant, no sink"
+}

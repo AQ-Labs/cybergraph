@@ -1,0 +1,8 @@
+{
+  "language": "java",
+  "framework": "spring",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "listUsers", "sink": "executequery"}],
+  "min_findings": 1,
+  "note": "Spring @GetMapping route links to handler reaching JDBC executeQuery"
+}
