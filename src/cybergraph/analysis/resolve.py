@@ -26,16 +26,22 @@ CONFIDENCE_LOW = "low"
 
 def resolve_calls(nodes: list[Node], edges: list[Edge]) -> list[Edge]:
     """Return new ``CALLS_RESOLVED`` edges linking call sites to definitions."""
-    function_keys: set[str] = set()
-    keys_by_name: dict[str, list[str]] = {}
+    # Function definitions are resolution *targets*; calls may originate from a
+    # function or from a route Entrypoint (e.g. a Django URLconf entry that names
+    # its view), so both kinds are valid call sources.
+    target_keys_by_name: dict[str, list[str]] = {}
+    source_keys: set[str] = set()
     for node in nodes:
         if node.kind == "Function":
-            function_keys.add(node.key)
-            keys_by_name.setdefault(node.name, []).append(node.key)
+            target_keys_by_name.setdefault(node.name, []).append(node.key)
+            source_keys.add(node.key)
+        elif node.kind == "Entrypoint":
+            source_keys.add(node.key)
 
+    keys_by_name = target_keys_by_name
     resolved: list[Edge] = []
     for edge in edges:
-        if edge.kind != "CALLS" or edge.source not in function_keys:
+        if edge.kind != "CALLS" or edge.source not in source_keys:
             continue
         callee = _simple_name(edge.target)
         if not callee:

@@ -106,7 +106,32 @@ def analyze_python_file(
                 if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
                     edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
 
+    _add_django_url_routes(tree, rel, nodes, edges)
     return nodes, edges, findings
+
+
+def _add_django_url_routes(tree: ast.AST, rel: str, nodes: list[Node], edges: list[Edge]) -> None:
+    """Detect Django URLconf entries (``path``/``re_path``/``url``) as entrypoints.
+
+    Django function/class views carry no route decorator; the route lives in a
+    ``urls.py`` ``path('users/', views.list_users)`` call. We model the route as
+    an Entrypoint and link it to its view by name so interprocedural traversal
+    can reach the view's sinks (route -> view -> sink).
+    """
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        if _callable_name(call.func) not in {"path", "re_path", "url"} or len(call.args) < 2:
+            continue
+        route_arg = call.args[0]
+        if not (isinstance(route_arg, ast.Constant) and isinstance(route_arg.value, str)):
+            continue
+        line_no = getattr(call, "lineno", 1)
+        route = route_arg.value or "/"
+        key = f"{rel}::route:{route}:{line_no}"
+        nodes.append(Node("Entrypoint", key, route, rel, line_no, line_no, {"framework": "django"}))
+        edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+        view_name = _callable_name(call.args[1])
+        if view_name:
+            edges.append(Edge("CALLS", key, view_name, rel, line_no))
 
 
 def classify_name(
