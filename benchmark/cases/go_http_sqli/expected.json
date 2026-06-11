@@ -1,0 +1,8 @@
+{
+  "language": "go",
+  "framework": "net/http",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "listUsers", "sink": "db.query"}],
+  "min_findings": 1,
+  "note": "net/http route links to handler which reaches db.Query"
+}

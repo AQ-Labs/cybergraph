@@ -1,0 +1,8 @@
+{
+  "language": "python",
+  "framework": "fastapi",
+  "vulnerable": false,
+  "expected_paths": [],
+  "max_findings": 0,
+  "note": "Secure baseline: routes do not reach any sensitive sink"
+}

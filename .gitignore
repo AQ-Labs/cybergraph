@@ -19,3 +19,6 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Benchmark run output (regenerate with python benchmark/run_eval.py)
+benchmark/results.json
