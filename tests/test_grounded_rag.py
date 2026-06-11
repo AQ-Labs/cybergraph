@@ -11,9 +11,9 @@ from cybergraph.rag import (
     collect_records,
 )
 from cybergraph.rag.grounded import (
-    CONFIDENCE_INSUFFICIENT,
     CATEGORY_DEPENDENCY,
     CATEGORY_SINK,
+    CONFIDENCE_INSUFFICIENT,
 )
 
 
