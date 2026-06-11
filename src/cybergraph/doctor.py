@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
+from importlib.util import find_spec
 from pathlib import Path
 
 from cybergraph.config import CONFIG_FILE, load_config
@@ -26,6 +27,7 @@ def run_doctor(repo_root: Path) -> list[DoctorCheck]:
         _check_config(repo_root),
         _check_graph(repo_root),
         _check_workflow(repo_root),
+        _check_optional_dependencies(),
     ]
     return checks
 
@@ -99,3 +101,22 @@ def _check_workflow(repo_root: Path) -> DoctorCheck:
     if not workflow.exists():
         return DoctorCheck("github action", False, "workflow not installed")
     return DoctorCheck("github action", True, ".github/workflows/cybergraph.yml")
+
+
+# Optional extras and the import that proves each is installed.
+_OPTIONAL_EXTRAS = {
+    "mcp": ("fastmcp",),
+    "llm": ("anthropic", "openai"),
+}
+
+
+def _check_optional_dependencies() -> DoctorCheck:
+    """Report which optional extras are installed. Informational, never blocks."""
+    statuses: list[str] = []
+    for extra, modules in _OPTIONAL_EXTRAS.items():
+        missing = [module for module in modules if find_spec(module) is None]
+        if missing:
+            statuses.append(f"{extra}: missing {', '.join(missing)} (pip install cybergraph[{extra}])")
+        else:
+            statuses.append(f"{extra}: available")
+    return DoctorCheck("optional extras", True, "; ".join(statuses))

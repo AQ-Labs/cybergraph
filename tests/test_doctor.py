@@ -20,3 +20,13 @@ def test_doctor_detects_initialized_files(tmp_path: Path) -> None:
 
     assert any(check.name == "config" and check.ok for check in checks)
     assert any(check.name == "github action" and check.ok for check in checks)
+
+
+def test_doctor_reports_optional_extras(tmp_path: Path) -> None:
+    checks = run_doctor(tmp_path)
+
+    extras = next(check for check in checks if check.name == "optional extras")
+    # Informational only — never blocks — and mentions each extra.
+    assert extras.ok is True
+    assert "mcp:" in extras.detail
+    assert "llm:" in extras.detail
