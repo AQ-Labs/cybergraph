@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .build import build_graph
-from .rag import answer_question
+from .rag import answer_grounded, answer_question, format_grounded_answer
 from .security import find_attack_paths, format_attack_paths
 
 try:
@@ -39,6 +39,21 @@ if FastMCP is not None:
         """Explain possible entrypoint-to-sensitive-sink paths."""
         paths = find_attack_paths(Path(repo_root).resolve(), max_depth=max_depth)
         return {"answer": format_attack_paths(paths)}
+
+    @mcp.tool()
+    def grounded_security_answer_tool(question: str, repo_root: str = ".") -> dict[str, Any]:
+        """Answer a security question with cited, confidence-scored graph evidence.
+
+        Local-only: returns structured evidence and an explicit confidence level
+        (high/medium/low/insufficient) without contacting any external LLM.
+        """
+        answer = answer_grounded(Path(repo_root).resolve(), question)
+        return {
+            "answer": format_grounded_answer(answer),
+            "category": answer.category,
+            "confidence": answer.confidence,
+            "citations": list(answer.citations),
+        }
 else:
     mcp = None
 

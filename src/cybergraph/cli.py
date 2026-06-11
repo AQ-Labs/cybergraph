@@ -11,7 +11,7 @@ from .doctor import format_doctor, run_doctor
 from .graph import GraphStore
 from .init_project import format_init_result, init_project
 from .pr_comment import write_pr_comment
-from .rag import answer_question
+from .rag import answer_question, answer_grounded, format_grounded_answer
 from .security import (
     find_attack_paths,
     format_attack_paths,
@@ -58,6 +58,18 @@ def build_parser() -> argparse.ArgumentParser:
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
     ask.add_argument("--repo", default=".", help="Repository root containing the graph")
+
+    explain = sub.add_parser(
+        "explain", help="Answer a security question with cited, confidence-scored graph evidence"
+    )
+    explain.add_argument("question", help="Security review question")
+    explain.add_argument("--repo", default=".", help="Repository root containing the graph")
+    explain.add_argument(
+        "--llm",
+        action="store_true",
+        help="Phrase the answer with a configured LLM (CYBERGRAPH_LLM_* env), grounded in evidence",
+    )
+    explain.add_argument("--limit", type=int, default=8, help="Maximum evidence records to retrieve")
 
     paths = sub.add_parser("paths", help="Explain entrypoint-to-sink attack paths")
     paths.add_argument("--repo", default=".", help="Repository root containing the graph")
@@ -122,6 +134,22 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "ask":
         print(answer_question(repo, args.question))
+    elif args.command == "explain":
+        client = None
+        use_llm = bool(args.llm)
+        if use_llm:
+            from .llm import build_client, load_llm_config_from_env
+
+            config = load_llm_config_from_env()
+            if config is None:
+                print("No LLM configured (set CYBERGRAPH_LLM_*); using evidence-only answer.")
+                use_llm = False
+            else:
+                client = build_client(config)
+        answer = answer_grounded(
+            repo, args.question, client=client, use_llm=use_llm, limit=args.limit
+        )
+        print(format_grounded_answer(answer))
     elif args.command == "paths":
         print(format_attack_paths(find_attack_paths(repo, max_depth=args.max_depth)))
     elif args.command == "layers":
