@@ -1,0 +1,9 @@
+{
+  "name": "vulnerable-express-demo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Intentionally vulnerable Express app for CyberGraph demos",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
