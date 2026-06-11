@@ -28,7 +28,9 @@ from pathlib import Path
 from cybergraph.config import CyberGraphConfig
 from cybergraph.graph import Edge, Finding, Node
 
+from .csharp import analyze_csharp_file
 from .go import analyze_go_file
+from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
 
@@ -37,9 +39,13 @@ AnalyzerResult = tuple[list[Node], list[Edge], list[Finding]]
 PYTHON_SUFFIXES = {".py"}
 JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
 GO_SUFFIXES = {".go"}
+JAVA_SUFFIXES = {".java"}
+CSHARP_SUFFIXES = {".cs"}
 
 # Suffixes that have a dedicated security analyzer (everything else falls back).
-ANALYZED_SUFFIXES = PYTHON_SUFFIXES | JAVASCRIPT_SUFFIXES | GO_SUFFIXES
+ANALYZED_SUFFIXES = (
+    PYTHON_SUFFIXES | JAVASCRIPT_SUFFIXES | GO_SUFFIXES | JAVA_SUFFIXES | CSHARP_SUFFIXES
+)
 
 
 def analyze_source_file(path: Path, repo_root: Path, config: CyberGraphConfig) -> AnalyzerResult:
@@ -63,6 +69,20 @@ def analyze_source_file(path: Path, repo_root: Path, config: CyberGraphConfig) -
         )
     if suffix in GO_SUFFIXES:
         return analyze_go_file(
+            path,
+            repo_root,
+            custom_sinks=config.custom_sinks,
+            secret_markers=config.secret_markers,
+        )
+    if suffix in JAVA_SUFFIXES:
+        return analyze_java_file(
+            path,
+            repo_root,
+            custom_sinks=config.custom_sinks,
+            secret_markers=config.secret_markers,
+        )
+    if suffix in CSHARP_SUFFIXES:
+        return analyze_csharp_file(
             path,
             repo_root,
             custom_sinks=config.custom_sinks,
