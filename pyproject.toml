@@ -16,6 +16,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.4"]
 mcp = ["fastmcp>=2"]
+llm = ["anthropic>=0.40", "openai>=1.40"]
 
 [project.scripts]
 cybergraph = "cybergraph.cli:main"
