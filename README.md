@@ -18,14 +18,15 @@ CyberGraph is designed to connect those dots.
 ## Current capabilities
 
 - Builds a local SQLite graph in `.cybergraph/graph.db`.
-- Extracts Python files, functions, calls, route-like entrypoints, and sensitive sink calls.
-- Extracts JavaScript/TypeScript Express and Next.js-style entrypoints and common sinks.
+- Analyzes **five languages**: Python (FastAPI/Flask/Django), JavaScript/TypeScript (Express/Next.js), Go (net/http, Gin, Echo), Java (Spring), and C# (ASP.NET Core) — through a shared analyzer contract with graceful fallback for the rest.
+- Extracts functions, calls, route entrypoints, auth/authz guards, validators, secret access, and sensitive sink calls.
+- **Cross-file, interprocedural attack paths** (route → service → repository → sink) with a per-path confidence and sanitizer-barrier flag; a `--shallow` mode reproduces intra-function traversal for comparison.
+- **Interactive, offline graph explorer** in the HTML report: security-typed styling, search, layer/severity filters, a details panel, and entrypoint→sink path highlighting (Cytoscape.js, fully inlined).
+- **Evidence-grounded answers** (`cybergraph explain`) with file/line/rule/path citations and a high/medium/low/insufficient confidence level — never claims a vulnerability without supporting evidence, and works with no LLM.
+- Optional, **local-only by default** LLM phrasing via configurable providers (Anthropic Claude, OpenAI, Kimi 2.6) constrained to retrieved evidence.
 - Maps dependency manifests from `package.json`, `requirements.txt`, and `pyproject.toml`.
-- Imports OSV Scanner and npm audit vulnerability reports into dependency graph nodes.
-- Stores built-in findings with file and line evidence.
-- Imports Semgrep JSON, SARIF, and Gitleaks JSON reports.
-- Answers basic security questions from graph evidence.
-- Exposes optional MCP tools for AI coding assistants.
+- Imports OSV Scanner, npm audit, Semgrep JSON, SARIF, and Gitleaks reports into the same graph; exports findings as SARIF.
+- Exposes MCP tools for AI coding assistants.
 
 ## Quick start
 
@@ -35,8 +36,10 @@ cybergraph init .
 cybergraph doctor .
 cybergraph build path/to/repo
 cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
+cybergraph explain "Which routes reach SQL execution?" --repo path/to/repo
 cybergraph paths --repo path/to/repo
 cybergraph layers --repo path/to/repo
+cybergraph export-json path/to/repo --output graph.json
 cybergraph review --base main --repo path/to/repo
 cybergraph pr-comment --base main --repo path/to/repo --output cybergraph-pr-comment.md
 cybergraph visualize path/to/repo
@@ -118,6 +121,7 @@ Initial tools:
 - `build_security_graph_tool`
 - `query_security_graph_tool`
 - `explain_attack_path_tool`
+- `grounded_security_answer_tool` (cited, confidence-scored, local-only)
 
 ## Project direction
 
@@ -127,6 +131,7 @@ See:
 
 - [Architecture](docs/architecture.md)
 - [Getting started](docs/getting-started.md)
+- [Five-minute tutorial](docs/tutorial.md)
 - [Security ontology](docs/security-ontology.md)
 - [Product plan](docs/product-plan.md)
 - [GitHub Action](docs/github-action.md)
