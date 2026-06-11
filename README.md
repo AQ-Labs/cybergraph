@@ -28,10 +28,27 @@ CyberGraph is designed to connect those dots.
 - Imports OSV Scanner, npm audit, Semgrep JSON, SARIF, and Gitleaks reports into the same graph; exports findings as SARIF.
 - Exposes MCP tools for AI coding assistants.
 
+## Install
+
+```bash
+# From PyPI (once published):
+pipx install cybergraph                 # isolated CLI install
+python -m pip install cybergraph        # or into the current environment
+
+# Optional extras:
+python -m pip install "cybergraph[mcp]" # MCP server for AI assistants
+python -m pip install "cybergraph[llm]" # Anthropic / OpenAI / Kimi providers
+python -m pip install "cybergraph[all]" # everything optional
+
+# From a clone (development):
+python -m pip install -e ".[dev]"
+```
+
+Supported Python: 3.10, 3.11, 3.12.
+
 ## Quick start
 
 ```bash
-python -m pip install -e ".[dev]"
 cybergraph init .
 cybergraph doctor .
 cybergraph build path/to/repo

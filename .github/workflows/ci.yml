@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install with dev + mcp extras
+        run: python -m pip install -e ".[dev,mcp]"
+      - name: Lint (errors only)
+        run: python -m ruff check --select F src tests
+      - name: Run tests
+        run: python -m pytest -q
+
+  install-from-wheel:
+    name: clean-env install from wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+      - name: Install the built wheel into a clean environment
+        shell: bash
+        run: |
+          python -m venv fresh
+          if [ -d fresh/bin ]; then PY=fresh/bin/python; else PY=fresh/Scripts/python; fi
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install dist/*.whl
+          "$PY" -m pip show cybergraph
+      - name: Smoke-test the installed console script (no repo clone needed)
+        shell: bash
+        run: |
+          if [ -d fresh/bin ]; then CG=fresh/bin/cybergraph; else CG=fresh/Scripts/cybergraph; fi
+          "$CG" --version
+          "$CG" build examples/vulnerable-fastapi
+          "$CG" visualize examples/vulnerable-fastapi --output report.html
+          test -s report.html

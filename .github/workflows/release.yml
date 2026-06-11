@@ -1,0 +1,57 @@
+name: release
+
+# Builds and validates distributions on every version tag, then publishes to
+# PyPI. Publishing only runs if a PYPI_API_TOKEN secret is configured by the
+# maintainer; without it the build/validation still runs so tags are safe.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+      - name: Validate metadata and wheel contents
+        run: |
+          python -m twine check dist/*
+          python - <<'PY'
+          import glob, zipfile
+          wheel = sorted(glob.glob("dist/*.whl"))[-1]
+          names = zipfile.ZipFile(wheel).namelist()
+          assert any("assets/cytoscape.min.js" in n for n in names), "cytoscape asset missing from wheel"
+          print("wheel OK:", wheel)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish when a PyPI token is configured.
+    if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine upload dist/*
