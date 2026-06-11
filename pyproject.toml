@@ -21,6 +21,10 @@ mcp = ["fastmcp>=2"]
 cybergraph = "cybergraph.cli:main"
 cybergraph-mcp = "cybergraph.mcp_server:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/cybergraph"]
+artifacts = ["src/cybergraph/assets/*.js"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
