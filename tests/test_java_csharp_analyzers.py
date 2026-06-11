@@ -6,6 +6,7 @@ from pathlib import Path
 
 from cybergraph.build import build_graph
 from cybergraph.graph import GraphStore
+from cybergraph.security.attack_paths import find_attack_paths
 
 
 def _edge_kinds(repo: Path) -> dict[str, int]:
@@ -57,6 +58,9 @@ def test_java_route_links_to_handler_method(tmp_path: Path) -> None:
     # Route node links to the handler method via a CALLS edge.
     assert kinds.get("CALLS", 0) >= 1
     assert kinds.get("REACHES_SINK", 0) >= 1
+    # Sink attributed to the handler method, so route -> method -> sink connects.
+    paths = find_attack_paths(repo)
+    assert any("C.java::run" in p.nodes for p in paths)
 
 
 def test_csharp_attribute_route_and_sql_sink(tmp_path: Path) -> None:

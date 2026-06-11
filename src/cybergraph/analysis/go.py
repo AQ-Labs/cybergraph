@@ -26,10 +26,12 @@ FUNC_RE = re.compile(
 # net/http: http.HandleFunc("/path", handler) or mux.Handle("/path", ...)
 NET_HTTP_RE = re.compile(
     r"\b(?:http|mux|r|router)\.(?:HandleFunc|Handle)\s*\(\s*\"(?P<path>[^\"]+)\""
+    r"(?:\s*,\s*(?P<handler>[A-Za-z_]\w*))?"
 )
 # Gin / Echo / chi: r.GET("/path", handler), e.POST("/path", ...), group.DELETE(...)
 ROUTER_VERB_RE = re.compile(
     r"\b[A-Za-z_]\w*\.(?P<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any)\s*\(\s*\"(?P<path>[^\"]+)\""
+    r"(?:\s*,\s*(?P<handler>[A-Za-z_]\w*))?"
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
 
@@ -55,21 +57,21 @@ def analyze_go_file(
     edges: list[Edge] = []
     findings: list[Finding] = []
 
+    current_function: str | None = None
     for line_no, line in enumerate(lines, start=1):
         func_match = FUNC_RE.search(line)
         if func_match:
             name = func_match.group("name")
-            key = f"{rel}::{name}"
-            nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_go_name(name)))
+            current_function = f"{rel}::{name}"
+            nodes.append(
+                Node("Function", current_function, name, rel, line_no, line_no, _classify_go_name(name))
+            )
 
         for route_match in (NET_HTTP_RE.search(line), ROUTER_VERB_RE.search(line)):
             if not route_match:
                 continue
             route_path = route_match.group("path")
-            method = (
-                route_match.groupdict().get("method")
-                or "ANY"
-            )
+            method = route_match.groupdict().get("method") or "ANY"
             framework = "net/http" if route_match.re is NET_HTTP_RE else "gin/echo"
             key = f"{rel}::route:{route_path}:{line_no}"
             nodes.append(
@@ -79,15 +81,22 @@ def analyze_go_file(
                 )
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+            handler = route_match.groupdict().get("handler")
+            if handler:
+                # Link the route to its handler so traversal reaches the handler's sinks.
+                edges.append(Edge("CALLS", key, handler, rel, line_no))
 
+        # Attribute sinks/secrets to the enclosing function so interprocedural
+        # reachability (route -> handler -> sink) works uniformly across languages.
+        sink_source = current_function or rel
         lowered_line = line.lower()
         if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)):
-            edges.append(Edge(EDGE_USES_SECRET, rel, "secret", rel, line_no))
+            edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
-                edges.append(Edge(EDGE_REACHES_SINK, rel, call_name, rel, line_no))
+                edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if not is_inline_suppressed(lines, line_no, "CG-GO-SINK-CALL"):
                     findings.append(
                         Finding(

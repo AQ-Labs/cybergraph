@@ -6,6 +6,7 @@ from pathlib import Path
 
 from cybergraph.build import build_graph
 from cybergraph.graph import GraphStore
+from cybergraph.security.attack_paths import find_attack_paths
 
 
 def _edge_kinds(repo: Path) -> dict[str, int]:
@@ -41,6 +42,10 @@ def test_go_net_http_route_and_sql_sink(tmp_path: Path) -> None:
     assert counts["findings"] >= 1  # the SQL sink
     assert kinds.get("EXPOSES_ENTRYPOINT", 0) >= 1  # http.HandleFunc("/users", ...)
     assert kinds.get("REACHES_SINK", 0) >= 1  # db.Query
+
+    # The route links to its handler, so the path connects route -> handler -> sink.
+    paths = find_attack_paths(repo)
+    assert any("main.go::listUsers" in p.nodes and p.sink.lower().startswith("db") for p in paths)
 
 
 def test_go_gin_route_and_command_sink(tmp_path: Path) -> None:
