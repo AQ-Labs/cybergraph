@@ -21,6 +21,7 @@ from .security.review import format_security_review, review_security_delta
 from .security.layers import format_layer_summary, summarize_layers
 from .security.vulnerabilities import import_vulnerability_report
 from .sarif import export_sarif
+from .graph_export import export_graph_json
 from .visualize import generate_html_report
 
 
@@ -82,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
 
+    export_json = sub.add_parser("export-json", help="Export the security graph as Cytoscape JSON")
+    export_json.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    export_json.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/graph.json")
+    export_json.add_argument("--max-nodes", type=int, default=600, help="Maximum nodes to include")
+
     return parser
 
 
@@ -131,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "visualize":
         output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
         print(f"Wrote CyberGraph HTML report: {output}")
+    elif args.command == "export-json":
+        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "graph.json"
+        export_graph_json(repo, output, max_nodes=args.max_nodes)
+        print(f"Wrote CyberGraph graph JSON: {output}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
