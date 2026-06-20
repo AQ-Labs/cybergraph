@@ -126,6 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use a configured LLM (CYBERGRAPH_LLM_*) to propose specs, validated against real call sites",
     )
 
+    sca = sub.add_parser(
+        "sca", help="Prioritize imported dependency vulnerabilities by severity x reachability"
+    )
+    sca.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+
     return parser
 
 
@@ -230,6 +235,12 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 client = build_client(config)
         print(format_specs(propose_specs(repo, client=client)))
+    elif args.command == "sca":
+        from .security.sca import prioritize_vulnerabilities, format_sca
+
+        # Read the existing graph (do NOT rebuild — that would clear the
+        # vulnerabilities imported via 'import-vulns'). Flow: build -> import-vulns -> sca.
+        print(format_sca(prioritize_vulnerabilities(repo)))
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
