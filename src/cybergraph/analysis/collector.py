@@ -10,7 +10,7 @@ DEFAULT_EXCLUDES = {
     ".cybergraph", ".pytest_cache", ".ruff_cache",
 }
 
-SUPPORTED_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs", ".rb", ".php"}
+SUPPORTED_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs", ".rb", ".php", ".tf"}
 SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml"}
 
 

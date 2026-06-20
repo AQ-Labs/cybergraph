@@ -21,6 +21,7 @@ LAYERS: tuple[SecurityLayer, ...] = (
     SecurityLayer("crypto", "Cryptography", "Hashing, signing, encryption, verification, and key use."),
     SecurityLayer("sink", "Sensitive Sinks", "Database, shell, filesystem, network, template, and deserialization sinks."),
     SecurityLayer("dependency", "Dependencies", "Third-party packages and known vulnerable components."),
+    SecurityLayer("infrastructure", "Infrastructure", "Cloud/IaC resources: networking, storage, identity, and their misconfigurations."),
 )
 
 SOURCE_KEYWORDS = {
