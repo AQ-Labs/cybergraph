@@ -50,6 +50,8 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
             props = json.loads(row["properties"] or "{}")
             if row["kind"] in {"Dependency", "DependencyManifest", "Vulnerability"}:
                 node_counts["dependency"] += 1
+            if row["kind"] == "Resource":
+                node_counts["infrastructure"] += 1
             for prop, layer in PROPERTY_TO_LAYER.items():
                 if props.get(prop):
                     node_counts[layer] += 1
@@ -70,6 +72,8 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
                 finding_counts["secrets"] += 1
             if "osv" in text or "npm" in text or "vulnerability" in text or "affected by" in text:
                 finding_counts["dependency"] += 1
+            if "iac" in text or "infrastructure" in text:
+                finding_counts["infrastructure"] += 1
 
         return [
             LayerSummary(

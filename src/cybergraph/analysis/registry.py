@@ -33,6 +33,7 @@ from .go import analyze_go_file
 from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
+from .terraform import analyze_terraform_file
 
 AnalyzerResult = tuple[list[Node], list[Edge], list[Finding]]
 
@@ -41,10 +42,12 @@ JAVASCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
 GO_SUFFIXES = {".go"}
 JAVA_SUFFIXES = {".java"}
 CSHARP_SUFFIXES = {".cs"}
+TERRAFORM_SUFFIXES = {".tf"}
 
 # Suffixes that have a dedicated security analyzer (everything else falls back).
 ANALYZED_SUFFIXES = (
     PYTHON_SUFFIXES | JAVASCRIPT_SUFFIXES | GO_SUFFIXES | JAVA_SUFFIXES | CSHARP_SUFFIXES
+    | TERRAFORM_SUFFIXES
 )
 
 
@@ -86,6 +89,12 @@ def analyze_source_file(path: Path, repo_root: Path, config: CyberGraphConfig) -
             path,
             repo_root,
             custom_sinks=config.custom_sinks,
+            secret_markers=config.secret_markers,
+        )
+    if suffix in TERRAFORM_SUFFIXES:
+        return analyze_terraform_file(
+            path,
+            repo_root,
             secret_markers=config.secret_markers,
         )
     return _fallback_file_node(path, repo_root)
