@@ -13,6 +13,7 @@ from cybergraph.security.ontology import (
     CRYPTO_KEYWORDS,
     EDGE_EXPOSES_ENTRYPOINT,
     EDGE_GUARDS,
+    EDGE_IMPORTS,
     EDGE_REACHES_SINK,
     EDGE_SANITIZES,
     EDGE_USES_SECRET,
@@ -107,7 +108,32 @@ def analyze_python_file(
                     edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
 
     _add_django_url_routes(tree, rel, nodes, edges)
+    _add_imports(tree, rel, edges)
     return nodes, edges, findings
+
+
+def _add_imports(tree: ast.AST, rel: str, edges: list[Edge]) -> None:
+    """Emit ``IMPORTS`` edges (File -> top-level module name) for absolute imports.
+
+    These ground reachability-based SCA: a later pass links them to declared
+    Dependency nodes so vulnerabilities in *used* packages can be prioritized over
+    ones that are merely declared. Relative imports (``from . import x``) are local
+    and skipped. Only the top-level module is recorded (``a.b.c`` -> ``a``)."""
+    seen: set[str] = set()
+    for node in ast.walk(tree):
+        modules: list[str] = []
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:  # relative import -> local, not a dependency
+                continue
+            if node.module:
+                modules = [node.module]
+        for module in modules:
+            top = module.split(".", 1)[0].strip()
+            if top and top not in seen:
+                seen.add(top)
+                edges.append(Edge(EDGE_IMPORTS, rel, top, rel, getattr(node, "lineno", 0)))
 
 
 def _add_django_url_routes(tree: ast.AST, rel: str, nodes: list[Node], edges: list[Edge]) -> None:

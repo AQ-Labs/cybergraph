@@ -6,7 +6,12 @@ import re
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
-from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REACHES_SINK, EDGE_USES_SECRET
+from cybergraph.security.ontology import (
+    EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_IMPORTS,
+    EDGE_REACHES_SINK,
+    EDGE_USES_SECRET,
+)
 from cybergraph.suppressions import is_inline_suppressed
 
 FUNCTION_RE = re.compile(
@@ -19,6 +24,7 @@ ROUTE_RE = re.compile(
 )
 NEXT_EXPORT_RE = re.compile(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(")
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(")
+IMPORT_RE = re.compile(r"""(?:import\b[^'"]*?from\s*|import\s*|require\s*\(\s*)['"](?P<mod>[^'"]+)['"]""")
 
 SINK_CALLS = {
     "db.query",
@@ -106,7 +112,35 @@ def analyze_javascript_file(
             if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
                 edges.append(Edge(EDGE_USES_SECRET, sink_source, call_name, rel, line_no))
 
+    _add_imports(lines, rel, edges)
     return nodes, edges, findings
+
+
+def _add_imports(lines: list[str], rel: str, edges: list[Edge]) -> None:
+    """Emit ``IMPORTS`` edges (File -> package name) for ES imports and require().
+
+    Bare specifiers map to their package: ``lodash/fp`` -> ``lodash`` and a scoped
+    ``@scope/pkg/sub`` -> ``@scope/pkg``. Relative imports (``./x``, ``../x``, ``/x``)
+    are local and skipped. A later pass links these to declared Dependency nodes for
+    reachability-based SCA."""
+    seen: set[str] = set()
+    for line_no, line in enumerate(lines, start=1):
+        for match in IMPORT_RE.finditer(line):
+            package = _package_specifier(match.group("mod"))
+            if package and package not in seen:
+                seen.add(package)
+                edges.append(Edge(EDGE_IMPORTS, rel, package, rel, line_no))
+
+
+def _package_specifier(raw: str) -> str:
+    """Reduce an import specifier to its installable package name (or '' if local)."""
+    spec = raw.strip()
+    if not spec or spec.startswith(".") or spec.startswith("/"):
+        return ""
+    parts = spec.split("/")
+    if spec.startswith("@") and len(parts) >= 2:  # scoped: @scope/pkg
+        return "/".join(parts[:2])
+    return parts[0]
 
 
 def _function_lines(lines: list[str]) -> list[tuple[str, int]]:
