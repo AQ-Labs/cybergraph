@@ -1,0 +1,9 @@
+{
+  "language": "python",
+  "framework": "fastapi",
+  "vulnerability_class": "command_injection",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "ping", "sink": "subprocess"}],
+  "min_findings": 1,
+  "note": "FastAPI route reaches a command-execution sink via run_ping() -> subprocess.run with concatenated input"
+}

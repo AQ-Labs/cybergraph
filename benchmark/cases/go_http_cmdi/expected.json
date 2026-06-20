@@ -1,0 +1,9 @@
+{
+  "language": "go",
+  "framework": "net/http",
+  "vulnerability_class": "command_injection",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "runPing", "sink": "exec.command"}],
+  "min_findings": 1,
+  "note": "net/http route links to handler which reaches exec.Command with tainted input"
+}
