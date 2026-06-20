@@ -131,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sca.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
 
+    iac_paths = sub.add_parser(
+        "iac-paths", help="Trace cloud attack paths (public exposure -> privileged IaC resource)"
+    )
+    iac_paths.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+    iac_paths.add_argument("--max-depth", type=int, default=6, help="Maximum reference-traversal depth")
+
     return parser
 
 
@@ -241,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
         # Read the existing graph (do NOT rebuild — that would clear the
         # vulnerabilities imported via 'import-vulns'). Flow: build -> import-vulns -> sca.
         print(format_sca(prioritize_vulnerabilities(repo)))
+    elif args.command == "iac-paths":
+        from .security.iac_paths import find_iac_attack_paths, format_iac_attack_paths
+
+        build_graph(repo)
+        print(format_iac_attack_paths(find_iac_attack_paths(repo, max_depth=args.max_depth)))
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
