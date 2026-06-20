@@ -24,10 +24,13 @@ import re
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
-from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT
+from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REFERENCES
 from cybergraph.suppressions import is_inline_suppressed
 
 RESOURCE_RE = re.compile(r'resource\s+"(?P<type>[^"]+)"\s+"(?P<name>[^"]+)"\s*\{')
+# A reference to another resource: <provider_type>.<name>(.attr) e.g. aws_security_group.web.id.
+# The type must contain an underscore (provider_resource), which excludes var/local/module/each/data.
+REFERENCE_RE = re.compile(r"\b(?P<type>[a-z][a-z0-9]*_[a-z0-9_]+)\.(?P<name>[A-Za-z0-9_-]+)")
 OPEN_CIDR_RE = re.compile(r'"(?:0\.0\.0\.0/0|::/0)"')
 WILDCARD_ACTION_RE = re.compile(r'"?actions?"?\s*[=:]\s*\[?\s*"\*"', re.IGNORECASE)
 PUBLIC_ACL_RE = re.compile(r'acl\s*=\s*"public-read(?:-write)?"')
@@ -109,6 +112,12 @@ def analyze_terraform_file(
                 f"`{rtype}.{rname}` grants wildcard privileges (Action/Resource \"*\")",
                 line_no, "CWE-269",
             )
+
+        # References to other resources (foundation for cross-resource attack paths).
+        for ref in REFERENCE_RE.finditer(body):
+            target = f"{ref.group('type')}.{ref.group('name')}"
+            if target != f"{rtype}.{rname}":
+                edges.append(Edge(EDGE_REFERENCES, key, target, rel, start_line))
 
         secret_match = SECRET_ASSIGN_RE.search(body)
         if secret_match:
