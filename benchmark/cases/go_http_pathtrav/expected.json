@@ -1,0 +1,9 @@
+{
+  "language": "go",
+  "framework": "net/http",
+  "vulnerability_class": "path_traversal",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "readFile", "sink": "os.open"}],
+  "min_findings": 1,
+  "note": "net/http route links to handler which reaches os.Open with a concatenated user path"
+}
