@@ -13,6 +13,7 @@ from cybergraph.analysis import (
 from cybergraph.analysis.registry import analyze_source_file
 from cybergraph.analysis.resolve import resolve_calls
 from cybergraph.analysis.dep_usage import link_dependency_usage
+from cybergraph.analysis.resource_refs import resolve_resource_references
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 from cybergraph.suppressions import filter_suppressed_findings
 
@@ -47,6 +48,10 @@ def build_graph(repo_root: Path) -> dict[str, int]:
     # Link imported modules to declared dependencies (USES_DEPENDENCY) so
     # reachability-based SCA can prioritize vulnerabilities in *used* packages.
     edges.extend(link_dependency_usage(nodes, edges))
+
+    # Link IaC resources that reference each other (REFERENCES_RESOLVED) so
+    # cross-resource cloud attack paths can be traversed.
+    edges.extend(resolve_resource_references(nodes, edges))
 
     store.upsert_nodes(nodes)
     store.add_edges(edges)
