@@ -115,6 +115,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use a configured LLM (CYBERGRAPH_LLM_*) to refute false positives, grounded in graph evidence",
     )
 
+    infer_specs = sub.add_parser(
+        "infer-specs",
+        help="Infer taint specs; with --llm, propose graph-grounded custom sinks/sources",
+    )
+    infer_specs.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+    infer_specs.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use a configured LLM (CYBERGRAPH_LLM_*) to propose specs, validated against real call sites",
+    )
+
     return parser
 
 
@@ -205,6 +216,20 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 client = build_client(config)
         print(format_triage(triage_findings(repo, findings=findings, client=client)))
+    elif args.command == "infer-specs":
+        from .security.spec_inference import propose_specs, format_specs
+
+        build_graph(repo)
+        client = None
+        if args.llm:
+            from .llm import build_client, load_llm_config_from_env
+
+            config = load_llm_config_from_env()
+            if config is None:
+                print("No LLM configured (set CYBERGRAPH_LLM_*); no specs inferred.")
+            else:
+                client = build_client(config)
+        print(format_specs(propose_specs(repo, client=client)))
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
