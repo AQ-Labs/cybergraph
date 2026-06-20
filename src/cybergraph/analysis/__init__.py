@@ -8,6 +8,7 @@ from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
 from .registry import analyze_source_file
+from .terraform import analyze_terraform_file
 
 __all__ = [
     "analyze_csharp_file",
@@ -17,6 +18,7 @@ __all__ = [
     "analyze_javascript_file",
     "analyze_python_file",
     "analyze_source_file",
+    "analyze_terraform_file",
     "is_dependency_manifest",
     "iter_source_files",
 ]
