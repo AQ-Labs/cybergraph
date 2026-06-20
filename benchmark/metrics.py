@@ -65,6 +65,49 @@ def score_case(
     return CaseScore(name=name, tp=tp, fp=fp, fn=fn)
 
 
+@dataclass(frozen=True)
+class GuardrailResult:
+    """Outcome of the recall guardrail (see ``recall_guardrail``)."""
+
+    passed: bool
+    recall: float
+    secure_false_positives: int
+    missed_vulnerable: tuple[str, ...]
+    violations: tuple[str, ...]
+
+
+def recall_guardrail(
+    scores: list[CaseScore],
+    secure_cases: set[str],
+    min_recall: float = 1.0,
+) -> GuardrailResult:
+    """Safety check that any noise-reduction step must never regress.
+
+    A pass requires (a) recall over all cases >= ``min_recall`` (no real
+    vulnerability silently dropped) and (b) zero false positives on the secure
+    baselines. Phase-1 false-positive triage runs against this guardrail so it
+    can suppress noise but never a confirmed true positive.
+    """
+    agg = aggregate(scores)
+    recall = agg["recall"]
+    secure_fp = sum(s.fp for s in scores if s.name in secure_cases)
+    missed = tuple(s.name for s in scores if s.name not in secure_cases and s.fn > 0)
+    violations: list[str] = []
+    if recall < min_recall:
+        violations.append(f"recall {recall} < required {min_recall}")
+    if secure_fp > 0:
+        violations.append(f"{secure_fp} false positive(s) on secure baselines")
+    if missed:
+        violations.append(f"missed vulnerable case(s): {', '.join(missed)}")
+    return GuardrailResult(
+        passed=not violations,
+        recall=recall,
+        secure_false_positives=secure_fp,
+        missed_vulnerable=missed,
+        violations=tuple(violations),
+    )
+
+
 def aggregate(scores: list[CaseScore]) -> dict[str, float]:
     tp = sum(s.tp for s in scores)
     fp = sum(s.fp for s in scores)
