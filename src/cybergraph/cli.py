@@ -105,6 +105,16 @@ def build_parser() -> argparse.ArgumentParser:
     export_json.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/graph.json")
     export_json.add_argument("--max-nodes", type=int, default=600, help="Maximum nodes to include")
 
+    triage = sub.add_parser(
+        "triage", help="Triage findings; with --llm, suppress graph-grounded false positives"
+    )
+    triage.add_argument("repo", nargs="?", default=".", help="Repository root to triage")
+    triage.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use a configured LLM (CYBERGRAPH_LLM_*) to refute false positives, grounded in graph evidence",
+    )
+
     return parser
 
 
@@ -180,6 +190,21 @@ def main(argv: list[str] | None = None) -> int:
         output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "graph.json"
         export_graph_json(repo, output, max_nodes=args.max_nodes)
         print(f"Wrote CyberGraph graph JSON: {output}")
+    elif args.command == "triage":
+        from .security.triage import triage_findings, format_triage, load_findings
+
+        build_graph(repo)
+        findings = load_findings(repo)
+        client = None
+        if args.llm:
+            from .llm import build_client, load_llm_config_from_env
+
+            config = load_llm_config_from_env()
+            if config is None:
+                print("No LLM configured (set CYBERGRAPH_LLM_*); keeping all findings (no triage).")
+            else:
+                client = build_client(config)
+        print(format_triage(triage_findings(repo, findings=findings, client=client)))
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
