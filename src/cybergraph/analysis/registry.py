@@ -34,6 +34,7 @@ from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
 from .terraform import analyze_terraform_file
+from .dockerfile import analyze_dockerfile_file
 
 AnalyzerResult = tuple[list[Node], list[Edge], list[Finding]]
 
@@ -43,6 +44,8 @@ GO_SUFFIXES = {".go"}
 JAVA_SUFFIXES = {".java"}
 CSHARP_SUFFIXES = {".cs"}
 TERRAFORM_SUFFIXES = {".tf"}
+DOCKERFILE_SUFFIXES = {".dockerfile"}
+DOCKERFILE_NAMES = {"Dockerfile"}
 
 # Suffixes that have a dedicated security analyzer (everything else falls back).
 ANALYZED_SUFFIXES = (
@@ -93,6 +96,12 @@ def analyze_source_file(path: Path, repo_root: Path, config: CyberGraphConfig) -
         )
     if suffix in TERRAFORM_SUFFIXES:
         return analyze_terraform_file(
+            path,
+            repo_root,
+            secret_markers=config.secret_markers,
+        )
+    if suffix in DOCKERFILE_SUFFIXES or path.name in DOCKERFILE_NAMES:
+        return analyze_dockerfile_file(
             path,
             repo_root,
             secret_markers=config.secret_markers,
