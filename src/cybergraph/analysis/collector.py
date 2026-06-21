@@ -10,8 +10,8 @@ DEFAULT_EXCLUDES = {
     ".cybergraph", ".pytest_cache", ".ruff_cache",
 }
 
-SUPPORTED_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs", ".rb", ".php", ".tf"}
-SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml"}
+SUPPORTED_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".cs", ".rb", ".php", ".tf", ".dockerfile"}
+SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml", "Dockerfile"}
 
 
 def iter_source_files(repo_root: Path, ignored_paths: tuple[str, ...] = ()) -> list[Path]:
