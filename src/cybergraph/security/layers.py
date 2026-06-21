@@ -72,7 +72,7 @@ def summarize_layers(repo_root: Path) -> list[LayerSummary]:
                 finding_counts["secrets"] += 1
             if "osv" in text or "npm" in text or "vulnerability" in text or "affected by" in text:
                 finding_counts["dependency"] += 1
-            if "iac" in text or "infrastructure" in text:
+            if "iac" in text or "infrastructure" in text or "docker" in text:
                 finding_counts["infrastructure"] += 1
 
         return [
