@@ -137,6 +137,13 @@ def build_parser() -> argparse.ArgumentParser:
     iac_paths.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
     iac_paths.add_argument("--max-depth", type=int, default=6, help="Maximum reference-traversal depth")
 
+    opengraph = sub.add_parser(
+        "opengraph", help="Export the graph as BloodHound OpenGraph JSON for attack-path interop"
+    )
+    opengraph.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    opengraph.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/opengraph.json")
+    opengraph.add_argument("--max-nodes", type=int, default=5000, help="Maximum nodes to include")
+
     return parser
 
 
@@ -252,6 +259,13 @@ def main(argv: list[str] | None = None) -> int:
 
         build_graph(repo)
         print(format_iac_attack_paths(find_iac_attack_paths(repo, max_depth=args.max_depth)))
+    elif args.command == "opengraph":
+        from .opengraph_export import export_opengraph
+
+        build_graph(repo)
+        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "opengraph.json"
+        export_opengraph(repo, output, max_nodes=args.max_nodes)
+        print(f"Wrote BloodHound OpenGraph JSON: {output}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
