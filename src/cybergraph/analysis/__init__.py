@@ -9,10 +9,12 @@ from .javascript import analyze_javascript_file
 from .python import analyze_python_file
 from .registry import analyze_source_file
 from .terraform import analyze_terraform_file
+from .dockerfile import analyze_dockerfile_file
 
 __all__ = [
     "analyze_csharp_file",
     "analyze_dependency_manifest",
+    "analyze_dockerfile_file",
     "analyze_go_file",
     "analyze_java_file",
     "analyze_javascript_file",
