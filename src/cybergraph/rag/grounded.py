@@ -15,6 +15,7 @@ from pathlib import Path
 
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
+from cybergraph.security.remediation import narrative_for_attack_path, remediation_for_rule
 
 # Question categories.
 CATEGORY_SINK = "sink_reachability"
@@ -177,7 +178,7 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 EvidenceRecord(
                     "finding", _finding_category(row["message"], row["rule_id"]),
                     f"{row['severity']} {row['rule_id']}",
-                    row["message"],
+                    f"{row['message']} Fix: {remediation_for_rule(row['rule_id'], row['message'])}",
                     Citation(file=row["file_path"], line=row["line_start"] or 0, rule=row["rule_id"]),
                 )
             )
@@ -207,7 +208,7 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
             EvidenceRecord(
                 "attack_path", CATEGORY_SINK,
                 f"Attack path {_short(path.entrypoint)} -> {path.sink}",
-                f"Entrypoint `{path.entrypoint}` can reach sink `{path.sink}`",
+                narrative_for_attack_path(path),
                 Citation(path=tuple(path.nodes)),
             )
         )
@@ -307,9 +308,12 @@ def _synthesis(category: str, confidence: str, records: list[EvidenceRecord]) ->
     kinds = {record.kind for record in in_category} if in_category else {r.kind for r in records}
     if category == CATEGORY_SINK:
         if "attack_path" in kinds:
-            return "At least one entrypoint reaches a sensitive sink; verify the cited path is validated."
+            return (
+                "At least one entrypoint reaches a sensitive sink. Use the cited narrative to verify "
+                "the source, missing controls, and recommended fix."
+            )
         if "sink" in kinds:
-            return "Sensitive sinks are reachable; confirm inputs are sanitized before they reach the sink."
+            return "Sensitive sinks are reachable; apply the listed remediation and confirm inputs are sanitized."
     if category == CATEGORY_AUTH:
         return "Authentication/authorization guards above are the controls protecting these entrypoints."
     if category == CATEGORY_ENTRYPOINT:

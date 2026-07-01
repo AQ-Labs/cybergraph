@@ -24,6 +24,7 @@ from cybergraph.security.ontology import (
     EDGE_SANITIZES,
     EDGE_TAINTS,
 )
+from cybergraph.security.remediation import remediation_for_sink
 from cybergraph.security.risk import RiskScore, score_risk
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -176,6 +177,7 @@ def format_attack_paths(paths: list[AttackPath]) -> str:
             lines.append(f"  user input: {', '.join(path.taint_sources)}")
         if path.reasons:
             lines.append(f"  why: {'; '.join(path.reasons)}")
+        lines.append(f"  fix: {remediation_for_sink(path.sink)}")
     return "\n".join(lines)
 
 

@@ -100,4 +100,6 @@ def test_tainted_sink_path_reports_data_reachability(tmp_path: Path) -> None:
     assert tainted[0].data_reachable is True
     assert tainted[0].taint_sources
     assert any("user-controlled data reaches" in reason for reason in tainted[0].reasons)
-    assert "data=tainted" in format_attack_paths(tainted)
+    formatted = format_attack_paths(tainted)
+    assert "data=tainted" in formatted
+    assert "parameterized queries" in formatted

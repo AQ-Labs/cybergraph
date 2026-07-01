@@ -56,6 +56,8 @@ def test_answer_is_cited_with_confidence(tmp_path: Path) -> None:
     assert answer.citations
     assert any("app.py" in citation for citation in answer.citations)
     assert "Confidence:" in answer.answer
+    assert "Recommended fix:" in answer.answer
+    assert "parameterized queries" in answer.answer
 
 
 def test_insufficient_evidence_is_explicit(tmp_path: Path) -> None:
