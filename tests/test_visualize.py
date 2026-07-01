@@ -24,6 +24,7 @@ def test_generate_html_report_writes_security_sections(tmp_path: Path) -> None:
     assert "data-filter='findings-search'" in html
     assert "data-finding-row" in html
     assert "Potential Attack Paths" in html
+    assert "Top Risks" in html
 
 
 def test_report_embeds_offline_interactive_explorer(tmp_path: Path) -> None:

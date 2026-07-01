@@ -16,6 +16,7 @@ from typing import Any
 
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
+from cybergraph.security.investigate import collect_top_risks
 from cybergraph.security.layers import summarize_layers
 
 # Visual grouping used by the explorer stylesheet. Keep these keys stable: the
@@ -121,6 +122,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
         for path in find_attack_paths(repo_root, limit=50)
     ]
     layers = [asdict(layer) for layer in summarize_layers(repo_root)]
+    top_risks = [asdict(risk) for risk in collect_top_risks(repo_root, limit=10)]
 
     node_list = _cap_nodes(list(nodes.values()), edges, max_nodes)
     kept = {node["id"] for node in node_list}
@@ -132,6 +134,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
         "edges": edge_list,
         "layers": layers,
         "attack_paths": attack_paths,
+        "top_risks": top_risks,
         "truncated": len(node_list) < len(nodes),
     }
 

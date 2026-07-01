@@ -113,6 +113,15 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
 
+    top_risks = sub.add_parser("top-risks", help="Show the highest-priority risks across graph layers")
+    top_risks.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    top_risks.add_argument("--limit", type=int, default=10, help="Maximum risks to show")
+
+    investigate = sub.add_parser("investigate", help="Export a Markdown investigation summary")
+    investigate.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    investigate.add_argument("--output", help="Output Markdown path. Defaults to .cybergraph/investigation.md")
+    investigate.add_argument("--limit", type=int, default=10, help="Maximum risks to include")
+
     export_json = sub.add_parser("export-json", help="Export the security graph as Cytoscape JSON")
     export_json.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     export_json.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/graph.json")
@@ -246,6 +255,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "visualize":
         output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
         print(f"Wrote CyberGraph HTML report: {output}")
+    elif args.command == "top-risks":
+        from .security.investigate import collect_top_risks, format_top_risks
+
+        build_graph(repo)
+        print(format_top_risks(collect_top_risks(repo, limit=args.limit)))
+    elif args.command == "investigate":
+        from .security.investigate import export_investigation_markdown
+
+        build_graph(repo)
+        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "investigation.md"
+        print(f"Wrote CyberGraph investigation: {export_investigation_markdown(repo, output, limit=args.limit)}")
     elif args.command == "export-json":
         output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "graph.json"
         export_graph_json(repo, output, max_nodes=args.max_nodes)

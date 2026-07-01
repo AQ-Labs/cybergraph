@@ -84,6 +84,7 @@ def _render_html(
         "__EDGES__": str(counts["edges"]),
         "__FINDINGS__": str(counts["findings"]),
         "__ATTACK_PATHS__": str(len(attack_paths)),
+        "__TOP_RISKS_TABLE__": _top_risks_table(graph_data.get("top_risks", [])),
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
         "__FINDINGS_TABLE__": _findings_table(findings),
@@ -104,8 +105,10 @@ NODE_GROUPS = [
     ("validator", "Validator", "#0d9488"),
     ("sink", "Sensitive sink", "#dc2626"),
     ("secret", "Secret", "#d97706"),
+    ("dataflow", "Data flow", "#0891b2"),
     ("dependency", "Dependency", "#7c3aed"),
     ("vulnerability", "Vulnerability", "#991b1b"),
+    ("infrastructure", "Infrastructure", "#475569"),
     ("call", "Call", "#cbd5e1"),
     ("file", "File", "#94a3b8"),
 ]
@@ -117,6 +120,8 @@ EDGE_KINDS = [
     ("SANITIZES", "#0d9488"),
     ("REACHES_SINK", "#dc2626"),
     ("USES_SECRET", "#d97706"),
+    ("EXPOSES_SECRET", "#dc2626"),
+    ("USES_RESOURCE", "#475569"),
     ("AFFECTS_DEPENDENCY", "#7c3aed"),
 ]
 
@@ -202,6 +207,25 @@ def _vulnerable_dependencies_table(rows) -> str:
     )
 
 
+def _top_risks_table(risks) -> str:
+    if not risks:
+        return "<p class='muted'>No prioritized risks found yet.</p>"
+    rows = "".join(
+        "<tr>"
+        f"<td><span class='pill'>{html.escape(str(risk['risk_label']))}</span></td>"
+        f"<td>{html.escape(str(risk['risk_score']))}/100</td>"
+        f"<td>{html.escape(str(risk['category']))}</td>"
+        f"<td>{html.escape(str(risk['title']))}</td>"
+        f"<td>{html.escape(str(risk['detail']))}</td>"
+        "</tr>"
+        for risk in risks
+    )
+    return (
+        "<table><thead><tr><th>Risk</th><th>Score</th><th>Category</th><th>Title</th>"
+        f"<th>Detail</th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
 def _attack_paths(paths) -> str:
     if not paths:
         return "<p class='muted'>No entrypoint-to-sink paths found yet.</p>"
@@ -268,6 +292,9 @@ _HTML_TEMPLATE = """<!doctype html>
       <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong></div>
     </section>
 
+    <h2>Top Risks</h2>
+    __TOP_RISKS_TABLE__
+
     <h2>Interactive Graph Explorer</h2>
     <div class="toolbar">
       <input id="cg-search" type="search" placeholder="Search nodes by name, file, or group">
@@ -317,12 +344,13 @@ _HTML_TEMPLATE = """<!doctype html>
       const data = window.CYBERGRAPH || { nodes: [], edges: [], attack_paths: [] };
       const GROUP_COLORS = {
         entrypoint: '#2563eb', function: '#64748b', guard: '#16a34a', validator: '#0d9488',
-        sink: '#dc2626', secret: '#d97706', dependency: '#7c3aed', vulnerability: '#991b1b',
-        call: '#cbd5e1', file: '#94a3b8'
+        sink: '#dc2626', secret: '#d97706', dataflow: '#0891b2', dependency: '#7c3aed',
+        vulnerability: '#991b1b', infrastructure: '#475569', call: '#cbd5e1', file: '#94a3b8'
       };
       const EDGE_COLORS = {
         EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a', SANITIZES: '#0d9488',
-        REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', AFFECTS_DEPENDENCY: '#7c3aed'
+        REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', EXPOSES_SECRET: '#dc2626',
+        USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed'
       };
       const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0, '': -1 };
 
