@@ -14,6 +14,7 @@ from cybergraph.analysis.registry import analyze_source_file
 from cybergraph.analysis.resolve import resolve_calls
 from cybergraph.analysis.dep_usage import link_dependency_usage
 from cybergraph.analysis.resource_refs import resolve_resource_references
+from cybergraph.analysis.cloud_refs import link_code_resource_usage
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 from cybergraph.suppressions import filter_suppressed_findings
 
@@ -52,6 +53,10 @@ def build_graph(repo_root: Path) -> dict[str, int]:
     # Link IaC resources that reference each other (REFERENCES_RESOLVED) so
     # cross-resource cloud attack paths can be traversed.
     edges.extend(resolve_resource_references(nodes, edges))
+
+    # Link application code to named IaC resources so cloud exposure can be
+    # correlated with reachable code paths.
+    edges.extend(link_code_resource_usage(repo_root, nodes))
 
     store.upsert_nodes(nodes)
     store.add_edges(edges)

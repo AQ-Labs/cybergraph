@@ -30,6 +30,7 @@ GROUP_SECRET = "secret"
 GROUP_DATAFLOW = "dataflow"
 GROUP_DEPENDENCY = "dependency"
 GROUP_VULNERABILITY = "vulnerability"
+GROUP_INFRASTRUCTURE = "infrastructure"
 GROUP_CALL = "call"
 
 # Edge kind -> the group a *synthesized* (otherwise unknown) target should take.
@@ -38,6 +39,7 @@ _EDGE_TARGET_GROUP = {
     "GUARDS": GROUP_GUARD,
     "USES_SECRET": GROUP_SECRET,
     "EXPOSES_SECRET": GROUP_SINK,
+    "USES_RESOURCE": GROUP_INFRASTRUCTURE,
     "SANITIZES": GROUP_VALIDATOR,
     "READS_INPUT": GROUP_DATAFLOW,
     "FLOWS_TO": GROUP_DATAFLOW,
@@ -149,6 +151,8 @@ def _node_group(kind: str, props: dict[str, Any]) -> str:
         return GROUP_DEPENDENCY
     if kind == "Vulnerability":
         return GROUP_VULNERABILITY
+    if kind == "Resource":
+        return GROUP_INFRASTRUCTURE
     if kind in {"Input", "DataFlow"}:
         return GROUP_DATAFLOW
     if kind == "Function":
@@ -220,6 +224,7 @@ def _cap_nodes(node_list: list[dict[str, Any]], edges, max_nodes: int) -> list[d
         GROUP_VALIDATOR: 2,
         GROUP_DATAFLOW: 3,
         GROUP_DEPENDENCY: 3,
+        GROUP_INFRASTRUCTURE: 3,
         GROUP_FUNCTION: 4,
         GROUP_FILE: 5,
         GROUP_CALL: 6,

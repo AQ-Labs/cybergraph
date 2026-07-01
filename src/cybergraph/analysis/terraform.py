@@ -75,8 +75,10 @@ def analyze_terraform_file(
         )
 
         props = {"resource_type": rtype, "layer": "infrastructure"}
-        if public_ingress:
+        if public_ingress or public_bucket:
             props["public_exposure"] = True
+        if public_bucket:
+            props["public_storage"] = True
         if wildcard_iam:
             props["privileged"] = True
         nodes.append(Node("Resource", key, f"{rtype}.{rname}", rel, start_line, end_line, props))

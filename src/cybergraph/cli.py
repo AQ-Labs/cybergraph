@@ -150,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     iac_paths.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
     iac_paths.add_argument("--max-depth", type=int, default=6, help="Maximum reference-traversal depth")
 
+    cloud_code = sub.add_parser(
+        "cloud-code", help="Correlate public IaC resources with application code paths"
+    )
+    cloud_code.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+
     opengraph = sub.add_parser(
         "opengraph", help="Export the graph as BloodHound OpenGraph JSON for attack-path interop"
     )
@@ -285,6 +290,11 @@ def main(argv: list[str] | None = None) -> int:
 
         build_graph(repo)
         print(format_iac_attack_paths(find_iac_attack_paths(repo, max_depth=args.max_depth)))
+    elif args.command == "cloud-code":
+        from .security.cloud import find_cloud_code_paths, format_cloud_code_paths
+
+        build_graph(repo)
+        print(format_cloud_code_paths(find_cloud_code_paths(repo)))
     elif args.command == "opengraph":
         from .opengraph_export import export_opengraph
 
