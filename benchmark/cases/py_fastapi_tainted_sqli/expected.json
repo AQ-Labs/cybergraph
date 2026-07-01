@@ -1,0 +1,8 @@
+{
+  "language": "python",
+  "framework": "fastapi",
+  "vulnerable": true,
+  "expected_paths": [{"entrypoint": "search", "sink": "execute"}],
+  "min_findings": 1,
+  "note": "FastAPI route reads request input into a local value that reaches a SQL sink"
+}
