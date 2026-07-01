@@ -56,6 +56,7 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
         f"| Changed entrypoints | {len(review.changed_entrypoints)} |",
         f"| Changed sink edges | {len(review.changed_sink_edges)} |",
         f"| Changed attack paths | {review.attack_path_count} |",
+        f"| Risk deltas | {len(review.risk_deltas)} |",
         f"| Total graph nodes | {counts['nodes']} |",
         f"| Total graph edges | {counts['edges']} |",
         f"| Total findings | {counts['findings']} |",
@@ -77,6 +78,14 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
     if review.changed_sink_edges:
         lines.extend(["", "### Changed Sink Edges", ""])
         lines.extend(f"- `{sink}`" for sink in review.changed_sink_edges[:10])
+    if review.risk_deltas:
+        lines.extend(["", "### Reachable Risk Deltas", ""])
+        for delta in review.risk_deltas[:10]:
+            data = "data-reachable" if delta.data_reachable else "structural"
+            lines.append(
+                f"- `{delta.status}` `{delta.risk_label}` {delta.risk_score}/100 "
+                f"`{delta.entrypoint}` -> `{delta.sink}` ({data})"
+            )
     if top_findings:
         lines.extend(["", "### Top Findings", ""])
         for finding in top_findings:
@@ -103,6 +112,8 @@ def write_pr_comment(repo_root: Path, output: Path, base: str = "HEAD~1") -> Pat
 
 
 def _risk(review) -> str:
+    if any(delta.status in {"added", "worsened"} and delta.risk_score >= 70 for delta in review.risk_deltas):
+        return "high"
     if review.attack_path_count or review.finding_count > 3:
         return "high"
     if review.finding_count or review.changed_sink_edges or review.changed_entrypoints:
@@ -120,12 +131,28 @@ def _change_summary(review) -> str:
         parts.append(f"{len(review.changed_sink_edges)} sensitive sink edge(s)")
     if review.finding_count:
         parts.append(f"{review.finding_count} finding(s) in changed files")
+    added = sum(1 for delta in review.risk_deltas if delta.status == "added")
+    worsened = sum(1 for delta in review.risk_deltas if delta.status == "worsened")
+    removed = sum(1 for delta in review.risk_deltas if delta.status == "removed")
+    if added:
+        parts.append(f"{added} added reachable risk(s)")
+    if worsened:
+        parts.append(f"{worsened} worsened reachable risk(s)")
+    if removed:
+        parts.append(f"{removed} removed reachable risk(s)")
     if not parts:
         return "No security-relevant graph changes were detected in this diff."
     return "CyberGraph detected " + ", ".join(parts) + "."
 
 
 def _risk_summary(review) -> str:
+    added_or_worsened = [d for d in review.risk_deltas if d.status in {"added", "worsened"}]
+    if added_or_worsened:
+        top = added_or_worsened[0]
+        return (
+            f"This PR introduces or worsens reachable risk: `{top.entrypoint}` -> "
+            f"`{top.sink}` ({top.risk_label} {top.risk_score}/100)."
+        )
     if review.attack_path_count:
         return "Changed code is connected to potential attack paths. Review the route, guard, validation, and sink chain before merging."
     if review.changed_sink_edges and review.changed_entrypoints:
@@ -145,4 +172,6 @@ def _checklist(review) -> list[str]:
     ]
     if review.finding_count:
         checks.append("- Triage top findings; suppress only accepted risk with `cybergraph: ignore` or `.cybergraph.toml`.")
+    if any(delta.status in {"added", "worsened"} for delta in review.risk_deltas):
+        checks.append("- Review added or worsened reachable risks before merging; confirm source, controls, and sink fix.")
     return checks
