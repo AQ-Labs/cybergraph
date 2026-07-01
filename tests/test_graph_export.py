@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cybergraph.build import build_graph
 from cybergraph.graph_export import build_graph_data, export_graph_json
+from cybergraph.security.ontology import LAYERS
 
 
 def _build_demo(tmp_path: Path) -> Path:
@@ -35,10 +36,11 @@ def test_build_graph_data_has_nodes_edges_and_layers(tmp_path: Path) -> None:
     assert data["counts"]["nodes"] > 0
     assert data["nodes"], "expected at least one node"
     assert data["edges"], "expected at least one edge"
-    assert len(data["layers"]) == 9  # one per security ontology layer
+    assert len(data["layers"]) == len(LAYERS)  # one per security ontology layer
 
     groups = {node["group"] for node in data["nodes"]}
     assert "entrypoint" in groups  # the @app.route handler
+    assert "dataflow" in groups  # route input/data propagation
     assert "sink" in groups  # synthesized from REACHES_SINK to execute()
 
 

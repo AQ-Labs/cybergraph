@@ -12,13 +12,17 @@ from cybergraph.security.ontology import (
     AUTHZ_KEYWORDS,
     CRYPTO_KEYWORDS,
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_FLOWS_TO,
     EDGE_GUARDS,
     EDGE_IMPORTS,
+    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
     EDGE_SANITIZES,
+    EDGE_TAINTS,
     EDGE_USES_SECRET,
     SECRET_KEYWORDS,
     SINK_KEYWORDS,
+    SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
 
@@ -74,12 +78,15 @@ def analyze_python_file(
             )
             if route:
                 edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, item.lineno))
+            tainted_values = _route_inputs(item, key, rel, route, nodes, edges)
             for decorator in decorators:
                 lowered_decorator = decorator.lower()
                 if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)):
                     edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
             for dependency in _fastapi_depends_guards(item, auth_markers):
                 edges.append(Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"}))
+
+            _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
 
             for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
@@ -134,6 +141,163 @@ def _add_imports(tree: ast.AST, rel: str, edges: list[Edge]) -> None:
             if top and top not in seen:
                 seen.add(top)
                 edges.append(Edge(EDGE_IMPORTS, rel, top, rel, getattr(node, "lineno", 0)))
+
+
+def _route_inputs(
+    item: ast.FunctionDef | ast.AsyncFunctionDef,
+    function_key: str,
+    rel: str,
+    route: dict[str, str],
+    nodes: list[Node],
+    edges: list[Edge],
+) -> dict[str, str]:
+    """Model route handler parameters as user-controlled input sources."""
+    tainted: dict[str, str] = {}
+    if not route:
+        return tainted
+    for arg in [*item.args.posonlyargs, *item.args.args, *item.args.kwonlyargs]:
+        if arg.arg in {"self", "cls"}:
+            continue
+        input_key = f"{function_key}::input:{arg.arg}"
+        nodes.append(
+            Node(
+                "Input",
+                input_key,
+                arg.arg,
+                rel,
+                getattr(arg, "lineno", item.lineno),
+                getattr(arg, "lineno", item.lineno),
+                {"source": "parameter", "route": route.get("path", ""), "user_controlled": True},
+            )
+        )
+        edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, item.lineno))
+        edges.append(Edge(EDGE_TAINTS, input_key, function_key, rel, item.lineno, {"reason": "route parameter"}))
+        tainted[arg.arg] = input_key
+    return tainted
+
+
+def _add_python_dataflows(
+    item: ast.FunctionDef | ast.AsyncFunctionDef,
+    function_key: str,
+    rel: str,
+    tainted_values: dict[str, str],
+    nodes: list[Node],
+    edges: list[Edge],
+) -> None:
+    """Track simple local propagation from request inputs into sink arguments."""
+    tainted = dict(tainted_values)
+    for node in ast.walk(item):
+        if isinstance(node, ast.Assign):
+            source_key = _tainted_source_key(node.value, tainted)
+            if not source_key and _is_user_input_expr(node.value):
+                source_key = _ensure_input_node(
+                    function_key, rel, getattr(node, "lineno", item.lineno), "request", nodes, edges
+                )
+            if not source_key:
+                continue
+            for target in node.targets:
+                for name in _assigned_names(target):
+                    flow_key = f"{function_key}::flow:{name}:{getattr(node, 'lineno', item.lineno)}"
+                    nodes.append(
+                        Node(
+                            "DataFlow",
+                            flow_key,
+                            name,
+                            rel,
+                            getattr(node, "lineno", item.lineno),
+                            getattr(node, "lineno", item.lineno),
+                            {"user_controlled": True, "source": source_key},
+                        )
+                    )
+                    edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, getattr(node, "lineno", item.lineno)))
+                    tainted[name] = flow_key
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            source_key = _tainted_source_key(node.value, tainted) if node.value is not None else ""
+            if not source_key and node.value is not None and _is_user_input_expr(node.value):
+                source_key = _ensure_input_node(
+                    function_key, rel, getattr(node, "lineno", item.lineno), "request", nodes, edges
+                )
+            if source_key:
+                name = node.target.id
+                flow_key = f"{function_key}::flow:{name}:{getattr(node, 'lineno', item.lineno)}"
+                nodes.append(
+                    Node(
+                        "DataFlow",
+                        flow_key,
+                        name,
+                        rel,
+                        getattr(node, "lineno", item.lineno),
+                        getattr(node, "lineno", item.lineno),
+                        {"user_controlled": True, "source": source_key},
+                    )
+                )
+                edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, getattr(node, "lineno", item.lineno)))
+                tainted[name] = flow_key
+        elif isinstance(node, ast.Call):
+            call_name = _call_name(node)
+            if not call_name:
+                continue
+            source_key = _tainted_source_key(node, tainted)
+            if source_key:
+                edges.append(
+                    Edge(
+                        EDGE_TAINTS,
+                        source_key,
+                        call_name,
+                        rel,
+                        getattr(node, "lineno", item.lineno),
+                        {"function": function_key, "reason": "tainted argument"},
+                    )
+                )
+
+
+def _ensure_input_node(
+    function_key: str,
+    rel: str,
+    line_no: int,
+    name: str,
+    nodes: list[Node],
+    edges: list[Edge],
+) -> str:
+    input_key = f"{function_key}::input:{name}:{line_no}"
+    nodes.append(
+        Node(
+            "Input",
+            input_key,
+            name,
+            rel,
+            line_no,
+            line_no,
+            {"source": "request", "user_controlled": True},
+        )
+    )
+    edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, line_no))
+    return input_key
+
+
+def _assigned_names(target: ast.AST) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: list[str] = []
+        for elt in target.elts:
+            names.extend(_assigned_names(elt))
+        return names
+    return []
+
+
+def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
+    if node is None:
+        return ""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id in tainted:
+            return tainted[child.id]
+    return ""
+
+
+def _is_user_input_expr(node: ast.AST) -> bool:
+    text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
+    return any(keyword in text for keyword in SOURCE_KEYWORDS)
 
 
 def _add_django_url_routes(tree: ast.AST, rel: str, nodes: list[Node], edges: list[Edge]) -> None:

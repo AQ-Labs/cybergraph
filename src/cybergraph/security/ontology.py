@@ -20,6 +20,7 @@ LAYERS: tuple[SecurityLayer, ...] = (
     SecurityLayer("secrets", "Secrets", "Credential, token, key, and environment variable handling."),
     SecurityLayer("crypto", "Cryptography", "Hashing, signing, encryption, verification, and key use."),
     SecurityLayer("sink", "Sensitive Sinks", "Database, shell, filesystem, network, template, and deserialization sinks."),
+    SecurityLayer("dataflow", "Data Flow", "User-controlled inputs and their propagation toward sensitive operations."),
     SecurityLayer("dependency", "Dependencies", "Third-party packages and known vulnerable components."),
     SecurityLayer("infrastructure", "Infrastructure", "Cloud/IaC resources: networking, storage, identity, and their misconfigurations."),
 )
@@ -63,3 +64,6 @@ EDGE_IMPORTS = "IMPORTS"
 EDGE_USES_DEPENDENCY = "USES_DEPENDENCY"
 EDGE_REFERENCES = "REFERENCES"
 EDGE_REFERENCES_RESOLVED = "REFERENCES_RESOLVED"
+EDGE_READS_INPUT = "READS_INPUT"
+EDGE_FLOWS_TO = "FLOWS_TO"
+EDGE_TAINTS = "TAINTS"

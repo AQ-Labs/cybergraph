@@ -27,6 +27,7 @@ GROUP_GUARD = "guard"
 GROUP_VALIDATOR = "validator"
 GROUP_SINK = "sink"
 GROUP_SECRET = "secret"
+GROUP_DATAFLOW = "dataflow"
 GROUP_DEPENDENCY = "dependency"
 GROUP_VULNERABILITY = "vulnerability"
 GROUP_CALL = "call"
@@ -37,6 +38,9 @@ _EDGE_TARGET_GROUP = {
     "GUARDS": GROUP_GUARD,
     "USES_SECRET": GROUP_SECRET,
     "SANITIZES": GROUP_VALIDATOR,
+    "READS_INPUT": GROUP_DATAFLOW,
+    "FLOWS_TO": GROUP_DATAFLOW,
+    "TAINTS": GROUP_SINK,
     "CALLS": GROUP_CALL,
 }
 
@@ -129,6 +133,8 @@ def _node_group(kind: str, props: dict[str, Any]) -> str:
         return GROUP_DEPENDENCY
     if kind == "Vulnerability":
         return GROUP_VULNERABILITY
+    if kind in {"Input", "DataFlow"}:
+        return GROUP_DATAFLOW
     if kind == "Function":
         if props.get("entrypoint") or props.get("route"):
             return GROUP_ENTRYPOINT
@@ -196,6 +202,7 @@ def _cap_nodes(node_list: list[dict[str, Any]], edges, max_nodes: int) -> list[d
         GROUP_SECRET: 2,
         GROUP_GUARD: 2,
         GROUP_VALIDATOR: 2,
+        GROUP_DATAFLOW: 3,
         GROUP_DEPENDENCY: 3,
         GROUP_FUNCTION: 4,
         GROUP_FILE: 5,

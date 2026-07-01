@@ -14,7 +14,10 @@ from pathlib import Path
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_FLOWS_TO,
+    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
 from cybergraph.suppressions import is_inline_suppressed
@@ -23,6 +26,7 @@ METHOD_RE = re.compile(
     r"\b(?:public|private|protected|internal)\s+(?:static\s+|async\s+|virtual\s+|override\s+)*"
     r"[\w<>\[\],.\s]+?\s+(?P<name>[A-Za-z_]\w*)\s*\([^;{]*\)\s*\{"
 )
+METHOD_PARAMS_RE = re.compile(r"\((?P<params>[^)]*)\)")
 ATTR_ROUTE_RE = re.compile(
     r"\[(?:Http(?P<verb>Get|Post|Put|Patch|Delete)|Route)\s*(?:\(\s*\"(?P<path>[^\"]*)\")?"
 )
@@ -30,6 +34,7 @@ MINIMAL_API_RE = re.compile(
     r"\bapp\.Map(?P<verb>Get|Post|Put|Patch|Delete)\s*\(\s*\"(?P<path>[^\"]+)\""
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
+ASSIGN_RE = re.compile(r"\b(?:var|string|int|long|bool|Path|FileInfo|[\w<>]+)\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)")
 
 SINK_CALLS = {
     "executereader", "executenonquery", "executescalar",
@@ -40,6 +45,7 @@ SECRET_MARKERS = {
     "environment.getenvironmentvariable", "configuration[", "_configuration[",
     "secret", "password", "token", "apikey", "api_key",
 }
+INPUT_MARKERS = {"request.query", "request.form", "request.headers", "request.body", "fromquery", "frombody", "fromroute"}
 
 
 def analyze_csharp_file(
@@ -57,6 +63,7 @@ def analyze_csharp_file(
 
     pending_route: dict | None = None
     current_function: str | None = None
+    tainted_by_function: dict[str, dict[str, str]] = {}
     for line_no, line in enumerate(lines, start=1):
         attr_match = ATTR_ROUTE_RE.search(line)
         if attr_match:
@@ -82,6 +89,7 @@ def analyze_csharp_file(
             name = method_match.group("name")
             key = f"{rel}::{name}"
             current_function = key
+            tainted_by_function.setdefault(current_function, {})
             nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_csharp_name(name)))
             if pending_route is not None:
                 route_key = f"{rel}::route:{pending_route['path']}:{pending_route['line']}"
@@ -94,10 +102,31 @@ def analyze_csharp_file(
                 )
                 edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, route_key, rel, pending_route["line"]))
                 edges.append(Edge("CALLS", route_key, name, rel, line_no))
+                _add_route_params(key, line, rel, line_no, pending_route["path"], nodes, edges, tainted_by_function[key])
                 pending_route = None
 
         sink_source = current_function or rel
+        tainted = tainted_by_function.setdefault(sink_source, {})
         lowered_line = line.lower()
+        input_key = _line_input_source(sink_source, lowered_line, rel, line_no, nodes, edges)
+        source_key = input_key or _tainted_source_for_line(line, tainted)
+        if source_key:
+            assigned = _assigned_name(line)
+            if assigned:
+                flow_key = f"{sink_source}::flow:{assigned}:{line_no}"
+                nodes.append(
+                    Node(
+                        "DataFlow",
+                        flow_key,
+                        assigned,
+                        rel,
+                        line_no,
+                        line_no,
+                        {"user_controlled": True, "source": source_key},
+                    )
+                )
+                edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, line_no))
+                tainted[assigned] = flow_key
         if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)):
             edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
@@ -105,6 +134,18 @@ def analyze_csharp_file(
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
+                taint_source = source_key or _tainted_source_for_line(line, tainted)
+                if taint_source:
+                    edges.append(
+                        Edge(
+                            EDGE_TAINTS,
+                            taint_source,
+                            call_name,
+                            rel,
+                            line_no,
+                            {"function": sink_source, "reason": "tainted argument"},
+                        )
+                    )
                 if not is_inline_suppressed(lines, line_no, "CG-CSHARP-SINK-CALL"):
                     findings.append(
                         Finding(
@@ -119,6 +160,74 @@ def analyze_csharp_file(
                     )
 
     return nodes, edges, findings
+
+
+def _add_route_params(
+    function_key: str,
+    signature_line: str,
+    rel: str,
+    line_no: int,
+    route: str,
+    nodes: list[Node],
+    edges: list[Edge],
+    tainted: dict[str, str],
+) -> None:
+    match = METHOD_PARAMS_RE.search(signature_line)
+    if not match:
+        return
+    for raw_param in match.group("params").split(","):
+        param = raw_param.strip()
+        if not param:
+            continue
+        parts = re.findall(r"[A-Za-z_]\w*", param)
+        if not parts:
+            continue
+        name = parts[-1]
+        input_key = f"{function_key}::input:{name}"
+        nodes.append(
+            Node(
+                "Input",
+                input_key,
+                name,
+                rel,
+                line_no,
+                line_no,
+                {"source": "parameter", "route": route, "user_controlled": True},
+            )
+        )
+        edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, line_no))
+        edges.append(Edge(EDGE_TAINTS, input_key, function_key, rel, line_no, {"reason": "route parameter"}))
+        tainted[name] = input_key
+
+
+def _line_input_source(
+    owner_key: str,
+    lowered_line: str,
+    rel: str,
+    line_no: int,
+    nodes: list[Node],
+    edges: list[Edge],
+) -> str:
+    if not any(marker in lowered_line for marker in INPUT_MARKERS):
+        return ""
+    input_key = f"{owner_key}::input:request:{line_no}"
+    nodes.append(
+        Node("Input", input_key, "request", rel, line_no, line_no, {"source": "request", "user_controlled": True})
+    )
+    edges.append(Edge(EDGE_READS_INPUT, owner_key, input_key, rel, line_no))
+    return input_key
+
+
+def _assigned_name(line: str) -> str:
+    match = ASSIGN_RE.search(line)
+    return match.group("name") if match else ""
+
+
+def _tainted_source_for_line(line: str, tainted: dict[str, str]) -> str:
+    for name, key in tainted.items():
+        if re.search(rf"\b{re.escape(name)}\b", line):
+            return key
+    return ""
 
 
 def _classify_csharp_name(name: str) -> dict[str, bool]:

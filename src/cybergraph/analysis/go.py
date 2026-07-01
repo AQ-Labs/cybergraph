@@ -15,7 +15,10 @@ from pathlib import Path
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_FLOWS_TO,
+    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
 from cybergraph.suppressions import is_inline_suppressed
@@ -34,6 +37,7 @@ ROUTER_VERB_RE = re.compile(
     r"(?:\s*,\s*(?P<handler>[A-Za-z_]\w*))?"
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
+ASSIGN_RE = re.compile(r"\b(?P<name>[A-Za-z_]\w*)\s*(?::=|=)\s*(?P<expr>.+)")
 
 SINK_CALLS = {
     "db.query", "db.exec", "db.queryrow", "db.querycontext", "db.execcontext",
@@ -42,6 +46,7 @@ SINK_CALLS = {
     "os.remove", "template.html", "fmt.sprintf",
 }
 SECRET_MARKERS = {"os.getenv", "secret", "password", "token", "apikey", "api_key", "private_key"}
+INPUT_MARKERS = {"url.query", "formvalue", "postformvalue", ".query(", ".param(", ".bind(", ".body"}
 
 
 def analyze_go_file(
@@ -58,11 +63,13 @@ def analyze_go_file(
     findings: list[Finding] = []
 
     current_function: str | None = None
+    tainted_by_function: dict[str, dict[str, str]] = {}
     for line_no, line in enumerate(lines, start=1):
         func_match = FUNC_RE.search(line)
         if func_match:
             name = func_match.group("name")
             current_function = f"{rel}::{name}"
+            tainted_by_function.setdefault(current_function, {})
             nodes.append(
                 Node("Function", current_function, name, rel, line_no, line_no, _classify_go_name(name))
             )
@@ -81,6 +88,7 @@ def analyze_go_file(
                 )
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+            _add_input_source(key, "request", rel, line_no, nodes, edges, route_path)
             handler = route_match.groupdict().get("handler")
             if handler:
                 # Link the route to its handler so traversal reaches the handler's sinks.
@@ -89,7 +97,27 @@ def analyze_go_file(
         # Attribute sinks/secrets to the enclosing function so interprocedural
         # reachability (route -> handler -> sink) works uniformly across languages.
         sink_source = current_function or rel
+        tainted = tainted_by_function.setdefault(sink_source, {})
         lowered_line = line.lower()
+        input_key = _line_input_source(sink_source, lowered_line, rel, line_no, nodes, edges)
+        source_key = input_key or _tainted_source_for_line(line, tainted)
+        if source_key:
+            assigned = _assigned_name(line)
+            if assigned:
+                flow_key = f"{sink_source}::flow:{assigned}:{line_no}"
+                nodes.append(
+                    Node(
+                        "DataFlow",
+                        flow_key,
+                        assigned,
+                        rel,
+                        line_no,
+                        line_no,
+                        {"user_controlled": True, "source": source_key},
+                    )
+                )
+                edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, line_no))
+                tainted[assigned] = flow_key
         if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)):
             edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
@@ -97,6 +125,18 @@ def analyze_go_file(
             call_name = call.group("name")
             if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
+                taint_source = source_key or _tainted_source_for_line(line, tainted)
+                if taint_source:
+                    edges.append(
+                        Edge(
+                            EDGE_TAINTS,
+                            taint_source,
+                            call_name,
+                            rel,
+                            line_no,
+                            {"function": sink_source, "reason": "tainted argument"},
+                        )
+                    )
                 if not is_inline_suppressed(lines, line_no, "CG-GO-SINK-CALL"):
                     findings.append(
                         Finding(
@@ -111,6 +151,56 @@ def analyze_go_file(
                     )
 
     return nodes, edges, findings
+
+
+def _add_input_source(
+    owner_key: str,
+    name: str,
+    rel: str,
+    line_no: int,
+    nodes: list[Node],
+    edges: list[Edge],
+    route: str = "",
+) -> str:
+    input_key = f"{owner_key}::input:{name}:{line_no}"
+    nodes.append(
+        Node(
+            "Input",
+            input_key,
+            name,
+            rel,
+            line_no,
+            line_no,
+            {"source": "request", "route": route, "user_controlled": True},
+        )
+    )
+    edges.append(Edge(EDGE_READS_INPUT, owner_key, input_key, rel, line_no))
+    return input_key
+
+
+def _line_input_source(
+    owner_key: str,
+    lowered_line: str,
+    rel: str,
+    line_no: int,
+    nodes: list[Node],
+    edges: list[Edge],
+) -> str:
+    if not any(marker in lowered_line for marker in INPUT_MARKERS):
+        return ""
+    return _add_input_source(owner_key, "request", rel, line_no, nodes, edges)
+
+
+def _assigned_name(line: str) -> str:
+    match = ASSIGN_RE.search(line)
+    return match.group("name") if match else ""
+
+
+def _tainted_source_for_line(line: str, tainted: dict[str, str]) -> str:
+    for name, key in tainted.items():
+        if re.search(rf"\b{re.escape(name)}\b", line):
+            return key
+    return ""
 
 
 def _classify_go_name(name: str) -> dict[str, bool]:

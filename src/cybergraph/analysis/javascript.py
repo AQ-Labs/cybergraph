@@ -8,8 +8,11 @@ from pathlib import Path
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_FLOWS_TO,
     EDGE_IMPORTS,
+    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
 from cybergraph.suppressions import is_inline_suppressed
@@ -25,6 +28,7 @@ ROUTE_RE = re.compile(
 NEXT_EXPORT_RE = re.compile(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(")
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(")
 IMPORT_RE = re.compile(r"""(?:import\b[^'"]*?from\s*|import\s*|require\s*\(\s*)['"](?P<mod>[^'"]+)['"]""")
+ASSIGN_RE = re.compile(r"\b(?:const|let|var)?\s*(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?P<expr>[^;]+)")
 
 SINK_CALLS = {
     "db.query",
@@ -39,6 +43,7 @@ SINK_CALLS = {
     "res.render",
 }
 SECRET_MARKERS = {"process.env", "secret", "password", "token", "api_key", "apikey"}
+INPUT_MARKERS = {"req.query", "req.body", "req.params", "req.headers", "request.query", "request.body"}
 
 
 def analyze_javascript_file(
@@ -60,10 +65,12 @@ def analyze_javascript_file(
         nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_js_name(name)))
 
     current_function: str | None = None
+    tainted_by_function: dict[str, dict[str, str]] = {}
     for line_no, line in enumerate(lines, start=1):
         fn_match = FUNCTION_RE.search(line)
         if fn_match:
             current_function = f"{rel}::{fn_match.group('name') or fn_match.group('var')}"
+            tainted_by_function.setdefault(current_function, {})
 
         route_match = ROUTE_RE.search(line)
         if route_match:
@@ -80,6 +87,7 @@ def analyze_javascript_file(
                 )
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+            _add_input_source(key, "request", rel, line_no, nodes, edges, route_match.group("path"))
 
         if NEXT_EXPORT_RE.search(line):
             method = NEXT_EXPORT_RE.search(line).group(1)
@@ -88,8 +96,29 @@ def analyze_javascript_file(
                 Node("Entrypoint", key, key.rsplit(":", 2)[1], rel, line_no, line_no, {"framework": "nextjs"})
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
+            _add_input_source(key, "request", rel, line_no, nodes, edges, method)
 
         sink_source = current_function or rel
+        tainted = tainted_by_function.setdefault(sink_source, {})
+        input_key = _line_input_source(sink_source, line, rel, line_no, nodes, edges)
+        source_key = input_key or _tainted_source_for_line(line, tainted)
+        if source_key:
+            assigned = _assigned_name(line)
+            if assigned:
+                flow_key = f"{sink_source}::flow:{assigned}:{line_no}"
+                nodes.append(
+                    Node(
+                        "DataFlow",
+                        flow_key,
+                        assigned,
+                        rel,
+                        line_no,
+                        line_no,
+                        {"user_controlled": True, "source": source_key},
+                    )
+                )
+                edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, line_no))
+                tainted[assigned] = flow_key
         if any(marker in line.lower() for marker in SECRET_MARKERS):
             edges.append(Edge(EDGE_USES_SECRET, sink_source, "secret", rel, line_no))
 
@@ -109,11 +138,79 @@ def analyze_javascript_file(
                             evidence=line.strip(),
                         )
                     )
+                taint_source = source_key or _tainted_source_for_line(line, tainted)
+                if taint_source:
+                    edges.append(
+                        Edge(
+                            EDGE_TAINTS,
+                            taint_source,
+                            call_name,
+                            rel,
+                            line_no,
+                            {"function": sink_source, "reason": "tainted argument"},
+                        )
+                    )
             if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
                 edges.append(Edge(EDGE_USES_SECRET, sink_source, call_name, rel, line_no))
 
     _add_imports(lines, rel, edges)
     return nodes, edges, findings
+
+
+def _add_input_source(
+    owner_key: str,
+    name: str,
+    rel: str,
+    line_no: int,
+    nodes: list[Node],
+    edges: list[Edge],
+    route: str = "",
+) -> str:
+    input_key = f"{owner_key}::input:{name}:{line_no}"
+    nodes.append(
+        Node(
+            "Input",
+            input_key,
+            name,
+            rel,
+            line_no,
+            line_no,
+            {"source": "request", "route": route, "user_controlled": True},
+        )
+    )
+    edges.append(Edge(EDGE_READS_INPUT, owner_key, input_key, rel, line_no))
+    return input_key
+
+
+def _line_input_source(
+    owner_key: str,
+    line: str,
+    rel: str,
+    line_no: int,
+    nodes: list[Node],
+    edges: list[Edge],
+) -> str:
+    lowered = line.lower()
+    if not any(marker in lowered for marker in INPUT_MARKERS):
+        return ""
+    return _add_input_source(owner_key, "request", rel, line_no, nodes, edges)
+
+
+def _assigned_name(line: str) -> str:
+    match = ASSIGN_RE.search(line)
+    if not match:
+        return ""
+    expr = match.group("expr")
+    if "=>" in expr or "function" in expr:
+        return ""
+    return match.group("name")
+
+
+def _tainted_source_for_line(line: str, tainted: dict[str, str]) -> str:
+    for name, key in tainted.items():
+        if re.search(rf"\b{re.escape(name)}\b", line):
+            return key
+    return ""
 
 
 def _add_imports(lines: list[str], rel: str, edges: list[Edge]) -> None:
