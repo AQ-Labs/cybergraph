@@ -46,6 +46,9 @@ class VulnPriority:
     score: int
     priority: str
     rationale: str
+    epss_score: float | None = None
+    kev: bool = False
+    exploit_maturity: str = ""
 
 
 def _severity_weight(severity: str) -> int:
@@ -63,18 +66,26 @@ def _priority_label(score: int) -> str:
     return "low"
 
 
-def _rationale(severity: str, tier: str, package: str, files: list[str], linked: bool) -> str:
+def _rationale(
+    severity: str,
+    tier: str,
+    package: str,
+    files: list[str],
+    linked: bool,
+    props: dict,
+) -> str:
     sev = severity or "unknown"
     where = ", ".join(files[:3]) if files else ""
+    intel = _intel_suffix(props)
     if tier == TIER_ENTRYPOINT:
-        return f"{sev} severity; `{package}` is imported in {where}, which exposes an entrypoint — reachable from external input."
+        return f"{sev} severity; `{package}` is imported in {where}, which exposes an entrypoint — reachable from external input.{intel}"
     if tier == TIER_IMPORTED:
-        return f"{sev} severity; `{package}` is imported in {where} but not in an entrypoint file."
+        return f"{sev} severity; `{package}` is imported in {where} but not in an entrypoint file.{intel}"
     if not linked:
-        return f"{sev} severity; no matching dependency node in the graph — retained for review (verify package name/ecosystem)."
+        return f"{sev} severity; no matching dependency node in the graph — retained for review (verify package name/ecosystem).{intel}"
     return (
         f"{sev} severity; `{package}` is declared but no import was found in scanned code — "
-        f"likely unreachable (transitive/dynamic use possible). Retained, not dropped."
+        f"likely unreachable (transitive/dynamic use possible). Retained, not dropped.{intel}"
     )
 
 
@@ -139,7 +150,10 @@ def prioritize_vulnerabilities(repo_root: Path) -> list[VulnPriority]:
                 used_by=tuple(files),
                 score=score,
                 priority=_priority_label(score),
-                rationale=_rationale(severity, tier, package, files, bool(dep_keys)),
+                rationale=_rationale(severity, tier, package, files, bool(dep_keys), props),
+                epss_score=_optional_float(props.get("epss_score")),
+                kev=bool(props.get("kev")),
+                exploit_maturity=str(props.get("exploit_maturity") or ""),
             )
         )
 
@@ -163,3 +177,24 @@ def format_sca(results: list[VulnPriority]) -> str:
         )
         lines.append(f"      {r.rationale}")
     return "\n".join(lines)
+
+
+def _intel_suffix(props: dict) -> str:
+    details: list[str] = []
+    epss = _optional_float(props.get("epss_score"))
+    if epss is not None:
+        details.append(f"EPSS={epss:.3f}")
+    if props.get("kev"):
+        details.append("CISA KEV")
+    if props.get("exploit_maturity"):
+        details.append(f"exploit={props['exploit_maturity']}")
+    if not details:
+        return ""
+    return " Advisory intelligence: " + ", ".join(details) + "."
+
+
+def _optional_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

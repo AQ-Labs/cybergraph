@@ -55,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_vulns.add_argument("report", help="Path to vulnerability report JSON")
     import_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
 
+    enrich_vulns = sub.add_parser(
+        "enrich-vulns",
+        help="Merge offline advisory intelligence (EPSS/KEV/CVSS/exploit data) into vulnerabilities",
+    )
+    enrich_vulns.add_argument("report", help="Path to advisory enrichment JSON")
+    enrich_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
+
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
     ask.add_argument("--repo", default=".", help="Repository root containing the graph")
@@ -175,6 +182,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Imported {counts['vulnerabilities']} vulnerabilit(y/ies); "
             f"matched {counts['matched_dependencies']} dependency node(s)"
+        )
+    elif args.command == "enrich-vulns":
+        from .security.vulnerabilities import enrich_vulnerabilities
+
+        counts = enrich_vulnerabilities(repo, Path(args.report).resolve())
+        print(
+            f"Loaded {counts['advisories']} advisory record(s); "
+            f"enriched {counts['matched_vulnerabilities']} vulnerabilit(y/ies)"
         )
     elif args.command == "ask":
         print(answer_question(repo, args.question))
