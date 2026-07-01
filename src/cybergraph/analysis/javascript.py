@@ -8,6 +8,7 @@ from pathlib import Path
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
     EDGE_IMPORTS,
     EDGE_READS_INPUT,
@@ -44,6 +45,18 @@ SINK_CALLS = {
 }
 SECRET_MARKERS = {"process.env", "secret", "password", "token", "api_key", "apikey"}
 INPUT_MARKERS = {"req.query", "req.body", "req.params", "req.headers", "request.query", "request.body"}
+SECRET_EXPOSURE_SINKS = {
+    "console.log",
+    "logger.info",
+    "logger.warn",
+    "logger.error",
+    "res.send",
+    "res.json",
+    "response.send",
+    "fetch",
+    "axios.post",
+    "child_process.exec",
+}
 
 
 def analyze_javascript_file(
@@ -152,6 +165,17 @@ def analyze_javascript_file(
                     )
             if any(marker in line.lower() for marker in SECRET_MARKERS | set(secret_markers)):
                 edges.append(Edge(EDGE_USES_SECRET, sink_source, call_name, rel, line_no))
+                if _is_secret_exposure(call_name):
+                    edges.append(
+                        Edge(
+                            EDGE_EXPOSES_SECRET,
+                            sink_source,
+                            call_name,
+                            rel,
+                            line_no,
+                            {"reason": "secret passed to exposure sink"},
+                        )
+                    )
 
     _add_imports(lines, rel, edges)
     return nodes, edges, findings
@@ -264,6 +288,11 @@ def _classify_js_name(name: str) -> dict[str, bool]:
 def _is_sink(call_name: str, custom_sinks: tuple[str, ...] = ()) -> bool:
     lowered = call_name.lower()
     return any(sink.lower() in lowered for sink in SINK_CALLS | set(custom_sinks))
+
+
+def _is_secret_exposure(call_name: str) -> bool:
+    lowered = call_name.lower()
+    return any(sink in lowered for sink in SECRET_EXPOSURE_SINKS)
 
 
 def _language(path: Path) -> str:

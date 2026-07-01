@@ -12,6 +12,7 @@ from cybergraph.security.ontology import (
     AUTHZ_KEYWORDS,
     CRYPTO_KEYWORDS,
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
     EDGE_GUARDS,
     EDGE_IMPORTS,
@@ -25,6 +26,21 @@ from cybergraph.security.ontology import (
     SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
+
+SECRET_EXPOSURE_SINKS = {
+    "print",
+    "logger.info",
+    "logger.warning",
+    "logger.error",
+    "logging.info",
+    "logging.warning",
+    "logging.error",
+    "requests.post",
+    "requests.put",
+    "subprocess.run",
+    "subprocess.call",
+    "os.system",
+}
 
 
 def analyze_python_file(
@@ -111,6 +127,18 @@ def analyze_python_file(
                     )
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
                     edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, getattr(call, "lineno", item.lineno)))
+                call_text = ast.unparse(call).lower() if hasattr(ast, "unparse") else lowered
+                if _is_secret_exposure(call_name, call_text, secret_markers):
+                    edges.append(
+                        Edge(
+                            EDGE_EXPOSES_SECRET,
+                            key,
+                            call_name,
+                            rel,
+                            getattr(call, "lineno", item.lineno),
+                            {"reason": "secret passed to exposure sink"},
+                        )
+                    )
                 if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
                     edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
 
@@ -298,6 +326,13 @@ def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
 def _is_user_input_expr(node: ast.AST) -> bool:
     text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
     return any(keyword in text for keyword in SOURCE_KEYWORDS)
+
+
+def _is_secret_exposure(call_name: str, call_text: str, secret_markers: tuple[str, ...]) -> bool:
+    lowered_name = call_name.lower()
+    if not any(sink in lowered_name for sink in SECRET_EXPOSURE_SINKS):
+        return False
+    return any(marker in call_text for marker in SECRET_KEYWORDS | set(secret_markers))
 
 
 def _add_django_url_routes(tree: ast.AST, rel: str, nodes: list[Node], edges: list[Edge]) -> None:

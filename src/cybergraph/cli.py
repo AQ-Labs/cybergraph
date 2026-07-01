@@ -90,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     layers = sub.add_parser("layers", help="Summarize detected security layers")
     layers.add_argument("--repo", default=".", help="Repository root containing the graph")
 
+    secrets = sub.add_parser(
+        "secrets",
+        help="Prioritize secret exposure paths to logs, responses, network calls, and processes",
+    )
+    secrets.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     review.add_argument("--repo", default=".", help="Repository root to review")
@@ -219,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "layers":
         print(format_layer_summary(summarize_layers(repo)))
+    elif args.command == "secrets":
+        from .security.secrets import find_secret_exposures, format_secret_exposures
+
+        build_graph(repo)
+        print(format_secret_exposures(find_secret_exposures(repo)))
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "pr-comment":

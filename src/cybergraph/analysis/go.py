@@ -15,6 +15,7 @@ from pathlib import Path
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
     EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
@@ -47,6 +48,15 @@ SINK_CALLS = {
 }
 SECRET_MARKERS = {"os.getenv", "secret", "password", "token", "apikey", "api_key", "private_key"}
 INPUT_MARKERS = {"url.query", "formvalue", "postformvalue", ".query(", ".param(", ".bind(", ".body"}
+SECRET_EXPOSURE_SINKS = {
+    "fmt.print",
+    "log.print",
+    "log.printf",
+    "http.post",
+    "http.client.do",
+    "exec.command",
+    "responsewriter.write",
+}
 
 
 def analyze_go_file(
@@ -123,6 +133,17 @@ def analyze_go_file(
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
+            if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)) and _is_secret_exposure(call_name):
+                edges.append(
+                    Edge(
+                        EDGE_EXPOSES_SECRET,
+                        sink_source,
+                        call_name,
+                        rel,
+                        line_no,
+                        {"reason": "secret passed to exposure sink"},
+                    )
+                )
             if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 taint_source = source_key or _tainted_source_for_line(line, tainted)
@@ -220,3 +241,8 @@ def _is_sink(call_name: str, custom_sinks: tuple[str, ...] = ()) -> bool:
     return any(sink in lowered for sink in SINK_CALLS) or any(
         sink.lower() in lowered for sink in custom_sinks
     )
+
+
+def _is_secret_exposure(call_name: str) -> bool:
+    lowered = call_name.lower()
+    return any(sink in lowered for sink in SECRET_EXPOSURE_SINKS)
