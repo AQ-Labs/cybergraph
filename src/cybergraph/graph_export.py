@@ -99,7 +99,16 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
     _attach_findings(nodes, finding_rows)
 
     attack_paths = [
-        {"entrypoint": path.entrypoint, "sink": path.sink, "nodes": list(path.nodes)}
+        {
+            "entrypoint": path.entrypoint,
+            "sink": path.sink,
+            "nodes": list(path.nodes),
+            "confidence": path.confidence,
+            "sanitized": path.sanitized,
+            "data_reachable": path.data_reachable,
+            "taint_sources": list(path.taint_sources),
+            "reasons": list(path.reasons),
+        }
         for path in find_attack_paths(repo_root, limit=50)
     ]
     layers = [asdict(layer) for layer in summarize_layers(repo_root)]

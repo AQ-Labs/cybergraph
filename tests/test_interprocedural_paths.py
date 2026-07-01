@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cybergraph.build import build_graph
-from cybergraph.security.attack_paths import find_attack_paths
+from cybergraph.security.attack_paths import find_attack_paths, format_attack_paths
 
 
 def _multi_file_repo(tmp_path: Path) -> Path:
@@ -79,3 +79,25 @@ def test_confidence_present_on_every_path(tmp_path: Path) -> None:
     repo = _multi_file_repo(tmp_path)
     for path in find_attack_paths(repo):
         assert path.confidence in {"high", "medium", "low"}
+
+
+def test_tainted_sink_path_reports_data_reachability(tmp_path: Path) -> None:
+    repo = tmp_path / "tainted"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "@app.get('/search')\n"
+        "def search(request):\n"
+        "    q = request.query['q']\n"
+        "    return db.execute('select ' + q)\n",
+        encoding="utf-8",
+    )
+    build_graph(repo)
+
+    paths = find_attack_paths(repo)
+    tainted = [path for path in paths if path.sink == "db.execute"]
+
+    assert tainted
+    assert tainted[0].data_reachable is True
+    assert tainted[0].taint_sources
+    assert any("user-controlled data reaches" in reason for reason in tainted[0].reasons)
+    assert "data=tainted" in format_attack_paths(tainted)

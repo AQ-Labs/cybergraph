@@ -11,6 +11,7 @@ behaviour for ablation.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
     EDGE_REACHES_SINK,
     EDGE_SANITIZES,
+    EDGE_TAINTS,
 )
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -34,6 +36,9 @@ class AttackPath:
     nodes: tuple[str, ...]
     confidence: str = "high"
     sanitized: bool = False
+    data_reachable: bool = False
+    taint_sources: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
 
 
 def find_attack_paths(
@@ -73,7 +78,9 @@ def find_attack_paths(
                 confidence = _confidence_from_properties(row["properties"])
                 callgraph.setdefault(row["source"], []).append((row["target"], confidence))
 
-        return _traverse(entrypoints, sinks, sanitizers, callgraph, max_depth, limit)
+        taints = _load_taints(store)
+
+        return _traverse(entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit)
     finally:
         store.close()
 
@@ -83,6 +90,7 @@ def _traverse(
     sinks: dict[str, list[str]],
     sanitizers: set[str],
     callgraph: dict[str, list[tuple[str, str]]],
+    taints: dict[tuple[str, str], tuple[str, ...]],
     max_depth: int,
     limit: int,
 ) -> list[AttackPath]:
@@ -106,6 +114,15 @@ def _traverse(
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
+                taint_sources = taints.get((node, sink_name), ())
+                reasons = _path_reasons(
+                    path=path,
+                    sink_name=sink_name,
+                    confidence=_RANK_CONF[conf_rank],
+                    sanitized=sanitized,
+                    taint_sources=taint_sources,
+                    interprocedural=bool(callgraph),
+                )
                 paths.append(
                     AttackPath(
                         entrypoint=entry,
@@ -113,6 +130,9 @@ def _traverse(
                         nodes=path + (sink_name,),
                         confidence=_RANK_CONF[conf_rank],
                         sanitized=sanitized,
+                        data_reachable=bool(taint_sources),
+                        taint_sources=taint_sources,
+                        reasons=reasons,
                     )
                 )
                 if len(paths) >= limit:
@@ -143,18 +163,74 @@ def format_attack_paths(paths: list[AttackPath]) -> str:
         flags = f"confidence={path.confidence}"
         if path.sanitized:
             flags += ", validated"
+        flags += ", data=tainted" if path.data_reachable else ", data=structural-only"
         lines.append(f"- {path.entrypoint} -> {path.sink} ({flags})")
         lines.append(f"  path: {' -> '.join(path.nodes)}")
+        if path.taint_sources:
+            lines.append(f"  user input: {', '.join(path.taint_sources)}")
+        if path.reasons:
+            lines.append(f"  why: {'; '.join(path.reasons)}")
     return "\n".join(lines)
+
+
+def _load_taints(store: GraphStore) -> dict[tuple[str, str], tuple[str, ...]]:
+    """Map (function, sink) pairs to user-controlled data-flow source labels."""
+    source_names = {
+        row["key"]: row["name"]
+        for row in store.conn.execute("SELECT key, name FROM nodes WHERE kind IN ('Input', 'DataFlow')")
+    }
+    taints: dict[tuple[str, str], set[str]] = {}
+    for row in store.conn.execute(
+        "SELECT source, target, properties FROM edges WHERE kind = ?", (EDGE_TAINTS,)
+    ):
+        props = _loads(row["properties"])
+        function = props.get("function")
+        if not function:
+            continue
+        label = source_names.get(row["source"], row["source"])
+        taints.setdefault((function, row["target"]), set()).add(label)
+    return {key: tuple(sorted(values)) for key, values in taints.items()}
+
+
+def _path_reasons(
+    path: tuple[str, ...],
+    sink_name: str,
+    confidence: str,
+    sanitized: bool,
+    taint_sources: tuple[str, ...],
+    interprocedural: bool,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if interprocedural and len(path) > 1:
+        reasons.append("follows resolved calls across functions")
+    else:
+        reasons.append("sink is directly reachable from the entrypoint scope")
+    if taint_sources:
+        reasons.append(f"user-controlled data reaches `{sink_name}`")
+    else:
+        reasons.append("no user-controlled argument evidence was found for the sink")
+    if sanitized:
+        reasons.append("a sanitizer or validation barrier appears on the path")
+    reasons.append(f"confidence is {confidence}")
+    return tuple(reasons)
 
 
 def _confidence_from_properties(raw: str | None) -> str:
     if not raw:
         return "high"
-    import json
 
     try:
         props = json.loads(raw)
     except (TypeError, ValueError):
         return "high"
     return props.get("confidence", "high") if isinstance(props, dict) else "high"
+
+
+def _loads(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
