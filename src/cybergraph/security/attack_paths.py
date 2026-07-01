@@ -24,6 +24,7 @@ from cybergraph.security.ontology import (
     EDGE_SANITIZES,
     EDGE_TAINTS,
 )
+from cybergraph.security.risk import RiskScore, score_risk
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 _RANK_CONF = {3: "high", 2: "medium", 1: "low"}
@@ -39,6 +40,7 @@ class AttackPath:
     data_reachable: bool = False
     taint_sources: tuple[str, ...] = ()
     reasons: tuple[str, ...] = ()
+    risk: RiskScore | None = None
 
 
 def find_attack_paths(
@@ -115,6 +117,7 @@ def _traverse(
                     continue
                 seen_paths.add(key)
                 taint_sources = taints.get((node, sink_name), ())
+                risk = _score_attack_path(sink_name, bool(taint_sources), sanitized, _RANK_CONF[conf_rank])
                 reasons = _path_reasons(
                     path=path,
                     sink_name=sink_name,
@@ -133,6 +136,7 @@ def _traverse(
                         data_reachable=bool(taint_sources),
                         taint_sources=taint_sources,
                         reasons=reasons,
+                        risk=risk,
                     )
                 )
                 if len(paths) >= limit:
@@ -164,6 +168,8 @@ def format_attack_paths(paths: list[AttackPath]) -> str:
         if path.sanitized:
             flags += ", validated"
         flags += ", data=tainted" if path.data_reachable else ", data=structural-only"
+        if path.risk:
+            flags += f", risk={path.risk.label}/{path.risk.score}"
         lines.append(f"- {path.entrypoint} -> {path.sink} ({flags})")
         lines.append(f"  path: {' -> '.join(path.nodes)}")
         if path.taint_sources:
@@ -171,6 +177,28 @@ def format_attack_paths(paths: list[AttackPath]) -> str:
         if path.reasons:
             lines.append(f"  why: {'; '.join(path.reasons)}")
     return "\n".join(lines)
+
+
+def _score_attack_path(
+    sink_name: str,
+    data_reachable: bool,
+    sanitized: bool,
+    confidence: str,
+) -> RiskScore:
+    lowered = sink_name.lower()
+    impact = 0.9 if any(token in lowered for token in ("exec", "shell", "eval", "command")) else 0.75
+    if any(token in lowered for token in ("execute", "query", "sql")):
+        impact = max(impact, 0.85)
+    if any(token in lowered for token in ("open", "read", "write", "file")):
+        impact = max(impact, 0.7)
+    return score_risk(
+        reachability=1.0 if data_reachable else 0.6,
+        exposure=1.0,
+        exploitability=0.85 if data_reachable else 0.45,
+        impact=impact,
+        controls=0.35 if sanitized else 0.0,
+        confidence=confidence,
+    )
 
 
 def _load_taints(store: GraphStore) -> dict[tuple[str, str], tuple[str, ...]]:

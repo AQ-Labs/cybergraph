@@ -108,6 +108,12 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
             "data_reachable": path.data_reachable,
             "taint_sources": list(path.taint_sources),
             "reasons": list(path.reasons),
+            "risk": {
+                "score": path.risk.score,
+                "label": path.risk.label,
+                "factors": path.risk.factors,
+                "rationale": path.risk.rationale,
+            } if path.risk else None,
         }
         for path in find_attack_paths(repo_root, limit=50)
     ]

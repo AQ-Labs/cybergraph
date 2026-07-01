@@ -26,6 +26,7 @@ from pathlib import Path
 
 from cybergraph.graph import GraphStore
 from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_USES_DEPENDENCY
+from cybergraph.security.risk import RiskScore, score_dependency_vulnerability
 from cybergraph.security.vulnerabilities import EDGE_AFFECTS_DEPENDENCY
 
 TIER_ENTRYPOINT = "entrypoint-reachable"
@@ -49,6 +50,7 @@ class VulnPriority:
     epss_score: float | None = None
     kev: bool = False
     exploit_maturity: str = ""
+    risk: RiskScore | None = None
 
 
 def _severity_weight(severity: str) -> int:
@@ -141,6 +143,16 @@ def prioritize_vulnerabilities(repo_root: Path) -> list[VulnPriority]:
 
         score = _severity_weight(severity) * _REACH_WEIGHT[tier]
         files = sorted(using_files)
+        epss = _optional_float(props.get("epss_score"))
+        kev = bool(props.get("kev"))
+        exploit_maturity = str(props.get("exploit_maturity") or "")
+        risk = score_dependency_vulnerability(
+            severity=severity,
+            reach_tier=tier,
+            epss_score=epss,
+            kev=kev,
+            exploit_maturity=exploit_maturity,
+        )
         results.append(
             VulnPriority(
                 vuln_id=vuln_id,
@@ -151,13 +163,14 @@ def prioritize_vulnerabilities(repo_root: Path) -> list[VulnPriority]:
                 score=score,
                 priority=_priority_label(score),
                 rationale=_rationale(severity, tier, package, files, bool(dep_keys), props),
-                epss_score=_optional_float(props.get("epss_score")),
-                kev=bool(props.get("kev")),
-                exploit_maturity=str(props.get("exploit_maturity") or ""),
+                epss_score=epss,
+                kev=kev,
+                exploit_maturity=exploit_maturity,
+                risk=risk,
             )
         )
 
-    results.sort(key=lambda v: (-v.score, -_severity_weight(v.severity), v.vuln_id))
+    results.sort(key=lambda v: (-(v.risk.score if v.risk else 0), -v.score, v.vuln_id))
     return results
 
 
@@ -175,6 +188,8 @@ def format_sca(results: list[VulnPriority]) -> str:
             f"  [{r.priority.upper()}] {r.vuln_id}  {r.package}  "
             f"(severity={r.severity}, {r.reach_tier}, score={r.score})"
         )
+        if r.risk:
+            lines.append(f"      Risk: {r.risk.label.upper()} {r.risk.score}/100 ({r.risk.rationale})")
         lines.append(f"      {r.rationale}")
     return "\n".join(lines)
 

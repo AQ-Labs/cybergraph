@@ -22,6 +22,7 @@ from pathlib import Path
 
 from cybergraph.graph import GraphStore
 from cybergraph.security.ontology import EDGE_REFERENCES_RESOLVED
+from cybergraph.security.risk import RiskScore, score_risk
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class IacAttackPath:
     nodes: tuple[str, ...]
     confidence: str
     files: tuple[str, ...]
+    risk: RiskScore | None = None
 
 
 def _confidence(hops: int) -> str:
@@ -89,6 +91,7 @@ def find_iac_attack_paths(repo_root: Path, max_depth: int = 6, limit: int = 20) 
                     nodes=node_names,
                     confidence=_confidence(len(path_keys) - 1),
                     files=path_files,
+                    risk=_score_iac_path(len(path_keys) - 1),
                 )
             )
             if len(paths) >= limit:
@@ -128,8 +131,20 @@ def format_iac_attack_paths(paths: list[IacAttackPath]) -> str:
         )
     lines = ["Cloud attack paths (public exposure -> privileged resource):"]
     for path in paths:
-        lines.append(f"- {path.entrypoint} -> {path.sink} (confidence={path.confidence})")
+        risk = f", risk={path.risk.label}/{path.risk.score}" if path.risk else ""
+        lines.append(f"- {path.entrypoint} -> {path.sink} (confidence={path.confidence}{risk})")
         lines.append(f"  path: {' -> '.join(path.nodes)}")
         if path.files:
             lines.append(f"  in: {', '.join(path.files)}")
     return "\n".join(lines)
+
+
+def _score_iac_path(hops: int) -> RiskScore:
+    return score_risk(
+        reachability=1.0 if hops <= 2 else 0.75,
+        exposure=1.0,
+        exploitability=0.8,
+        impact=0.9,
+        controls=0.0,
+        confidence=_confidence(hops),
+    )
