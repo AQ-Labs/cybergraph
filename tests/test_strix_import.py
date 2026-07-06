@@ -48,6 +48,22 @@ def test_import_strix_findings_persist_in_graph(tmp_path: Path) -> None:
     assert rows[0]["cwe"] == "CWE-863"
 
 
+def test_import_strix_findings_is_idempotent(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".cybergraph").mkdir(parents=True)
+    findings = load_strix_findings(FIXTURE)
+
+    store = GraphStore.open_for_repo(repo)
+    store.add_findings(findings)
+    store.add_findings(findings)
+    count = store.conn.execute(
+        "SELECT COUNT(*) FROM findings WHERE tool = ?", (VALIDATED_TOOL,)
+    ).fetchone()[0]
+    store.close()
+
+    assert count == 1
+
+
 def test_validated_finding_scores_higher_than_static_equivalent() -> None:
     validated = score_validated_finding("high", cvss=7.5)
     # A validated finding is proven reachable + exploitable: it should land in the

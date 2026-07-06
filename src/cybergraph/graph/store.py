@@ -140,7 +140,16 @@ class GraphStore:
                 """
                 INSERT INTO findings(rule_id, severity, message, file_path, line_start,
                                      line_end, cwe, owasp, tool, evidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM findings
+                    WHERE rule_id = ?
+                      AND tool = ?
+                      AND file_path = ?
+                      AND line_start = ?
+                      AND line_end = ?
+                      AND message = ?
+                )
                 """,
                 [
                     (
@@ -154,6 +163,12 @@ class GraphStore:
                         f.owasp,
                         f.tool,
                         f.evidence,
+                        f.rule_id,
+                        f.tool,
+                        f.file_path,
+                        f.line_start,
+                        f.line_end,
+                        f.message,
                     )
                     for f in findings
                 ],
