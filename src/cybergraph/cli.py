@@ -203,6 +203,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _validate_json_report(path: Path) -> str | None:
+    """Return a human-readable error if ``path`` is not a readable JSON file.
+
+    Import commands take a scanner/advisory report path; a missing file or
+    truncated/invalid JSON is a common user mistake that should produce a clear
+    message and a non-zero exit code rather than a raw Python traceback.
+    """
+    if not path.exists():
+        return f"Report file not found: {path}"
+    if path.is_dir():
+        return f"Expected a JSON file but got a directory: {path}"
+    try:
+        import json as _json
+
+        _json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return f"Could not parse JSON report {path}: {exc}"
+    except OSError as exc:
+        return f"Could not read report {path}: {exc}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -221,13 +243,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Scanned {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
     elif args.command == "import-report":
+        report_path = Path(args.report).resolve()
+        error = _validate_json_report(report_path)
+        if error:
+            parser.exit(2, f"{error}\n")
         store = GraphStore.open_for_repo(repo)
-        findings = load_scanner_findings(Path(args.report).resolve())
+        findings = load_scanner_findings(report_path)
         store.add_findings(findings)
         store.close()
         print(f"Imported {len(findings)} finding(s) into {repo / '.cybergraph' / 'graph.db'}")
     elif args.command == "import-vulns":
-        counts = import_vulnerability_report(repo, Path(args.report).resolve())
+        report_path = Path(args.report).resolve()
+        error = _validate_json_report(report_path)
+        if error:
+            parser.exit(2, f"{error}\n")
+        counts = import_vulnerability_report(repo, report_path)
         print(
             f"Imported {counts['vulnerabilities']} vulnerabilit(y/ies); "
             f"matched {counts['matched_dependencies']} dependency node(s)"
@@ -246,7 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "enrich-vulns":
         from .security.vulnerabilities import enrich_vulnerabilities
 
-        counts = enrich_vulnerabilities(repo, Path(args.report).resolve())
+        report_path = Path(args.report).resolve()
+        error = _validate_json_report(report_path)
+        if error:
+            parser.exit(2, f"{error}\n")
+        counts = enrich_vulnerabilities(repo, report_path)
         print(
             f"Loaded {counts['advisories']} advisory record(s); "
             f"enriched {counts['matched_vulnerabilities']} vulnerabilit(y/ies)"

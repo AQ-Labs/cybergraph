@@ -16,6 +16,10 @@ strix_runs/
 *.db
 *.sqlite
 
+# Default CyberGraph output artifacts
+cybergraph.sarif
+cybergraph-pr-comment.md
+
 # Build output
 dist/
 build/
