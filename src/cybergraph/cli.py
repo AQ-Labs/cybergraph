@@ -55,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     import_vulns.add_argument("report", help="Path to vulnerability report JSON")
     import_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
 
+    import_strix = sub.add_parser(
+        "import-strix",
+        help="Import PoC-validated findings from a Strix AI pentest run into the graph",
+    )
+    import_strix.add_argument(
+        "run", help="Path to a Strix run directory or its vulnerabilities.json"
+    )
+    import_strix.add_argument("--repo", default=".", help="Repository root containing the graph")
+
     enrich_vulns = sub.add_parser(
         "enrich-vulns",
         help="Merge offline advisory intelligence (EPSS/KEV/CVSS/exploit data) into vulnerabilities",
@@ -95,6 +104,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prioritize secret exposure paths to logs, responses, network calls, and processes",
     )
     secrets.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+
+    strix_plan = sub.add_parser(
+        "strix-plan",
+        help="Generate a targeted Strix instruction file from reachable attack paths",
+    )
+    strix_plan.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+    strix_plan.add_argument(
+        "--output", help="Output Markdown path. Defaults to .cybergraph/strix-plan.md"
+    )
+    strix_plan.add_argument("--limit", type=int, default=15, help="Maximum paths to include")
+
+    strix_run = sub.add_parser(
+        "strix-run",
+        help="Run Strix scoped to reachable paths and import validated findings (needs Docker + strix)",
+    )
+    strix_run.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+    strix_run.add_argument(
+        "--scan-mode", default="quick", choices=["quick", "standard", "deep"], help="Strix scan depth"
+    )
+    strix_run.add_argument("--limit", type=int, default=15, help="Maximum paths to include in scope")
 
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
@@ -203,6 +232,17 @@ def main(argv: list[str] | None = None) -> int:
             f"Imported {counts['vulnerabilities']} vulnerabilit(y/ies); "
             f"matched {counts['matched_dependencies']} dependency node(s)"
         )
+    elif args.command == "import-strix":
+        from .security import load_strix_findings
+
+        store = GraphStore.open_for_repo(repo)
+        findings = load_strix_findings(Path(args.run).resolve())
+        store.add_findings(findings)
+        store.close()
+        print(
+            f"Imported {len(findings)} PoC-validated Strix finding(s) into "
+            f"{repo / '.cybergraph' / 'graph.db'}"
+        )
     elif args.command == "enrich-vulns":
         from .security.vulnerabilities import enrich_vulnerabilities
 
@@ -244,6 +284,20 @@ def main(argv: list[str] | None = None) -> int:
 
         build_graph(repo)
         print(format_secret_exposures(find_secret_exposures(repo)))
+    elif args.command == "strix-plan":
+        from .security.strix_plan import write_strix_instructions
+
+        build_graph(repo)
+        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "strix-plan.md"
+        written = write_strix_instructions(repo, output, limit=args.limit)
+        print(f"Wrote Strix instruction file: {written}")
+    elif args.command == "strix-run":
+        from .security.strix_runner import run_strix
+
+        build_graph(repo)
+        result = run_strix(repo, scan_mode=args.scan_mode, limit=args.limit)
+        print(result.message)
+        return 0 if result.ran else 1
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "pr-comment":

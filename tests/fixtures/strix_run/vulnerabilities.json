@@ -1,0 +1,26 @@
+[
+  {
+    "id": "vuln-0001",
+    "title": "Broken Function-Level Authorization on GET /users",
+    "severity": "high",
+    "timestamp": "2026-07-06 10:36:51 UTC",
+    "description": "The GET /users endpoint allows callers to access an administrator-only function without valid administrator credentials.",
+    "impact": "A remote attacker can invoke an administrative user-listing function without authentication and receive administrator data.",
+    "target": "vulnerable-fastapi application",
+    "poc_description": "Send GET /users?name=alice with no Authorization header and observe 200 OK with admin data.",
+    "poc_script_code": "import requests\nrequests.get('http://127.0.0.1:8000/users', params={'name': 'alice'})",
+    "cvss": 7.5,
+    "endpoint": "/users",
+    "method": "GET",
+    "cwe": "CWE-863",
+    "code_locations": [
+      {
+        "file": "app.py",
+        "start_line": 6,
+        "end_line": 8,
+        "snippet": "def require_admin(request: Request) -> bool:"
+      }
+    ],
+    "agent_name": "Auth Reporting Agent"
+  }
+]

@@ -23,7 +23,9 @@ def build_graph(repo_root: Path) -> dict[str, int]:
     repo_root = repo_root.resolve()
     config = load_config(repo_root)
     store = GraphStore.open_for_repo(repo_root)
-    store.clear()
+    # Preserve findings imported from external tools (Semgrep/SARIF/Gitleaks/Strix)
+    # across rebuilds; only analyzer-generated findings are regenerated below.
+    store.clear_for_rebuild()
 
     nodes: list[Node] = []
     edges: list[Edge] = []

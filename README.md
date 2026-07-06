@@ -61,6 +61,8 @@ cybergraph secrets path/to/repo
 cybergraph cloud-code path/to/repo
 cybergraph top-risks path/to/repo
 cybergraph investigate path/to/repo --output investigation.md
+cybergraph strix-plan path/to/repo --output strix-plan.md
+cybergraph import-strix strix_runs/<run> --repo path/to/repo
 cybergraph export-json path/to/repo --output graph.json
 cybergraph review --base main --repo path/to/repo
 cybergraph pr-comment --base main --repo path/to/repo --output cybergraph-pr-comment.md
@@ -93,6 +95,28 @@ cybergraph import-vulns osv-results.json --repo path/to/repo
 cybergraph enrich-vulns advisory-intel.json --repo path/to/repo
 cybergraph ask "Which high severity findings involve secrets?" --repo path/to/repo
 ```
+
+Validate reachable risk with an AI pentester ([Strix](https://github.com/usestrix/strix)):
+
+```bash
+# 1. Turn CyberGraph's reachable paths into a focused Strix scope brief
+cybergraph strix-plan path/to/repo --output strix-plan.md
+
+# 2. Run Strix yourself against that brief (needs Docker + an LLM key):
+#      strix -n -t path/to/repo -m quick --instruction-file strix-plan.md
+#    ...or let CyberGraph orchestrate it end-to-end (optional, opt-in):
+cybergraph strix-run path/to/repo --scan-mode quick
+
+# 3. Import Strix's PoC-validated findings back into the graph
+cybergraph import-strix strix_runs/<run-name> --repo path/to/repo
+cybergraph top-risks path/to/repo   # validated findings rank at the top
+```
+
+CyberGraph tells Strix *where* to attack (reachable routes and sinks), and Strix
+tells CyberGraph *what is actually exploitable* (validated with a working PoC).
+Strix is never a dependency — the `strix-run` bridge only activates when the
+`strix` binary and Docker are both present, so the offline-by-default workflow is
+unchanged.
 
 Suppress accepted findings:
 

@@ -79,7 +79,30 @@ cybergraph sca path/to/repo
 The advisory enrichment file is offline JSON, so EPSS, CISA KEV, CVSS, exploit
 maturity, aliases, and advisory URLs can be added without live network calls.
 
-## 8. (Optional) Let an LLM phrase the answer, grounded in evidence
+## 8. (Optional) Validate reachable risk with the Strix AI pentester
+
+CyberGraph finds *reachable* risk statically; [Strix](https://github.com/usestrix/strix)
+proves *exploitable* risk dynamically. You can chain them:
+
+```bash
+# Turn reachable attack paths into a focused Strix scope brief
+cybergraph strix-plan examples/vulnerable-fastapi --output strix-plan.md
+
+# Run Strix against that brief (needs Docker + an LLM key), or let CyberGraph do it:
+cybergraph strix-run examples/vulnerable-fastapi --scan-mode quick
+
+# Import Strix's PoC-validated findings back into the graph
+cybergraph import-strix strix_runs/<run-name> --repo examples/vulnerable-fastapi
+cybergraph top-risks examples/vulnerable-fastapi
+```
+
+Imported Strix findings are marked as PoC-validated and rank above static-only
+candidates in `top-risks` and `investigate`, because a working proof-of-concept
+is the strongest evidence a finding is real. Strix is optional and never a
+dependency: `strix-run` only activates when the `strix` binary and Docker are
+both present, and `strix-plan`/`import-strix` are pure local file operations.
+
+## 9. (Optional) Let an LLM phrase the answer, grounded in evidence
 
 CyberGraph is local-only by default. To opt into LLM phrasing, configure a
 provider and pass `--llm`:
