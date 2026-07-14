@@ -43,7 +43,7 @@ def build_sarif(repo_root: Path) -> dict[str, Any]:
                 "tool": {
                     "driver": {
                         "name": "CyberGraph",
-                        "informationUri": "https://github.com/azizur100389/cybergraph",
+                        "informationUri": "https://github.com/khan-ARK/cybergraph",
                         "rules": list(rules.values()),
                     }
                 },

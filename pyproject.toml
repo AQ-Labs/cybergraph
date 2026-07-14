@@ -25,9 +25,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/azizur100389/cybergraph"
-Repository = "https://github.com/azizur100389/cybergraph"
-Issues = "https://github.com/azizur100389/cybergraph/issues"
+Homepage = "https://github.com/khan-ARK/cybergraph"
+Repository = "https://github.com/khan-ARK/cybergraph"
+Issues = "https://github.com/khan-ARK/cybergraph/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.4"]
