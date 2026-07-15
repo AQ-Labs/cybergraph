@@ -11,8 +11,8 @@ from cybergraph.security.ontology import (
     EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
     EDGE_IMPORTS,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
@@ -26,10 +26,20 @@ ROUTE_RE = re.compile(
     r"(?P<router>\b(?:app|router|server)\s*\.\s*(?:get|post|put|patch|delete|all|use))"
     r"\s*\(\s*['\"](?P<path>[^'\"]+)['\"]"
 )
-NEXT_EXPORT_RE = re.compile(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(")
-CALL_RE = re.compile(r"(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*\(")
-IMPORT_RE = re.compile(r"""(?:import\b[^'"]*?from\s*|import\s*|require\s*\(\s*)['"](?P<mod>[^'"]+)['"]""")
-ASSIGN_RE = re.compile(r"\b(?:const|let|var)?\s*(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?P<expr>[^;]+)")
+ROUTE_HANDLER_RE = re.compile(
+    r"\b(?:app|router|server)\s*\.\s*(?:get|post|put|patch|delete|all|use)"
+    r"\s*\(\s*['\"][^'\"]+['\"]\s*,\s*(?P<handler>[A-Za-z_$][\w$]*)\b"
+)
+NEXT_EXPORT_RE = re.compile(
+    r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\("
+)
+CALL_RE = re.compile(r"(?P<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
+IMPORT_RE = re.compile(
+    r"""(?:import\b[^'"]*?from\s*|import\s*|require\s*\(\s*)['"](?P<mod>[^'"]+)['"]"""
+)
+ASSIGN_RE = re.compile(
+    r"\b(?:const|let|var)?\s*(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?P<expr>[^;]+)"
+)
 
 SINK_CALLS = {
     "db.query",
@@ -44,7 +54,14 @@ SINK_CALLS = {
     "res.render",
 }
 SECRET_MARKERS = {"process.env", "secret", "password", "token", "api_key", "apikey"}
-INPUT_MARKERS = {"req.query", "req.body", "req.params", "req.headers", "request.query", "request.body"}
+INPUT_MARKERS = {
+    "req.query",
+    "req.body",
+    "req.params",
+    "req.headers",
+    "request.query",
+    "request.body",
+}
 SECRET_EXPOSURE_SINKS = {
     "console.log",
     "logger.info",
@@ -101,12 +118,23 @@ def analyze_javascript_file(
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
             _add_input_source(key, "request", rel, line_no, nodes, edges, route_match.group("path"))
+            handler = _route_handler_name(line)
+            if handler:
+                edges.append(Edge("CALLS", key, handler, rel, line_no, {"via": "express-route"}))
 
         if NEXT_EXPORT_RE.search(line):
             method = NEXT_EXPORT_RE.search(line).group(1)
             key = f"{rel}::route:{method}:{line_no}"
             nodes.append(
-                Node("Entrypoint", key, key.rsplit(":", 2)[1], rel, line_no, line_no, {"framework": "nextjs"})
+                Node(
+                    "Entrypoint",
+                    key,
+                    key.rsplit(":", 2)[1],
+                    rel,
+                    line_no,
+                    line_no,
+                    {"framework": "nextjs"},
+                )
             )
             edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, line_no))
             _add_input_source(key, "request", rel, line_no, nodes, edges, method)
@@ -137,6 +165,9 @@ def analyze_javascript_file(
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
+            if _is_declaration_call(line, call.start()):
+                continue
+            edges.append(Edge("CALLS", sink_source, call_name, rel, line_no))
             if _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if not is_inline_suppressed(lines, line_no, "CG-JS-SINK-CALL"):
@@ -144,7 +175,10 @@ def analyze_javascript_file(
                         Finding(
                             rule_id="CG-JS-SINK-CALL",
                             severity="medium",
-                            message=f"JavaScript/TypeScript file reaches sensitive sink `{call_name}`",
+                            message=(
+                                "JavaScript/TypeScript file reaches sensitive sink "
+                                f"`{call_name}`"
+                            ),
                             file_path=rel,
                             line_start=line_no,
                             cwe="CWE-20",
@@ -271,6 +305,19 @@ def _function_lines(lines: list[str]) -> list[tuple[str, int]]:
         if match:
             found.append((match.group("name") or match.group("var"), line_no))
     return found
+
+
+def _route_handler_name(line: str) -> str:
+    match = ROUTE_HANDLER_RE.search(line)
+    if not match:
+        return ""
+    handler = match.group("handler")
+    return "" if handler in {"async", "function"} else handler
+
+
+def _is_declaration_call(line: str, start: int) -> bool:
+    prefix = line[:start].strip()
+    return prefix.endswith("function") or prefix.endswith("function*")
 
 
 def _classify_js_name(name: str) -> dict[str, bool]:

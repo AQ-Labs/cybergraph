@@ -16,7 +16,7 @@ def is_inline_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
         if index < 0 or index >= len(lines):
             continue
         marker = _inline_marker_text(lines[index])
-        if marker and _matches_rule(marker, rule_id):
+        if marker is not None and _matches_rule(marker, rule_id):
             return True
     return False
 
@@ -31,11 +31,11 @@ def is_config_suppressed(finding: Finding, config: CyberGraphConfig) -> bool:
     return any(fnmatch(finding.file_path, pattern) for pattern in config.suppressed_paths)
 
 
-def _inline_marker_text(line: str) -> str:
+def _inline_marker_text(line: str) -> str | None:
     lowered = line.lower()
     marker_at = lowered.find(INLINE_MARKER)
     if marker_at == -1:
-        return ""
+        return None
     return lowered[marker_at + len(INLINE_MARKER) :].strip()
 
 

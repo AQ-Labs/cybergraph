@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from cybergraph.graph import Edge, Node
-
 
 MANIFEST_NAMES = {
     "package.json",
@@ -33,13 +33,23 @@ def is_dependency_manifest(path: Path) -> bool:
 
 def analyze_dependency_manifest(path: Path, repo_root: Path) -> tuple[list[Node], list[Edge]]:
     rel = path.relative_to(repo_root).as_posix()
-    manifest = Node("DependencyManifest", rel, path.name, rel, 1, _line_count(path), {"layer": "dependency"})
+    manifest = Node(
+        "DependencyManifest",
+        rel,
+        path.name,
+        rel,
+        1,
+        _line_count(path),
+        {"layer": "dependency"},
+    )
     dependencies = _extract_dependencies(path)
     nodes = [manifest]
     edges: list[Edge] = []
     for name, spec in dependencies.items():
         key = f"{rel}::{name}"
-        nodes.append(Node("Dependency", key, name, rel, 0, 0, {"version": spec, "layer": "dependency"}))
+        nodes.append(
+            Node("Dependency", key, name, rel, 0, 0, {"version": spec, "layer": "dependency"})
+        )
         edges.append(Edge("DECLARES_DEPENDENCY", rel, key, rel, 0, {"version": spec}))
     return nodes, edges
 
@@ -119,7 +129,10 @@ def _yarn_lock_dependencies(path: Path) -> dict[str, str]:
     current: list[str] = []
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         if raw and not raw.startswith((" ", "\t")) and raw.rstrip().endswith(":"):
-            current = [_package_from_yarn_selector(part.strip().strip("'\"")) for part in raw[:-1].split(",")]
+            current = [
+                _package_from_yarn_selector(part.strip().strip("'\""))
+                for part in raw[:-1].split(",")
+            ]
             current = [name for name in current if name]
             continue
         version_match = re.match(r"\s*version\s+\"(?P<version>[^\"]+)\"", raw)
@@ -155,19 +168,56 @@ def _requirements_dependencies(path: Path) -> dict[str, str]:
 
 def _pyproject_dependencies(path: Path) -> dict[str, str]:
     deps: dict[str, str] = {}
-    in_dependencies = False
-    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw.strip()
-        if line.startswith("dependencies") and "[" in line:
-            in_dependencies = True
-            continue
-        if in_dependencies and line.startswith("]"):
-            break
-        if in_dependencies:
-            dep = line.strip(",").strip("\"'")
-            if dep:
-                deps.update(_requirements_dependencies_from_line(dep))
+    array_text = _toml_array_value(
+        path.read_text(encoding="utf-8", errors="ignore"), "dependencies"
+    )
+    if not array_text:
+        return deps
+    try:
+        values = ast.literal_eval(array_text)
+    except (SyntaxError, ValueError):
+        return deps
+    if not isinstance(values, list):
+        return deps
+    for value in values:
+        if isinstance(value, str):
+            deps.update(_requirements_dependencies_from_line(value))
     return deps
+
+
+def _toml_array_value(text: str, key: str) -> str:
+    """Extract a simple TOML array assigned to ``key``.
+
+    PEP 621 project dependencies are string arrays. Using the bracket span avoids
+    the previous line scanner bug where single-line arrays were skipped and the
+    parser kept reading unrelated sections as dependencies.
+    """
+    match = re.search(rf"(?m)^\s*{re.escape(key)}\s*=\s*\[", text)
+    if not match:
+        return ""
+    start = match.end() - 1
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
 
 
 def _poetry_lock_dependencies(path: Path) -> dict[str, str]:

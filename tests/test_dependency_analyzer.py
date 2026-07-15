@@ -31,6 +31,47 @@ def test_dependency_manifest_analyzer_reads_requirements(tmp_path: Path) -> None
     assert any(node.kind == "Dependency" and node.name == "uvicorn" for node in nodes)
 
 
+def test_dependency_manifest_analyzer_reads_inline_pyproject_dependencies(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    pyproject = repo / "pyproject.toml"
+    pyproject.write_text(
+        "[project]\n"
+        "dependencies = [\"requests>=2.28\", \"flask\"]\n"
+        "\n[project.urls]\n"
+        "Homepage = \"https://example.com\"\n",
+        encoding="utf-8",
+    )
+
+    nodes, _edges = analyze_dependency_manifest(pyproject, repo)
+    dependencies = {
+        node.name: node.properties["version"] for node in nodes if node.kind == "Dependency"
+    }
+
+    assert dependencies == {"requests": ">=2.28", "flask": ""}
+
+
+def test_dependency_manifest_analyzer_reads_multiline_pyproject_deps(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    pyproject = repo / "pyproject.toml"
+    pyproject.write_text(
+        "[project]\n"
+        "dependencies = [\n"
+        "  \"fastapi==0.110.0\",\n"
+        "  \"uvicorn>=0.29\",\n"
+        "]\n",
+        encoding="utf-8",
+    )
+
+    nodes, _edges = analyze_dependency_manifest(pyproject, repo)
+    dependencies = {
+        node.name: node.properties["version"] for node in nodes if node.kind == "Dependency"
+    }
+
+    assert dependencies == {"fastapi": "==0.110.0", "uvicorn": ">=0.29"}
+
+
 def test_dependency_manifest_analyzer_reads_common_lockfiles(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -50,7 +91,9 @@ def test_dependency_manifest_analyzer_reads_common_lockfiles(tmp_path: Path) -> 
 
     assert any(node.kind == "Dependency" and node.name == "express" for node in package_nodes)
     assert any(node.kind == "Dependency" and node.name == "fastapi" for node in poetry_nodes)
-    assert any(node.kind == "Dependency" and node.name == "github.com/gin-gonic/gin" for node in go_nodes)
+    assert any(
+        node.kind == "Dependency" and node.name == "github.com/gin-gonic/gin" for node in go_nodes
+    )
 
 
 def test_dependency_manifest_analyzer_reads_jvm_and_dotnet_manifests(tmp_path: Path) -> None:
@@ -64,7 +107,9 @@ def test_dependency_manifest_analyzer_reads_jvm_and_dotnet_manifests(tmp_path: P
     )
     csproj = repo / "App.csproj"
     csproj.write_text(
-        '<Project><ItemGroup><PackageReference Include="Dapper" Version="2.1.35" /></ItemGroup></Project>',
+        "<Project><ItemGroup>"
+        '<PackageReference Include="Dapper" Version="2.1.35" />'
+        "</ItemGroup></Project>",
         encoding="utf-8",
     )
 

@@ -48,6 +48,23 @@ def test_python_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> 
     assert findings == []
 
 
+def test_python_analyzer_respects_bare_inline_suppression(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.py"
+    app.write_text(
+        "def handler():\n"
+        "    # cybergraph: ignore\n"
+        "    return db.execute('select 1')\n",
+        encoding="utf-8",
+    )
+
+    _nodes, edges, findings = analyze_python_file(app, repo)
+
+    assert any(edge.kind == "REACHES_SINK" for edge in edges)
+    assert findings == []
+
+
 def test_python_analyzer_maps_fastapi_depends_guards(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
