@@ -12,6 +12,7 @@ htmlcov/
 
 # CyberGraph local data
 .cybergraph/
+.code-review-graph/
 strix_runs/
 *.db
 *.sqlite
