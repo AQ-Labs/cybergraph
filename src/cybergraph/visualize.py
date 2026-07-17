@@ -245,14 +245,14 @@ _HTML_TEMPLATE = """<!doctype html>
   <title>CyberGraph Report</title>
   <style>
     :root { color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif; }
-    body { margin: 0; background: #f7f8fa; color: #161b22; }
-    header { background: #0b1220; color: white; padding: 28px 36px; }
-    main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; }
+    body { margin: 0; background: #f5f7fb; color: #111827; }
+    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; }
+    main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
     .muted { color: #667085; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .stat, table { background: white; border: 1px solid #d0d7de; border-radius: 8px; }
+    .stat, table { background: white; border: 1px solid #d8e0ea; border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
     .stat { padding: 16px; }
     .stat strong { display: block; font-size: 26px; margin-top: 4px; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; }
@@ -267,15 +267,31 @@ _HTML_TEMPLATE = """<!doctype html>
     .toolbar button { cursor: pointer; }
     .toolbar button:hover { background: #eef2f7; }
     code { color: #7c2d12; }
-    .explorer { display: grid; grid-template-columns: 1fr 300px; gap: 12px; }
-    #cy { height: 540px; background: #ffffff; border: 1px solid #d0d7de; border-radius: 8px; }
-    .details { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; height: 540px; overflow: auto; font-size: 13px; }
+    .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
+    .graph-card, .details {
+      background: white; border: 1px solid #d8e0ea; border-radius: 16px;
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+    }
+    .graph-card { overflow: hidden; }
+    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: linear-gradient(180deg, #ffffff, #f8fafc); }
+    .graph-title { font-weight: 700; }
+    .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
+    .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
+    #cy { height: 640px; background: linear-gradient(135deg, #f8fafc, #ffffff 58%, #f1f5f9); }
+    .details { padding: 14px; height: 668px; overflow: auto; font-size: 13px; }
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
     .details .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; color: white; }
     .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 14px; font-size: 12px; color: #475467; }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+    .mode-help { margin: -4px 0 12px; color: #64748b; font-size: 13px; }
+    .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
+    .risk-card { border: 1px solid #e2e8f0; background: #fff; border-radius: 12px; padding: 11px; cursor: pointer; }
+    .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
+    .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
+    .risk-card span { color: #64748b; font-size: 12px; }
+    .risk-score { float: right; color: #dc2626; font-weight: 700; }
     @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
   </style>
 </head>
@@ -296,7 +312,15 @@ _HTML_TEMPLATE = """<!doctype html>
     __TOP_RISKS_TABLE__
 
     <h2>Interactive Graph Explorer</h2>
+    <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
+    <div class="risk-strip" id="cg-risk-strip"></div>
     <div class="toolbar">
+      <select id="cg-mode" aria-label="Graph view mode">
+        <option value="paths">View: attack paths</option>
+        <option value="risks">View: top-risk neighborhoods</option>
+        <option value="modules">View: module map</option>
+        <option value="raw">View: raw graph</option>
+      </select>
       <input id="cg-search" type="search" placeholder="Search nodes by name, file, or group">
       <select id="cg-layer" aria-label="Filter by security layer">
         <option value="">All layers</option>
@@ -323,7 +347,16 @@ _HTML_TEMPLATE = """<!doctype html>
     </div>
     __LEGEND__
     <div class="explorer">
-      <div id="cy"></div>
+      <div class="graph-card">
+        <div class="graph-head">
+          <div>
+            <div class="graph-title" id="cg-view-title">Attack Path Explorer</div>
+            <div class="graph-subtitle" id="cg-view-subtitle">Focused view of the highest-risk entrypoint-to-sink paths.</div>
+          </div>
+          <div class="graph-badge" id="cg-view-counts">0 nodes</div>
+        </div>
+        <div id="cy"></div>
+      </div>
       <div class="details" id="cg-details"><p class="muted">Click a node to inspect its security evidence.</p></div>
     </div>
 
@@ -350,33 +383,222 @@ _HTML_TEMPLATE = """<!doctype html>
       const EDGE_COLORS = {
         EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a', SANITIZES: '#0d9488',
         REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', EXPOSES_SECRET: '#dc2626',
-        USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed'
+        USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed', PATH: '#f59e0b', MODULE_LINK: '#94a3b8'
       };
       const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0, '': -1 };
 
       if (typeof cytoscape === 'undefined' || !document.getElementById('cy')) return;
 
-      const elements = [];
-      data.nodes.forEach(function (n) {
-        elements.push({ data: Object.assign({}, n) });
+      const rawNodes = data.nodes || [];
+      const rawEdges = data.edges || [];
+      const attackPaths = (data.attack_paths || []).slice().sort(function (a, b) {
+        return ((b.risk && b.risk.score) || 0) - ((a.risk && a.risk.score) || 0);
       });
-      data.edges.forEach(function (e) {
-        elements.push({ data: { id: e.id, source: e.source, target: e.target, kind: e.kind, label: e.kind } });
-      });
+      const nodeById = new Map(rawNodes.map(function (n) { return [n.id, n]; }));
+
+      function tail(id) {
+        return String(id || '?').split('::').pop().split('/').pop();
+      }
+
+      function moduleName(file) {
+        if (!file) return 'synthetic';
+        const parts = String(file).split('/').filter(Boolean);
+        if (parts.length <= 2) return parts.join('/') || file;
+        return parts.slice(0, 3).join('/');
+      }
+
+      function cloneNode(id, overrides) {
+        const base = nodeById.get(id) || {
+          id: id,
+          label: tail(id),
+          group: 'call',
+          kind: 'Synthetic',
+          file: '',
+          line: 0,
+          severity: '',
+          findings: [],
+          properties: {},
+          synthetic: true
+        };
+        return Object.assign({}, base, overrides || {});
+      }
+
+      function makeEdge(source, target, kind, id, extra) {
+        return {
+          data: Object.assign({
+            id: id,
+            source: source,
+            target: target,
+            kind: kind || 'PATH',
+            label: kind || 'PATH'
+          }, extra || {})
+        };
+      }
+
+      function rawEdgeBetween(source, target) {
+        return rawEdges.find(function (e) { return e.source === source && e.target === target; });
+      }
+
+      function buildRawElements() {
+        const elements = [];
+        rawNodes.forEach(function (n) { elements.push({ data: Object.assign({}, n) }); });
+        rawEdges.forEach(function (e) {
+          elements.push({
+            data: {
+              id: e.id,
+              source: e.source,
+              target: e.target,
+              kind: e.kind,
+              label: e.kind
+            }
+          });
+        });
+        return {
+          elements: elements,
+          layout: { name: 'breadthfirst', directed: true, padding: 24, spacingFactor: 1.25 },
+          title: 'Raw Security Graph',
+          subtitle: 'Advanced view of the capped graph export. Use filters to reduce noise.'
+        };
+      }
+
+      function buildAttackPathElements() {
+        const elements = [];
+        const seenNodes = new Set();
+        const paths = attackPaths.slice(0, 12);
+        paths.forEach(function (path, pathIndex) {
+          const ids = path.nodes || [];
+          ids.forEach(function (id, nodeIndex) {
+            if (!seenNodes.has(id)) {
+              seenNodes.add(id);
+              const isFirst = nodeIndex === 0;
+              const isLast = nodeIndex === ids.length - 1;
+              const group = isFirst ? 'entrypoint' : (isLast ? 'sink' : undefined);
+              const risk = path.risk || {};
+              elements.push({
+                data: cloneNode(id, {
+                  group: group || (nodeById.get(id) || {}).group || 'function',
+                  severity: risk.label || (nodeById.get(id) || {}).severity || '',
+                  risk_score: risk.score || ''
+                }),
+                position: { x: 90 + nodeIndex * 230, y: 70 + pathIndex * 105 }
+              });
+            }
+          });
+          for (let i = 0; i < ids.length - 1; i++) {
+            const raw = rawEdgeBetween(ids[i], ids[i + 1]);
+            elements.push(makeEdge(
+              ids[i],
+              ids[i + 1],
+              raw ? raw.kind : 'PATH',
+              'path-' + pathIndex + '-' + i,
+              { risk_score: (path.risk && path.risk.score) || '' }
+            ));
+          }
+        });
+        return {
+          elements: elements,
+          layout: { name: 'preset', fit: true, padding: 44 },
+          title: 'Attack Path Explorer',
+          subtitle: 'Default view: the highest-risk entrypoint-to-sink paths, arranged left to right.'
+        };
+      }
+
+      function buildRiskNeighborhoodElements() {
+        const pathIds = new Set();
+        attackPaths.slice(0, 8).forEach(function (path) {
+          (path.nodes || []).forEach(function (id) { pathIds.add(id); });
+        });
+        const neighborhoodEdges = rawEdges.filter(function (e) {
+          return pathIds.has(e.source) || pathIds.has(e.target);
+        }).slice(0, 220);
+        neighborhoodEdges.forEach(function (e) {
+          pathIds.add(e.source);
+          pathIds.add(e.target);
+        });
+        const elements = [];
+        Array.from(pathIds).forEach(function (id) {
+          elements.push({ data: cloneNode(id) });
+        });
+        neighborhoodEdges.forEach(function (e) {
+          elements.push(makeEdge(e.source, e.target, e.kind, e.id));
+        });
+        return {
+          elements: elements,
+          layout: { name: 'cose', animate: false, padding: 30, idealEdgeLength: 90, nodeRepulsion: 6500 },
+          title: 'Top-Risk Neighborhoods',
+          subtitle: 'The highest-risk path nodes plus their immediate graph context.'
+        };
+      }
+
+      function buildModuleElements() {
+        const modules = new Map();
+        rawNodes.forEach(function (node) {
+          const module = moduleName(node.file);
+          const current = modules.get(module) || { findings: 0, nodes: 0, severity: '' };
+          current.nodes += 1;
+          current.findings += (node.findings || []).length;
+          if (SEV_RANK[node.severity || ''] > SEV_RANK[current.severity || '']) current.severity = node.severity;
+          modules.set(module, current);
+        });
+        const ids = Array.from(modules.keys()).sort();
+        const edgeCounts = new Map();
+        rawEdges.forEach(function (edge) {
+          const source = nodeById.get(edge.source);
+          const target = nodeById.get(edge.target);
+          const sourceModule = moduleName(source && source.file);
+          const targetModule = moduleName(target && target.file);
+          if (!sourceModule || !targetModule || sourceModule === targetModule) return;
+          const key = sourceModule + ' -> ' + targetModule;
+          edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+        });
+        const radius = Math.max(180, ids.length * 28);
+        const elements = ids.map(function (id, index) {
+          const meta = modules.get(id);
+          const angle = (Math.PI * 2 * index) / Math.max(ids.length, 1);
+          return {
+            data: {
+              id: 'module:' + id,
+              label: id,
+              group: meta.findings ? 'sink' : 'infrastructure',
+              kind: 'Module',
+              file: id,
+              line: 0,
+              severity: meta.severity,
+              findings: [],
+              synthetic: true,
+              properties: { nodes: meta.nodes, findings: meta.findings }
+            },
+            position: { x: 420 + Math.cos(angle) * radius, y: 330 + Math.sin(angle) * radius }
+          };
+        });
+        edgeCounts.forEach(function (count, key) {
+          const parts = key.split(' -> ');
+          elements.push(makeEdge('module:' + parts[0], 'module:' + parts[1], 'MODULE_LINK', 'module-edge:' + key, { weight: count }));
+        });
+        return {
+          elements: elements,
+          layout: { name: 'preset', fit: true, padding: 44 },
+          title: 'Module Map',
+          subtitle: 'A clustered overview by folder/module, useful for understanding architecture before drilling down.'
+        };
+      }
 
       const cy = cytoscape({
         container: document.getElementById('cy'),
-        elements: elements,
+        elements: [],
         wheelSensitivity: 0.2,
         style: [
           { selector: 'node', style: {
             'background-color': function (ele) { return GROUP_COLORS[ele.data('group')] || '#94a3b8'; },
-            'label': 'data(label)', 'font-size': 9, 'color': '#0b1220', 'text-wrap': 'ellipsis',
-            'text-max-width': 90, 'width': 18, 'height': 18, 'border-width': 0
+            'label': 'data(label)', 'font-size': 10, 'font-weight': 600, 'color': '#0b1220',
+            'text-wrap': 'ellipsis', 'text-max-width': 110, 'width': 24, 'height': 24,
+            'border-width': 1, 'border-color': '#ffffff'
           } },
-          { selector: 'node[group = "entrypoint"]', style: { 'width': 24, 'height': 24, 'shape': 'round-rectangle' } },
-          { selector: 'node[group = "sink"]', style: { 'shape': 'triangle', 'width': 22, 'height': 22 } },
-          { selector: 'node[group = "vulnerability"]', style: { 'shape': 'diamond' } },
+          { selector: 'node[group = "entrypoint"]', style: { 'width': 34, 'height': 26, 'shape': 'round-rectangle' } },
+          { selector: 'node[group = "sink"]', style: { 'shape': 'triangle', 'width': 30, 'height': 30 } },
+          { selector: 'node[group = "dataflow"]', style: { 'shape': 'hexagon' } },
+          { selector: 'node[group = "vulnerability"]', style: { 'shape': 'diamond', 'width': 30, 'height': 30 } },
+          { selector: 'node[kind = "Module"]', style: { 'width': 44, 'height': 44, 'font-size': 11, 'text-max-width': 140 } },
           { selector: 'node[severity = "critical"], node[severity = "high"]', style: { 'border-width': 3, 'border-color': '#dc2626' } },
           { selector: 'node[severity = "medium"]', style: { 'border-width': 2, 'border-color': '#d97706' } },
           { selector: 'edge', style: {
@@ -385,16 +607,41 @@ _HTML_TEMPLATE = """<!doctype html>
             'target-arrow-color': function (ele) { return EDGE_COLORS[ele.data('kind')] || '#cbd5e1'; },
             'arrow-scale': 0.8
           } },
-          { selector: 'edge[kind = "REACHES_SINK"]', style: { 'width': 2.4 } },
+          { selector: 'edge[kind = "REACHES_SINK"], edge[kind = "PATH"]', style: { 'width': 3.2 } },
+          { selector: 'edge[kind = "MODULE_LINK"]', style: { 'line-style': 'dashed', 'width': 2 } },
           { selector: '.cg-dim', style: { 'opacity': 0.12 } },
           { selector: '.cg-hl', style: { 'opacity': 1, 'border-width': 4, 'border-color': '#f59e0b', 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'z-index': 99 } }
         ],
-        layout: { name: 'breadthfirst', directed: true, padding: 12, spacingFactor: 1.1 }
+        layout: { name: 'preset' }
       });
+
+      function updateViewText(view, built) {
+        document.getElementById('cg-view-title').textContent = built.title;
+        document.getElementById('cg-view-subtitle').textContent = built.subtitle;
+        document.getElementById('cg-view-counts').textContent =
+          cy.nodes().length + ' nodes / ' + cy.edges().length + ' edges';
+      }
+
+      function renderMode(mode) {
+        const builders = {
+          paths: buildAttackPathElements,
+          risks: buildRiskNeighborhoodElements,
+          modules: buildModuleElements,
+          raw: buildRawElements
+        };
+        const built = (builders[mode] || buildAttackPathElements)();
+        cy.elements().remove();
+        cy.add(built.elements);
+        cy.layout(built.layout).run();
+        updateViewText(mode, built);
+        applyFilters();
+        document.getElementById('cg-details').innerHTML =
+          '<p class="muted">Click a node to inspect its security evidence.</p>';
+      }
 
       // Populate the layer filter from the groups actually present.
       const layerSelect = document.getElementById('cg-layer');
-      const present = Array.from(new Set(data.nodes.map(function (n) { return n.group; }))).sort();
+      const present = Array.from(new Set(rawNodes.map(function (n) { return n.group; }).concat(['module']))).sort();
       present.forEach(function (g) {
         const opt = document.createElement('option');
         opt.value = g; opt.textContent = g.charAt(0).toUpperCase() + g.slice(1);
@@ -403,11 +650,30 @@ _HTML_TEMPLATE = """<!doctype html>
 
       // Populate the attack-path selector.
       const pathSelect = document.getElementById('cg-path');
-      (data.attack_paths || []).forEach(function (p, i) {
+      attackPaths.forEach(function (p, i) {
         const opt = document.createElement('option');
         opt.value = String(i);
         opt.textContent = (p.entrypoint || '?') + ' → ' + (p.sink || '?');
         pathSelect.appendChild(opt);
+      });
+
+      const riskStrip = document.getElementById('cg-risk-strip');
+      attackPaths.slice(0, 6).forEach(function (p, i) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'risk-card';
+        const score = (p.risk && p.risk.score) || '?';
+        card.innerHTML = '<strong><span class="risk-score">' + esc(score) + '</span>' +
+          esc(tail(p.entrypoint)) + ' → ' + esc(tail(p.sink)) + '</strong><span>' +
+          esc((p.risk && p.risk.label) || 'risk') + ' · ' +
+          esc(p.data_reachable ? 'data-reachable' : 'structural') + '</span>';
+        card.addEventListener('click', function () {
+          document.getElementById('cg-mode').value = 'paths';
+          renderMode('paths');
+          document.getElementById('cg-path').value = String(i);
+          highlightPath(String(i));
+        });
+        riskStrip.appendChild(card);
       });
 
       function applyFilters() {
@@ -430,15 +696,21 @@ _HTML_TEMPLATE = """<!doctype html>
       }
 
       function highlightPath(idx) {
+        if (document.getElementById('cg-mode').value !== 'paths') {
+          document.getElementById('cg-mode').value = 'paths';
+          renderMode('paths');
+        }
         cy.elements().removeClass('cg-hl cg-dim');
         if (idx === '' || idx === null) return;
-        const p = (data.attack_paths || [])[Number(idx)];
+        const p = attackPaths[Number(idx)];
         if (!p) return;
         const ids = p.nodes || [];
         const inPath = cy.collection();
         ids.forEach(function (id) { inPath.merge(cy.getElementById(id)); });
         for (let i = 0; i < ids.length - 1; i++) {
-          inPath.merge(cy.edges('[source = "' + ids[i] + '"][target = "' + ids[i + 1] + '"]'));
+          inPath.merge(cy.edges().filter(function (edge) {
+            return edge.source().id() === ids[i] && edge.target().id() === ids[i + 1];
+          }));
         }
         cy.elements().addClass('cg-dim');
         inPath.removeClass('cg-dim').addClass('cg-hl');
@@ -484,6 +756,10 @@ _HTML_TEMPLATE = """<!doctype html>
       });
       cy.on('tap', function (evt) { if (evt.target === cy) cy.elements().removeClass('cg-hl cg-dim'); });
 
+      document.getElementById('cg-mode').addEventListener('change', function (e) {
+        document.getElementById('cg-path').value = '';
+        renderMode(e.target.value);
+      });
       document.getElementById('cg-search').addEventListener('input', applyFilters);
       document.getElementById('cg-layer').addEventListener('change', applyFilters);
       document.getElementById('cg-severity').addEventListener('change', applyFilters);
@@ -494,14 +770,14 @@ _HTML_TEMPLATE = """<!doctype html>
       document.getElementById('cg-zoom-in').addEventListener('click', function () { cy.zoom(cy.zoom() * 1.2); });
       document.getElementById('cg-zoom-out').addEventListener('click', function () { cy.zoom(cy.zoom() / 1.2); });
       document.getElementById('cg-reset').addEventListener('click', function () {
+        document.getElementById('cg-mode').value = 'paths';
         document.getElementById('cg-search').value = '';
         document.getElementById('cg-layer').value = '';
         document.getElementById('cg-severity').value = '';
         document.getElementById('cg-path').value = '';
-        applyFilters();
-        cy.elements().removeClass('cg-hl cg-dim');
-        cy.fit(undefined, 30);
+        renderMode('paths');
       });
+      renderMode('paths');
     })();
   </script>
   <script>

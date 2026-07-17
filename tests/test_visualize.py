@@ -43,6 +43,10 @@ def test_report_embeds_offline_interactive_explorer(tmp_path: Path) -> None:
 
     # Explorer scaffolding is present.
     assert "Interactive Graph Explorer" in html
+    assert "Attack Path Explorer" in html
+    assert "View: attack paths" in html
+    assert "View: module map" in html
+    assert "View: raw graph" in html
     assert 'id="cy"' in html
     assert "Click a node to inspect" in html
     # Cytoscape is inlined (offline): the library and the graph data both live in the file.
