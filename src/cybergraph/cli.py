@@ -252,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = Path(getattr(args, "repo", ".")).resolve()
 
+    _READ_COMMANDS = {"explain", "paths", "layers", "sca", "ask"}
+    if args.command in _READ_COMMANDS and not _graph_built(repo):
+        print(f"No graph found at {repo / '.cybergraph' / 'graph.db'}. "
+              f"Run 'cybergraph build {repo}' first (or 'cybergraph analyze {repo}').")
+        return 0
+
     if args.command == "init":
         print(format_init_result(init_project(repo, force=args.force)))
     elif args.command == "doctor":
