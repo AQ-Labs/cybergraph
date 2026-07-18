@@ -200,6 +200,15 @@ def build_parser() -> argparse.ArgumentParser:
     opengraph.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/opengraph.json")
     opengraph.add_argument("--max-nodes", type=int, default=5000, help="Maximum nodes to include")
 
+    analyze = sub.add_parser(
+        "analyze", help="Build the graph and run every analysis, then print top risks"
+    )
+    analyze.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
+    analyze.add_argument("--json", action="store_true", help="Emit the result as JSON")
+    analyze.add_argument("--limit", type=int, default=10, help="Maximum top risks to show")
+    analyze.add_argument("--no-color", action="store_true", help="Disable coloured output")
+    analyze.add_argument("--no-report", action="store_true", help="Skip writing the HTML report")
+
     return parser
 
 
@@ -227,6 +236,10 @@ def _validate_json_report(path: Path) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+
+    from .env import load_dotenv
+    load_dotenv(Path(".").resolve())
+
     args = parser.parse_args(argv)
     repo = Path(getattr(args, "repo", ".")).resolve()
 
@@ -410,6 +423,24 @@ def main(argv: list[str] | None = None) -> int:
         output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "opengraph.json"
         export_opengraph(repo, output, max_nodes=args.max_nodes)
         print(f"Wrote BloodHound OpenGraph JSON: {output}")
+    elif args.command == "analyze":
+        import json as _json
+
+        from .orchestrator import run_full_analysis
+        from .output import render_text, should_color
+        from .report_model import to_json
+
+        result = run_full_analysis(repo, limit=args.limit)
+        if args.json:
+            print(_json.dumps(to_json(result), indent=2, sort_keys=True))
+        else:
+            color = (not args.no_color) and should_color()
+            print(render_text(result, color=color))
+            if not args.no_report:
+                from .visualize import generate_html_report
+
+                output = generate_html_report(repo, repo / ".cybergraph" / "report.html")
+                print(f"\nHTML report: {output}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
