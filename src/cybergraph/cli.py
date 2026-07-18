@@ -209,7 +209,16 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--no-color", action="store_true", help="Disable coloured output")
     analyze.add_argument("--no-report", action="store_true", help="Skip writing the HTML report")
 
+    config_cmd = sub.add_parser("config", help="Inspect CyberGraph configuration")
+    config_sub = config_cmd.add_subparsers(dest="config_action", required=True)
+    config_show = config_sub.add_parser("show", help="Show the effective configuration")
+    config_show.add_argument("repo", nargs="?", default=".", help="Repository root")
+
     return parser
+
+
+def _graph_built(repo: Path) -> bool:
+    return (repo / ".cybergraph" / "graph.db").is_file()
 
 
 def _validate_json_report(path: Path) -> str | None:
@@ -441,6 +450,18 @@ def main(argv: list[str] | None = None) -> int:
 
                 output = generate_html_report(repo, repo / ".cybergraph" / "report.html")
                 print(f"\nHTML report: {output}")
+    elif args.command == "config":
+        from .config import load_config
+        from .llm import load_llm_config_from_env
+
+        cfg = load_config(repo)
+        print(f"Repo: {repo}")
+        print(f"LLM configured: {'yes' if load_llm_config_from_env() is not None else 'no'}")
+        print(f"Graph built: {'yes' if _graph_built(repo) else 'no'}")
+        print(f"Ignored paths: {list(cfg.ignored_paths)}")
+        print(f"Custom sinks: {list(cfg.custom_sinks)}")
+        print(f"Suppressed rules: {list(cfg.suppressed_rules)}")
+        print(f"Suppressed paths: {list(cfg.suppressed_paths)}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
