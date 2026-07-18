@@ -54,6 +54,50 @@ if FastMCP is not None:
             "confidence": answer.confidence,
             "citations": list(answer.citations),
         }
+
+    @mcp.tool()
+    def analyze_repo_tool(repo_root: str = ".", limit: int = 10) -> dict[str, Any]:
+        """Build the graph and run every analysis; return the full result as JSON."""
+        from .orchestrator import run_full_analysis
+        from .report_model import to_json
+
+        return to_json(run_full_analysis(Path(repo_root).resolve(), limit=limit))
+
+    @mcp.tool()
+    def top_risks_tool(repo_root: str = ".", limit: int = 10) -> dict[str, Any]:
+        """Return the ranked top security risks across all graph layers."""
+        from .security.investigate import collect_top_risks
+
+        risks = collect_top_risks(Path(repo_root).resolve(), limit=limit)
+        return {"top_risks": [
+            {"category": r.category, "title": r.title, "risk_score": r.risk_score,
+             "risk_label": r.risk_label, "detail": r.detail}
+            for r in risks
+        ]}
+
+    @mcp.tool()
+    def secret_exposures_tool(repo_root: str = ".") -> dict[str, Any]:
+        """Return prioritized secret-exposure paths (reachable secret -> sink)."""
+        from .security.secrets import find_secret_exposures, format_secret_exposures
+
+        exposures = find_secret_exposures(Path(repo_root).resolve())
+        return {"count": len(exposures), "text": format_secret_exposures(exposures)}
+
+    @mcp.tool()
+    def prioritize_dependencies_tool(repo_root: str = ".") -> dict[str, Any]:
+        """Return dependency vulnerabilities ranked by severity x reachability."""
+        from .security.sca import format_sca, prioritize_vulnerabilities
+
+        priorities = prioritize_vulnerabilities(Path(repo_root).resolve())
+        return {"count": len(priorities), "text": format_sca(priorities)}
+
+    @mcp.tool()
+    def iac_attack_paths_tool(repo_root: str = ".", max_depth: int = 6) -> dict[str, Any]:
+        """Return cloud attack paths (public exposure -> privileged IaC resource)."""
+        from .security.iac_paths import find_iac_attack_paths, format_iac_attack_paths
+
+        paths = find_iac_attack_paths(Path(repo_root).resolve(), max_depth=max_depth)
+        return {"count": len(paths), "text": format_iac_attack_paths(paths)}
 else:
     mcp = None
 
