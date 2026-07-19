@@ -20,7 +20,9 @@ from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.layers import summarize_layers
 
 
-def generate_html_report(repo_root: Path, output: Path | None = None, *, with_source: bool = False) -> Path:
+def generate_html_report(
+    repo_root: Path, output: Path | None = None, *, with_source: bool = False
+) -> Path:
     repo_root = repo_root.resolve()
     output = output or repo_root / ".cybergraph" / "report.html"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +160,8 @@ def _truncation_banner(graph_data: dict) -> str:
     total = int(graph_data.get("counts", {}).get("nodes", shown))
     return (
         "<div style='margin:0 0 12px;padding:10px 12px;border-radius:8px;"
-        "background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-border);font-size:13px;'>"
+        "background:var(--warn-bg);color:var(--warn-fg);"
+        "border:1px solid var(--warn-border);font-size:13px;'>"
         f"Showing {shown} of {total} nodes — raise <code>--max-nodes</code> to see the full graph."
         "</div>"
     )
@@ -185,10 +188,14 @@ def _legend() -> str:
         "reaches a dangerous sink, green means a guard protects it, and the "
         "glowing amber trail is a highlighted attack path.</p>"
         "<div class='ex-samples'>"
-        "<span class='legend-item'><span class='ex-line' style='background:#94a3b8'></span>calls</span>"
-        "<span class='legend-item'><span class='ex-line' style='background:#dc2626'></span>reaches sink</span>"
-        "<span class='legend-item'><span class='ex-line' style='background:#16a34a'></span>guards</span>"
-        "<span class='legend-item'><span class='ex-line' style='background:#f59e0b'></span>attack path</span>"
+        "<span class='legend-item'>"
+        "<span class='ex-line' style='background:#94a3b8'></span>calls</span>"
+        "<span class='legend-item'>"
+        "<span class='ex-line' style='background:#dc2626'></span>reaches sink</span>"
+        "<span class='legend-item'>"
+        "<span class='ex-line' style='background:#16a34a'></span>guards</span>"
+        "<span class='legend-item'>"
+        "<span class='ex-line' style='background:#f59e0b'></span>attack path</span>"
         "</div>"
         "</div>"
         "<div class='ex-card'>"
@@ -375,26 +382,33 @@ _HTML_TEMPLATE = """<!doctype html>
               --edge-base: #cbd5e1; --glow-opacity: 0;
               --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-border: #fde68a; --code: #7c2d12; }
     body { margin: 0; background: var(--bg); color: var(--fg); }
-    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; position: relative; }
+    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617);
+      color: white; padding: 32px 36px; position: relative; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
     .muted { color: var(--muted); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .stat, table { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
+    .stat, table { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
     .stat { padding: 16px; }
     .stat strong { display: block; font-size: 26px; margin-top: 4px; }
     .stat-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
     .stat-crit { color: #dc2626; font-weight: 700; }
     .stat-high { color: #d97706; font-weight: 600; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left;
+      vertical-align: top; }
     th { background: var(--th); font-size: 13px; }
     tr:last-child td { border-bottom: 0; }
-    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-fg); font-size: 12px; }
-    .path { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px;
+      background: var(--pill-bg); color: var(--pill-fg); font-size: 12px; }
+    .path { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; margin-bottom: 10px; }
     .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; align-items: center; }
-    .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--input-border); border-radius: 6px; padding: 9px 10px; background: var(--input-bg); color: var(--input-fg); font-size: 13px; }
+    .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--input-border);
+      border-radius: 6px; padding: 9px 10px; background: var(--input-bg); color: var(--input-fg);
+      font-size: 13px; }
     .toolbar input { min-width: min(360px, 100%); flex: 1; }
     .toolbar button { cursor: pointer; }
     .toolbar button:hover { background: var(--hover); }
@@ -405,53 +419,80 @@ _HTML_TEMPLATE = """<!doctype html>
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
-    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--th); }
+    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px;
+      border-bottom: 1px solid var(--border); background: var(--th); }
     .graph-title { font-weight: 700; }
     .graph-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 12px; white-space: nowrap; }
+    .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px;
+      background: var(--accent-bg); color: var(--accent); font-size: 12px; white-space: nowrap;
+      }
     #cy { height: 640px; background: var(--cy-bg); }
     .details { padding: 14px; height: 668px; overflow: auto; font-size: 13px; }
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
-    .details .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; color: white; }
+    .details .tag { display: inline-block; padding: 2px 7px; border-radius: 999px;
+      font-size: 11px; color: white; }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
-    .explainer { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 8px 0 14px; }
-    .ex-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+    .explainer { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px; margin: 8px 0 14px; }
+    .ex-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 14px; }
     .ex-card p { margin: 6px 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
-    .ex-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--fg); display: flex; align-items: center; gap: 8px; }
-    .ex-glyph { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px rgba(56, 189, 248, 0.8); }
-    .ex-line { width: 18px; height: 3px; border-radius: 2px; display: inline-block; background: #f59e0b; box-shadow: none; }
-    .ex-hull { width: 16px; height: 12px; border-radius: 5px; border: 2px dashed #a78bfa; background: transparent; box-shadow: none; }
-    .ex-samples { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11.5px; color: var(--muted); }
-    .howto { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin: 0 0 12px; font-size: 13px; }
+    .ex-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--fg);
+      display: flex; align-items: center; gap: 8px; }
+    .ex-glyph { width: 12px; height: 12px; border-radius: 50%; display: inline-block;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.8); }
+    .ex-line { width: 18px; height: 3px; border-radius: 2px; display: inline-block;
+      background: #f59e0b; box-shadow: none; }
+    .ex-hull { width: 16px; height: 12px; border-radius: 5px; border: 2px dashed #a78bfa;
+      background: transparent; box-shadow: none; }
+    .ex-samples { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11.5px;
+      color: var(--muted); }
+    .howto { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 10px 14px; margin: 0 0 12px; font-size: 13px; }
     .howto summary { cursor: pointer; font-weight: 600; color: var(--accent); }
     .howto ul { margin: 8px 0 4px; padding-left: 20px; }
     .howto li { margin: 5px 0; line-height: 1.5; }
-    .finding-group { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; padding: 0; margin: 0 0 8px; overflow: hidden; }
+    .finding-group { background: var(--panel); border: 1px solid var(--border);
+      border-left: 4px solid var(--border); border-radius: 10px; padding: 0; margin: 0 0 8px;
+      overflow: hidden; }
     .finding-group.sev-critical, .finding-group.sev-high { border-left-color: #dc2626; }
     .finding-group.sev-medium { border-left-color: #d97706; }
     .finding-group.sev-low, .finding-group.sev-info { border-left-color: #64748b; }
-    .finding-group summary { cursor: pointer; padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .finding-group summary { cursor: pointer; padding: 10px 14px; display: flex;
+      align-items: center; gap: 10px; flex-wrap: wrap; }
     .finding-group .fg-count { color: var(--muted); font-size: 12px; }
-    .finding-group .fg-sample { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
-    .finding-group table { border: 0; border-radius: 0; box-shadow: none; border-top: 1px solid var(--border); }
+    .finding-group .fg-sample { color: var(--muted); font-size: 12px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+    .finding-group table { border: 0; border-radius: 0; box-shadow: none;
+      border-top: 1px solid var(--border); }
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
-    .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
-    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
+    .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 10px; margin: 0 0 14px; }
+    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px;
+      padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
     .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: var(--muted); font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
-    .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px;
+      overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; }
     .cg-snippet .ln { display: flex; gap: 10px; padding: 1px 8px; white-space: pre; }
-    .cg-snippet .ln .num { color: var(--muted, #94a3b8); user-select: none; min-width: 30px; text-align: right; }
+    .cg-snippet .ln .num { color: var(--muted, #94a3b8); user-select: none; min-width: 30px;
+      text-align: right; }
     .cg-snippet .ln.hl { background: rgba(245, 158, 11, 0.18); }
-    @keyframes cg-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes cg-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1;
+      transform: none; } }
     .grid, .risk-strip, .explainer, .explorer { animation: cg-fade 0.45s ease-out both; }
     .explorer { animation-delay: 0.08s; }
-    @media (prefers-reduced-motion: reduce) { .grid, .risk-strip, .explainer, .explorer { animation: none; } }
-    @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
+    @media (prefers-reduced-motion: reduce) {
+      .grid, .risk-strip, .explainer, .explorer { animation: none; }
+    }
+    @media (max-width: 820px) {
+      .explorer { grid-template-columns: 1fr; } .details { height: auto; }
+    }
   </style>
   <script>
     (function () {
@@ -467,14 +508,18 @@ _HTML_TEMPLATE = """<!doctype html>
   <header>
     <h1>CyberGraph Security Report</h1>
     <div>__REPO__</div>
-    <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;border-radius:6px;padding:6px 10px;">Theme</button>
+    <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;
+      cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;
+      border-radius:6px;padding:6px 10px;">Theme</button>
   </header>
   <main>
     <section class="grid">
       <div class="stat"><span class="muted">Nodes</span><strong>__NODES__</strong></div>
       <div class="stat"><span class="muted">Edges</span><strong>__EDGES__</strong></div>
-      <div class="stat"><span class="muted">Findings</span><strong>__FINDINGS__</strong>__FINDINGS_ACCENT__</div>
-      <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong>__PATHS_ACCENT__</div>
+      <div class="stat"><span class="muted">Findings</span><strong>__FINDINGS__</strong>
+        __FINDINGS_ACCENT__</div>
+      <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong>
+        __PATHS_ACCENT__</div>
     </section>
 
     <h2>Top Risks</h2>
@@ -484,13 +529,19 @@ _HTML_TEMPLATE = """<!doctype html>
     <details class="howto">
       <summary>How to read this report</summary>
       <ul>
-        <li><strong>Your codebase is drawn as a graph:</strong> every dot is a route, function, or secret; every line is a relationship between them.</li>
-        <li><strong>The glowing amber trail is the #1 risk</strong> — the most dangerous route user input can take from an entrypoint to a sensitive sink. The panel on the right tells its story.</li>
-        <li><strong>Click any risk card above the graph</strong> to trace a different attack path, or click a node to see its evidence, findings, and connections.</li>
-        <li><strong>Use the view menu</strong> to zoom out: module map for architecture, raw graph for everything; filters narrow by layer or severity.</li>
+        <li><strong>Your codebase is drawn as a graph:</strong> every dot is a route, function,
+          or secret; every line is a relationship between them.</li>
+        <li><strong>The glowing amber trail is the #1 risk</strong> — the most dangerous route
+          user input can take from an entrypoint to a sensitive sink. The panel on the right
+          tells its story.</li>
+        <li><strong>Click any risk card above the graph</strong> to trace a different attack
+          path, or click a node to see its evidence, findings, and connections.</li>
+        <li><strong>Use the view menu</strong> to zoom out: module map for architecture,
+          raw graph for everything; filters narrow by layer or severity.</li>
       </ul>
     </details>
-    <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
+    <p class="mode-help">Start with focused attack paths, then expand to module or raw graph
+      views when you need detail.</p>
     __TRUNCATION_BANNER__
     <div class="toolbar">
       <select id="cg-mode" aria-label="Graph view mode">
@@ -530,13 +581,15 @@ _HTML_TEMPLATE = """<!doctype html>
         <div class="graph-head">
           <div>
             <div class="graph-title" id="cg-view-title">Attack Path Explorer</div>
-            <div class="graph-subtitle" id="cg-view-subtitle">Focused view of the highest-risk entrypoint-to-sink paths.</div>
+            <div class="graph-subtitle" id="cg-view-subtitle">Focused view of the highest-risk
+              entrypoint-to-sink paths.</div>
           </div>
           <div class="graph-badge" id="cg-view-counts">0 nodes</div>
         </div>
         <div id="cy"></div>
       </div>
-      <div class="details" id="cg-details"><p class="muted">Click a node to inspect its security evidence.</p></div>
+      <div class="details" id="cg-details"><p class="muted">Click a node to inspect
+        its security evidence.</p></div>
     </div>
 
     <h2>Security Layers</h2>
@@ -564,9 +617,11 @@ _HTML_TEMPLATE = """<!doctype html>
             vulnerability: '#991b1b', infrastructure: '#475569', call: '#cbd5e1', file: '#94a3b8'
           },
           edges: {
-            EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a', SANITIZES: '#0d9488',
+            EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a',
+            SANITIZES: '#0d9488',
             REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', EXPOSES_SECRET: '#dc2626',
-            USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed', PATH: '#f59e0b', MODULE_LINK: '#94a3b8'
+            USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed', PATH: '#f59e0b',
+            MODULE_LINK: '#94a3b8'
           },
           nodeLabel: '#0b1220', nodeOutline: '#f8fafc', nodeBorder: '#ffffff',
           edgeFallback: '#cbd5e1', glow: 0
@@ -588,7 +643,8 @@ _HTML_TEMPLATE = """<!doctype html>
         }
       };
       function activeTheme() {
-        return document.documentElement.getAttribute('data-theme') === 'dark' ? THEMES.dark : THEMES.light;
+        return document.documentElement.getAttribute('data-theme') === 'dark'
+          ? THEMES.dark : THEMES.light;
       }
       function groupColor(group) {
         const t = activeTheme();
@@ -726,7 +782,8 @@ _HTML_TEMPLATE = """<!doctype html>
           elements: elements,
           layout: { name: 'preset', fit: true, padding: 44 },
           title: 'Attack Path Explorer',
-          subtitle: 'Default view: the highest-risk entrypoint-to-sink paths, arranged left to right.'
+          subtitle: 'Default view: the highest-risk entrypoint-to-sink paths, ' +
+            'arranged left to right.'
         };
       }
 
@@ -751,7 +808,8 @@ _HTML_TEMPLATE = """<!doctype html>
         });
         return {
           elements: elements,
-          layout: { name: 'cose', animate: false, padding: 30, idealEdgeLength: 90, nodeRepulsion: 6500 },
+          layout: { name: 'cose', animate: false, padding: 30, idealEdgeLength: 90,
+            nodeRepulsion: 6500 },
           title: 'Top-Risk Neighborhoods',
           subtitle: 'The highest-risk path nodes plus their immediate graph context.'
         };
@@ -764,7 +822,9 @@ _HTML_TEMPLATE = """<!doctype html>
           const current = modules.get(module) || { findings: 0, nodes: 0, severity: '' };
           current.nodes += 1;
           current.findings += (node.findings || []).length;
-          if (SEV_RANK[node.severity || ''] > SEV_RANK[current.severity || '']) current.severity = node.severity;
+          if (SEV_RANK[node.severity || ''] > SEV_RANK[current.severity || '']) {
+            current.severity = node.severity;
+          }
           modules.set(module, current);
         });
         const ids = Array.from(modules.keys()).sort();
@@ -800,18 +860,21 @@ _HTML_TEMPLATE = """<!doctype html>
         });
         edgeCounts.forEach(function (count, key) {
           const parts = key.split(' -> ');
-          elements.push(makeEdge('module:' + parts[0], 'module:' + parts[1], 'MODULE_LINK', 'module-edge:' + key, { weight: count }));
+          elements.push(makeEdge('module:' + parts[0], 'module:' + parts[1], 'MODULE_LINK',
+            'module-edge:' + key, { weight: count }));
         });
         return {
           elements: elements,
           layout: { name: 'preset', fit: true, padding: 44 },
           title: 'Module Map',
-          subtitle: 'A clustered overview by folder/module, useful for understanding architecture before drilling down.'
+          subtitle: 'A clustered overview by folder/module, useful for understanding ' +
+            'architecture before drilling down.'
         };
       }
 
       // Security zones, ordered so the canvas reads like an attack narrative.
-      const ZONE_ORDER = ['attack-surface', 'guards', 'logic', 'secrets', 'sinks', 'supply-chain', 'infrastructure'];
+      const ZONE_ORDER = ['attack-surface', 'guards', 'logic', 'secrets', 'sinks',
+        'supply-chain', 'infrastructure'];
       const ZONE_META = {
         'attack-surface': { label: 'Attack Surface', group: 'entrypoint' },
         'guards': { label: 'Guards', group: 'guard' },
@@ -875,7 +938,8 @@ _HTML_TEMPLATE = """<!doctype html>
           elements: elements,
           layout: { name: 'preset', fit: true, padding: 36 },
           title: 'Security Zones',
-          subtitle: 'Your app as an attack narrative: Attack Surface → Guards → Logic → Sensitive Sinks. Dashed hulls are zones.'
+          subtitle: 'Your app as an attack narrative: Attack Surface → Guards → Logic → ' +
+            'Sensitive Sinks. Dashed hulls are zones.'
         };
       }
 
@@ -897,11 +961,15 @@ _HTML_TEMPLATE = """<!doctype html>
             'underlay-opacity': function () { return activeTheme().glow; },
             'underlay-padding': 6
           } },
-          { selector: 'node[group = "entrypoint"]', style: { 'width': 34, 'height': 26, 'shape': 'round-rectangle' } },
-          { selector: 'node[group = "sink"]', style: { 'shape': 'triangle', 'width': 30, 'height': 30 } },
+          { selector: 'node[group = "entrypoint"]',
+            style: { 'width': 34, 'height': 26, 'shape': 'round-rectangle' } },
+          { selector: 'node[group = "sink"]',
+            style: { 'shape': 'triangle', 'width': 30, 'height': 30 } },
           { selector: 'node[group = "dataflow"]', style: { 'shape': 'hexagon' } },
-          { selector: 'node[group = "vulnerability"]', style: { 'shape': 'diamond', 'width': 30, 'height': 30 } },
-          { selector: 'node[kind = "Module"]', style: { 'width': 44, 'height': 44, 'font-size': 11, 'text-max-width': 140 } },
+          { selector: 'node[group = "vulnerability"]',
+            style: { 'shape': 'diamond', 'width': 30, 'height': 30 } },
+          { selector: 'node[kind = "Module"]',
+            style: { 'width': 44, 'height': 44, 'font-size': 11, 'text-max-width': 140 } },
           { selector: 'node[kind = "Zone"]', style: {
             'shape': 'round-rectangle',
             'background-color': function (ele) { return zoneColor(ele.data('zone')); },
@@ -938,7 +1006,9 @@ _HTML_TEMPLATE = """<!doctype html>
           { selector: 'edge[kind = "REACHES_SINK"], edge[kind = "PATH"]', style: { 'width': 3.2 } },
           { selector: 'edge[kind = "MODULE_LINK"]', style: { 'line-style': 'dashed', 'width': 2 } },
           { selector: '.cg-dim', style: { 'opacity': 0.12 } },
-          { selector: '.cg-hl', style: { 'opacity': 1, 'border-width': 4, 'border-color': '#f59e0b', 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b', 'z-index': 99 } }
+          { selector: '.cg-hl', style: { 'opacity': 1, 'border-width': 4,
+            'border-color': '#f59e0b', 'line-color': '#f59e0b',
+            'target-arrow-color': '#f59e0b', 'z-index': 99 } }
         ],
         layout: { name: 'preset' }
       });
@@ -970,7 +1040,9 @@ _HTML_TEMPLATE = """<!doctype html>
 
       // Populate the layer filter from the groups actually present.
       const layerSelect = document.getElementById('cg-layer');
-      const present = Array.from(new Set(rawNodes.map(function (n) { return n.group; }).concat(['module']))).sort();
+      const present = Array.from(
+        new Set(rawNodes.map(function (n) { return n.group; }).concat(['module']))
+      ).sort();
       present.forEach(function (g) {
         const opt = document.createElement('option');
         opt.value = g; opt.textContent = g.charAt(0).toUpperCase() + g.slice(1);
@@ -1016,14 +1088,16 @@ _HTML_TEMPLATE = """<!doctype html>
         cy.batch(function () {
           cy.nodes().forEach(function (n) {
             if (n.data('kind') === 'Zone') return; // hulls stay; their children filter individually
-            const hay = (n.data('label') + ' ' + (n.data('file') || '') + ' ' + n.data('group')).toLowerCase();
+            const hay = (n.data('label') + ' ' + (n.data('file') || '') + ' ' +
+              n.data('group')).toLowerCase();
             const matchText = !q || hay.indexOf(q) !== -1;
             const matchLayer = !layer || n.data('group') === layer;
             const matchSev = (SEV_RANK[n.data('severity')] ?? -1) >= minSev;
             n.style('display', (matchText && matchLayer && matchSev) ? 'element' : 'none');
           });
           cy.edges().forEach(function (e) {
-            const vis = e.source().style('display') !== 'none' && e.target().style('display') !== 'none';
+            const vis = e.source().style('display') !== 'none' &&
+              e.target().style('display') !== 'none';
             e.style('display', vis ? 'element' : 'none');
           });
         });
@@ -1032,21 +1106,28 @@ _HTML_TEMPLATE = """<!doctype html>
       function pathNarrative(p, rank) {
         const risk = p.risk || {};
         let html = '<h3>' + (rank === 0 ? 'Start here: the #1 risk' : 'Attack path') + '</h3>';
-        html += '<p>User input entering <strong>' + esc(tail(p.entrypoint)) + '</strong> can reach ' +
+        html += '<p>User input entering <strong>' + esc(tail(p.entrypoint)) +
+          '</strong> can reach ' +
           '<strong>' + esc(tail(p.sink)) + '</strong>' +
           (p.data_reachable ? ' carrying user-controlled data' : '') +
-          (p.sanitized ? ', passing a sanitizer on the way' : ' with no sanitizer on the way') + '.</p>';
+          (p.sanitized ? ', passing a sanitizer on the way' : ' with no sanitizer on the way') +
+          '.</p>';
         if (risk.label) {
           html += '<div class="kv"><span class="tag" style="background:#dc2626">' +
             esc(risk.label) + ' ' + esc(risk.score || '') + '/100</span></div>';
         }
         if (p.taint_sources && p.taint_sources.length) {
-          html += '<div class="kv"><strong>Tainted input:</strong> ' + esc(p.taint_sources.slice(0, 6).join(', ')) + '</div>';
+          html += '<div class="kv"><strong>Tainted input:</strong> ' +
+            esc(p.taint_sources.slice(0, 6).join(', ')) + '</div>';
         }
         html += '<div class="kv"><strong>Route taken:</strong><br><code>' +
           esc((p.nodes || []).map(tail).join(' → ')) + '</code></div>';
-        if (risk.rationale) html += '<div class="kv"><strong>Why it matters:</strong> ' + esc(risk.rationale) + '</div>';
-        html += '<p class="muted">The glowing trail on the left is this path. Click any node for its evidence, or pick another risk card above.</p>';
+        if (risk.rationale) {
+          html += '<div class="kv"><strong>Why it matters:</strong> ' +
+            esc(risk.rationale) + '</div>';
+        }
+        html += '<p class="muted">The glowing trail on the left is this path. ' +
+          'Click any node for its evidence, or pick another risk card above.</p>';
         document.getElementById('cg-details').innerHTML = html;
       }
 
@@ -1095,38 +1176,62 @@ _HTML_TEMPLATE = """<!doctype html>
         } catch (e) { /* animation is decorative; never break the explorer */ }
       }
 
-      function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        });
+      }
 
       function showDetails(node) {
         const d = node.data();
         const color = groupColor(d.group);
         let html = '<h3>' + esc(d.label) + '</h3>';
-        html += '<div class="kv"><span class="tag" style="background:' + color + '">' + esc(d.group) + '</span></div>';
-        if (d.id && d.id !== d.label) html += '<div class="kv muted"><code>' + esc(d.id) + '</code></div>';
-        if (d.file) html += '<div class="kv"><strong>Location:</strong> <code>' + esc(d.file) + ':' + esc(d.line) + '</code></div>';
+        html += '<div class="kv"><span class="tag" style="background:' + color + '">' +
+          esc(d.group) + '</span></div>';
+        if (d.id && d.id !== d.label) {
+          html += '<div class="kv muted"><code>' + esc(d.id) + '</code></div>';
+        }
+        if (d.file) {
+          html += '<div class="kv"><strong>Location:</strong> <code>' + esc(d.file) + ':' +
+            esc(d.line) + '</code></div>';
+        }
         html += '<div class="kv"><strong>Kind:</strong> ' + esc(d.kind) + '</div>';
-        if (d.severity) html += '<div class="kv"><strong>Severity:</strong> ' + esc(d.severity) + '</div>';
+        if (d.severity) {
+          html += '<div class="kv"><strong>Severity:</strong> ' + esc(d.severity) + '</div>';
+        }
         const findings = d.findings || [];
         if (findings.length) {
           html += '<div class="kv"><strong>Findings:</strong><ul>';
-          findings.forEach(function (f) { html += '<li>' + esc(f.severity) + ' ' + esc(f.rule_id) + ': ' + esc(f.message) + '</li>'; });
+          findings.forEach(function (f) {
+            html += '<li>' + esc(f.severity) + ' ' + esc(f.rule_id) + ': ' +
+              esc(f.message) + '</li>';
+          });
           html += '</ul></div>';
         }
         const props = d.properties || {};
-        const keys = Object.keys(props).filter(function (k) { return props[k] && k !== 'decorators'; });
+        const keys = Object.keys(props).filter(function (k) {
+          return props[k] && k !== 'decorators';
+        });
         if (keys.length) {
           html += '<div class="kv"><strong>Properties:</strong><ul>';
-          keys.forEach(function (k) { html += '<li>' + esc(k) + ': ' + esc(JSON.stringify(props[k])) + '</li>'; });
+          keys.forEach(function (k) {
+            html += '<li>' + esc(k) + ': ' + esc(JSON.stringify(props[k])) + '</li>';
+          });
           html += '</ul></div>';
         }
         const neighbors = node.neighborhood('node').map(function (n) { return n.data('label'); });
-        if (neighbors.length) html += '<div class="kv"><strong>Connected:</strong> ' + esc(neighbors.slice(0, 12).join(', ')) + '</div>';
+        if (neighbors.length) {
+          html += '<div class="kv"><strong>Connected:</strong> ' +
+            esc(neighbors.slice(0, 12).join(', ')) + '</div>';
+        }
         const snip = d.snippet;
         if (snip && snip.lines && snip.lines.length) {
-          html += '<div class="kv"><strong>Source:</strong> <code>' + esc(snip.file) + '</code></div>';
+          html += '<div class="kv"><strong>Source:</strong> <code>' + esc(snip.file) +
+            '</code></div>';
           html += '<div class="cg-snippet">';
           snip.lines.forEach(function (ln) {
-            html += '<div class="ln' + (ln.highlight ? ' hl' : '') + '"><span class="num">' + esc(ln.n) + '</span><span>' + ln.text + '</span></div>';
+            html += '<div class="ln' + (ln.highlight ? ' hl' : '') + '"><span class="num">' +
+              esc(ln.n) + '</span><span>' + ln.text + '</span></div>';
           });
           html += '</div>';
         }
@@ -1142,7 +1247,9 @@ _HTML_TEMPLATE = """<!doctype html>
         node.removeClass('cg-dim').addClass('cg-hl');
         showDetails(node);
       });
-      cy.on('tap', function (evt) { if (evt.target === cy) cy.elements().removeClass('cg-hl cg-dim'); });
+      cy.on('tap', function (evt) {
+        if (evt.target === cy) cy.elements().removeClass('cg-hl cg-dim');
+      });
 
       document.getElementById('cg-mode').addEventListener('change', function (e) {
         document.getElementById('cg-path').value = '';
@@ -1151,12 +1258,19 @@ _HTML_TEMPLATE = """<!doctype html>
       document.getElementById('cg-search').addEventListener('input', applyFilters);
       document.getElementById('cg-layer').addEventListener('change', applyFilters);
       document.getElementById('cg-severity').addEventListener('change', applyFilters);
-      document.getElementById('cg-path').addEventListener('change', function (e) { highlightPath(e.target.value); });
-      document.getElementById('cg-layout').addEventListener('change', function (e) {
-        cy.layout({ name: e.target.value, directed: true, padding: 12, spacingFactor: 1.1, animate: false }).run();
+      document.getElementById('cg-path').addEventListener('change', function (e) {
+        highlightPath(e.target.value);
       });
-      document.getElementById('cg-zoom-in').addEventListener('click', function () { cy.zoom(cy.zoom() * 1.2); });
-      document.getElementById('cg-zoom-out').addEventListener('click', function () { cy.zoom(cy.zoom() / 1.2); });
+      document.getElementById('cg-layout').addEventListener('change', function (e) {
+        cy.layout({ name: e.target.value, directed: true, padding: 12, spacingFactor: 1.1,
+          animate: false }).run();
+      });
+      document.getElementById('cg-zoom-in').addEventListener('click', function () {
+        cy.zoom(cy.zoom() * 1.2);
+      });
+      document.getElementById('cg-zoom-out').addEventListener('click', function () {
+        cy.zoom(cy.zoom() / 1.2);
+      });
       document.getElementById('cg-reset').addEventListener('click', function () {
         document.getElementById('cg-mode').value = 'paths';
         document.getElementById('cg-search').value = '';
