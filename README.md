@@ -53,6 +53,7 @@ Supported Python: 3.10, 3.11, 3.12.
 cybergraph init .
 cybergraph doctor .
 cybergraph analyze .          # build + run every analysis, print top risks
+cybergraph history .          # what's new / fixed / regressed since the last scan
 cybergraph config show .      # inspect effective config + LLM/graph state
 cybergraph build path/to/repo
 cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
