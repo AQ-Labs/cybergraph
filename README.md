@@ -50,6 +50,7 @@ Supported Python: 3.10, 3.11, 3.12.
 ## Quick start
 
 ```bash
+cybergraph quickstart .        # zero-to-report: init, build, analyze, open report
 cybergraph init .
 cybergraph doctor .
 cybergraph analyze .          # build + run every analysis, print top risks
