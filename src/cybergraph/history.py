@@ -65,12 +65,16 @@ def record_scan(repo_root: Path, *, top_risk_score: int = 0, top_risk_label: str
             prev_set = {row["fingerprint"] for row in conn.execute(
                 "SELECT fingerprint FROM scan_findings WHERE scan_id = ?", (prev["id"],))}
 
-        # No-change shortcut: identical set + same SHA -> touch last_seen, no new row.
+        # No-change shortcut: identical set + same SHA -> no new row, but still
+        # advance last_seen and refresh severity/line (a finding can be re-rated
+        # in place without changing the fingerprint set).
         if prev is not None and current_set == prev_set and (prev["git_sha"] or "") == sha:
             with conn:
                 conn.executemany(
-                    "UPDATE finding_history SET last_seen_ts = ? WHERE fingerprint = ?",
-                    [(ts, fp) for fp in current_set],
+                    "UPDATE finding_history SET last_seen_ts = ?, severity = ?, "
+                    "line_start = ? WHERE fingerprint = ?",
+                    [(ts, current[fp]["severity"], current[fp]["line_start"], fp)
+                     for fp in current_set],
                 )
             return ScanResult(prev["id"], no_change=True, is_first=False,
                               persisting=sorted(current_set))
@@ -107,15 +111,19 @@ def record_scan(repo_root: Path, *, top_risk_score: int = 0, top_risk_label: str
                     )
                     new.append(fp)
                 elif existing["status"] == "fixed":
+                    # Refresh severity/line (not part of the fingerprint) so a re-rated
+                    # finding doesn't keep stale metadata the trends slice will read.
                     conn.execute(
                         "UPDATE finding_history SET status='open', fixed_ts='', "
-                        "reopened_count = reopened_count + 1, last_seen_scan = ?, "
-                        "last_seen_ts = ? WHERE fingerprint = ?", (scan_id, ts, fp))
+                        "reopened_count = reopened_count + 1, severity = ?, line_start = ?, "
+                        "last_seen_scan = ?, last_seen_ts = ? WHERE fingerprint = ?",
+                        (r["severity"], r["line_start"], scan_id, ts, fp))
                     regressed.append(fp)
                 else:
                     conn.execute(
-                        "UPDATE finding_history SET last_seen_scan = ?, last_seen_ts = ? "
-                        "WHERE fingerprint = ?", (scan_id, ts, fp))
+                        "UPDATE finding_history SET severity = ?, line_start = ?, "
+                        "last_seen_scan = ?, last_seen_ts = ? WHERE fingerprint = ?",
+                        (r["severity"], r["line_start"], scan_id, ts, fp))
                     persisting.append(fp)
             for row in conn.execute(
                 "SELECT fingerprint FROM finding_history WHERE status = 'open'").fetchall():

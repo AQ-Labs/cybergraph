@@ -545,7 +545,8 @@ def main(argv: list[str] | None = None) -> int:
             quiet=args.json,
         )
         if not args.json and hist is not None and not hist.is_first:
-            print(f"Δ since last scan: +{len(hist.new)} new, -{len(hist.fixed)} fixed, "
+            # ASCII only: a non-cp1252 char here crashes real Windows consoles.
+            print(f"Changes since last scan: +{len(hist.new)} new, -{len(hist.fixed)} fixed, "
                   f"{len(hist.regressed)} regressed")
     elif args.command == "config":
         from .config import load_config
