@@ -514,8 +514,6 @@ def main(argv: list[str] | None = None) -> int:
             color = (not args.no_color) and should_color()
             print(render_text(result, color=color))
             if not args.no_report:
-                from .visualize import generate_html_report
-
                 output = generate_html_report(repo, repo / ".cybergraph" / "report.html")
                 print(f"\nHTML report: {output}")
     elif args.command == "config":

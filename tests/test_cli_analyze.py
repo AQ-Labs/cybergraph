@@ -24,6 +24,20 @@ def test_analyze_text_prints_summary(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "CyberGraph analysis" in out
+
+
+def test_visualize_cli_command_still_works(tmp_path, capsys):
+    # Regression: a local import inside the 'analyze' branch once shadowed the
+    # module-level generate_html_report, making the 'visualize' command raise
+    # UnboundLocalError. The visualize command must work end-to-end.
+    repo = _repo(tmp_path)
+    assert main(["build", str(repo)]) == 0
+    capsys.readouterr()
+    code = main(["visualize", str(repo)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "HTML report" in out
+    assert (repo / ".cybergraph" / "report.html").is_file()
     assert "Top risks" in out
 
 
