@@ -185,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
+    visualize.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets")
 
     top_risks = sub.add_parser("top-risks", help="Show the highest-priority risks across graph layers")
     top_risks.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
@@ -261,6 +262,14 @@ def build_parser() -> argparse.ArgumentParser:
     history = sub.add_parser("history", help="Show recorded scan history and changes since last scan")
     history.add_argument("repo", nargs="?", default=".", help="Repository root")
     history.add_argument("--limit", type=int, default=20, help="Maximum scans to list")
+
+    quickstart = sub.add_parser(
+        "quickstart", help="Zero-to-report: init, build, analyze, and open the HTML report"
+    )
+    quickstart.add_argument("repo", nargs="?", default=".", help="Repository root")
+    quickstart.add_argument("--yes", action="store_true", help="Run non-interactively")
+    quickstart.add_argument("--no-open", action="store_true", help="Do not open the report in a browser")
+    quickstart.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets in the report")
 
     return parser
 
@@ -452,7 +461,9 @@ def main(argv: list[str] | None = None) -> int:
         output = export_sarif(repo, Path(args.output).resolve())
         print(f"Wrote SARIF report: {output}")
     elif args.command == "visualize":
-        output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
+        output = generate_html_report(
+            repo, Path(args.output).resolve() if args.output else None, with_source=args.with_source
+        )
         print(f"Wrote CyberGraph HTML report: {output}")
     elif args.command == "top-risks":
         from .security.investigate import collect_top_risks, format_top_risks
@@ -565,6 +576,23 @@ def main(argv: list[str] | None = None) -> int:
 
         rows = list_scans(repo, limit=args.limit)
         print(format_history(rows, scan_delta(repo)))
+    elif args.command == "quickstart":
+        import os
+        import sys
+        import webbrowser
+
+        from .quickstart import run_quickstart
+
+        result = run_quickstart(repo, with_source=args.with_source)
+        for step in result.steps:
+            print(step)
+        can_open = (not args.no_open) and sys.stdout.isatty() and not os.environ.get("CI")
+        if can_open:
+            try:
+                webbrowser.open(result.report_path.as_uri())
+            except Exception:
+                pass
+        print(f"\nOpen the report: {result.report_path}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0
