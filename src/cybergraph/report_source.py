@@ -17,26 +17,37 @@ _REDACTION = "***redacted***"
 
 # A `KEY = VALUE` / `KEY: VALUE` assignment; group 1 is the key, `val` is the value.
 _ASSIGN_RE = re.compile(r"([A-Za-z_][\w.\-]*)\s*[:=]\s*(?P<val>\S.*)$")
-# The key names that make an assignment's value a secret.
+# The key names that make an assignment's *literal* value a secret.
 _SECRET_KEY_RE = re.compile(
     r"(?i)(pass(?:word|wd|phrase)?|secret|token|api[_-]?key|apikey|access[_-]?key"
     r"|private[_-]?key|client[_-]?secret|credential|authorization|bearer)"
 )
-# Recognizable key material even without a keyword (AWS access key id).
-_AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{12,}")
+# A value that is a hardcoded literal worth masking: a quoted string, or a bare
+# high-entropy-ish token (no spaces/parens/operators). Expressions and function
+# calls (e.g. ``request.headers.get("x")``) do NOT match, so legit code is kept.
+_LITERAL_VALUE_RE = re.compile(r"""^(?:["'].*|[A-Za-z0-9_\-./+:=]{10,}$)""")
+# Recognizable key material to mask anywhere on a line, regardless of the key.
+_SECRET_VALUE_RE = re.compile(
+    r"AKIA[0-9A-Z]{12,}"                    # AWS access key id
+    r"|sk-[A-Za-z0-9]{16,}"                 # OpenAI-style
+    r"|ghp_[A-Za-z0-9]{20,}"                # GitHub PAT
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"        # Slack
+    r"|AIza[0-9A-Za-z\-_]{20,}"             # Google API key
+)
 
 
 def _redact_line(text: str) -> tuple[str, bool]:
     """Mask secret material in a single source line. Returns (text, was_redacted).
 
-    Conservative: only redacts a value whose key looks secret, or a recognizable
-    key pattern — ordinary code (``x = 1``, ``db.execute(...)``) passes through."""
+    Precise + fail-safe: masks a secret-keyed value only when it is a literal
+    (quoted string or bare token) — sparing function-call/expression values — and
+    always masks recognizable key patterns anywhere. Ordinary code passes through."""
     redacted = False
     match = _ASSIGN_RE.search(text)
-    if match and _SECRET_KEY_RE.search(match.group(1)):
+    if match and _SECRET_KEY_RE.search(match.group(1)) and _LITERAL_VALUE_RE.match(match.group("val").strip()):
         text = text[: match.start("val")] + _REDACTION
         redacted = True
-    masked = _AWS_KEY_RE.sub(_REDACTION, text)
+    masked = _SECRET_VALUE_RE.sub(_REDACTION, text)
     if masked != text:
         text, redacted = masked, True
     return text, redacted

@@ -33,6 +33,18 @@ def test_ordinary_code_is_not_over_redacted():
         assert red is False and text == line
 
 
+def test_function_call_value_on_secret_key_is_not_redacted():
+    # A secret-named key assigned from an expression/call is legit code, not a secret.
+    line = '    token = request.headers.get("authorization")'
+    text, red = _redact_line(line)
+    assert red is False and text == line
+
+
+def test_quoted_literal_on_secret_key_is_redacted():
+    text, red = _redact_line('    api_token = "abc123realtokenvalue"')
+    assert red is True and "abc123realtokenvalue" not in text
+
+
 # --- unit: anchoring on the finding line, not the node line -----------------
 def test_snippet_anchors_on_finding_line_not_node_line(tmp_path: Path):
     (tmp_path / "f.py").write_text("\n".join(f"line{n}" for n in range(1, 11)) + "\n", encoding="utf-8")
