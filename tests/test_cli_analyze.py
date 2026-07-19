@@ -24,6 +24,7 @@ def test_analyze_text_prints_summary(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "CyberGraph analysis" in out
+    assert "Top risks" in out
 
 
 def test_visualize_cli_command_still_works(tmp_path, capsys):
@@ -38,7 +39,6 @@ def test_visualize_cli_command_still_works(tmp_path, capsys):
     assert code == 0
     assert "HTML report" in out
     assert (repo / ".cybergraph" / "report.html").is_file()
-    assert "Top risks" in out
 
 
 def test_analyze_json_is_valid_and_versioned(tmp_path, capsys):
