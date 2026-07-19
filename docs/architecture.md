@@ -10,6 +10,7 @@ CyberGraph is built around one idea: security review should be graph-first, not 
 4. Import external scanner reports into the same database.
 5. Retrieve evidence for security questions using graph context plus findings.
 6. One 'analyze' command builds once and fans every analysis into a shared AnalysisResult consumed by the CLI, HTML report, and MCP server.
+7. Every build/scan/analyze records a line-stable snapshot of findings; 'history' reports new/fixed/regressed since the previous scan (history tables survive rebuilds).
 
 ## Current graph model
 
