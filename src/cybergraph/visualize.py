@@ -94,6 +94,7 @@ def _render_html(
         "__FINDINGS_TABLE__": _findings_table(findings),
         "__ATTACK_PATHS_LIST__": _attack_paths(attack_paths),
         "__LEGEND__": _legend(),
+        "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
         "__GRAPH_JSON__": _embed_json(graph_data),
         "__CYTOSCAPE_SRC__": _load_cytoscape_source(),
     }
@@ -128,6 +129,19 @@ EDGE_KINDS = [
     ("USES_RESOURCE", "#475569"),
     ("AFFECTS_DEPENDENCY", "#7c3aed"),
 ]
+
+
+def _truncation_banner(graph_data: dict) -> str:
+    if not graph_data.get("truncated"):
+        return ""
+    shown = len(graph_data.get("nodes", []))
+    total = int(graph_data.get("counts", {}).get("nodes", shown))
+    return (
+        "<div style='margin:0 0 12px;padding:10px 12px;border-radius:8px;"
+        "background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:13px;'>"
+        f"Showing {shown} of {total} nodes — raise <code>--max-nodes</code> to see the full graph."
+        "</div>"
+    )
 
 
 def _legend() -> str:
@@ -341,6 +355,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
     <h2>Interactive Graph Explorer</h2>
     <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
+    __TRUNCATION_BANNER__
     <div class="risk-strip" id="cg-risk-strip"></div>
     <div class="toolbar">
       <select id="cg-mode" aria-label="Graph view mode">
