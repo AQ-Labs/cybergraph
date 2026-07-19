@@ -173,8 +173,6 @@ def _findings_table(findings) -> str:
     )
     return (
         "<div class='toolbar'>"
-        "<input data-filter='findings-search' type='search' "
-        "placeholder='Search findings by rule, file, message, or tool'>"
         "<select data-filter='findings-severity' aria-label='Filter findings by severity'>"
         "<option value=''>All severities</option>"
         "<option value='critical'>Critical</option>"
@@ -821,7 +819,7 @@ _HTML_TEMPLATE = """<!doctype html>
     })();
   </script>
   <script>
-    const findingSearch = document.querySelector('[data-filter="findings-search"]');
+    const findingSearch = document.getElementById('cg-search');
     const findingSeverity = document.querySelector('[data-filter="findings-severity"]');
     function filterFindings() {
       const query = (findingSearch?.value || '').toLowerCase();
