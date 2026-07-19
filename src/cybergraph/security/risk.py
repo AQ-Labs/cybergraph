@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 _CONFIDENCE = {"high": 1.0, "medium": 0.75, "low": 0.45, "insufficient": 0.2}
 _SEVERITY = {"critical": 1.0, "high": 0.8, "medium": 0.55, "moderate": 0.55, "low": 0.3}
 

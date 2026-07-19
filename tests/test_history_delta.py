@@ -1,8 +1,8 @@
 # tests/test_history_delta.py
 from pathlib import Path
 
-from cybergraph.graph import GraphStore, Finding
-from cybergraph.history import list_scans, record_scan, scan_delta, format_delta_line
+from cybergraph.graph import Finding, GraphStore
+from cybergraph.history import format_delta_line, list_scans, record_scan, scan_delta
 
 
 def _set_findings(repo: Path, msgs: list[str]):

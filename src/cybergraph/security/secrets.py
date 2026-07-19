@@ -8,7 +8,11 @@ from pathlib import Path
 
 from cybergraph.analysis.resolve import EDGE_CALLS_RESOLVED
 from cybergraph.graph import GraphStore
-from cybergraph.security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_EXPOSES_SECRET, EDGE_USES_SECRET
+from cybergraph.security.ontology import (
+    EDGE_EXPOSES_ENTRYPOINT,
+    EDGE_EXPOSES_SECRET,
+    EDGE_USES_SECRET,
+)
 from cybergraph.security.risk import RiskScore, score_risk
 
 

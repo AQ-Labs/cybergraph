@@ -1,7 +1,7 @@
 # tests/test_history_record.py
 from pathlib import Path
 
-from cybergraph.graph import GraphStore, Finding
+from cybergraph.graph import Finding, GraphStore
 from cybergraph.history import fingerprint, record_scan
 
 
@@ -82,7 +82,7 @@ def test_non_git_repo_records_without_crashing(tmp_path: Path):
 
 
 def test_severity_refreshed_on_persist_and_regression(tmp_path: Path):
-    from cybergraph.graph import GraphStore, Finding
+    from cybergraph.graph import Finding, GraphStore
 
     def _add(sev: str):
         s = GraphStore.open_for_repo(tmp_path)

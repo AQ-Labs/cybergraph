@@ -6,7 +6,6 @@ import ast
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
-from cybergraph.suppressions import is_inline_suppressed
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
     AUTHZ_KEYWORDS,
@@ -16,8 +15,8 @@ from cybergraph.security.ontology import (
     EDGE_FLOWS_TO,
     EDGE_GUARDS,
     EDGE_IMPORTS,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_SANITIZES,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
@@ -26,6 +25,7 @@ from cybergraph.security.ontology import (
     SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
+from cybergraph.suppressions import is_inline_suppressed
 
 SECRET_EXPOSURE_SINKS = {
     "print",

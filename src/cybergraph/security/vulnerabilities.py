@@ -9,7 +9,6 @@ from typing import Any
 
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 
-
 EDGE_AFFECTS_DEPENDENCY = "AFFECTS_DEPENDENCY"
 
 

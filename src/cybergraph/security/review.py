@@ -20,7 +20,7 @@ class SecurityReview:
     changed_entrypoints: tuple[str, ...]
     changed_sink_edges: tuple[str, ...]
     attack_path_count: int
-    risk_deltas: tuple["RiskDelta", ...] = ()
+    risk_deltas: tuple[RiskDelta, ...] = ()
 
 
 @dataclass(frozen=True)

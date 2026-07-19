@@ -16,8 +16,8 @@ from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
     EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )

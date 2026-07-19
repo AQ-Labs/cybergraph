@@ -9,19 +9,19 @@ from . import __version__
 from .build import build_graph, scan_repo
 from .doctor import format_doctor, run_doctor
 from .graph import GraphStore
+from .graph_export import export_graph_json
 from .init_project import format_init_result, init_project
 from .pr_comment import write_pr_comment
-from .rag import answer_question, answer_grounded, format_grounded_answer
+from .rag import answer_grounded, answer_question, format_grounded_answer
+from .sarif import export_sarif
 from .security import (
     find_attack_paths,
     format_attack_paths,
     load_scanner_findings,
 )
-from .security.review import format_security_review, review_security_delta
 from .security.layers import format_layer_summary, summarize_layers
+from .security.review import format_security_review, review_security_delta
 from .security.vulnerabilities import import_vulnerability_report
-from .sarif import export_sarif
-from .graph_export import export_graph_json
 from .visualize import generate_html_report
 
 
@@ -481,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
         export_graph_json(repo, output, max_nodes=args.max_nodes)
         print(f"Wrote CyberGraph graph JSON: {output}")
     elif args.command == "triage":
-        from .security.triage import triage_findings, format_triage, load_findings
+        from .security.triage import format_triage, load_findings, triage_findings
 
         build_graph(repo)
         findings = load_findings(repo)
@@ -496,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
                 client = build_client(config)
         print(format_triage(triage_findings(repo, findings=findings, client=client)))
     elif args.command == "infer-specs":
-        from .security.spec_inference import propose_specs, format_specs
+        from .security.spec_inference import format_specs, propose_specs
 
         build_graph(repo)
         client = None
@@ -510,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
                 client = build_client(config)
         print(format_specs(propose_specs(repo, client=client)))
     elif args.command == "sca":
-        from .security.sca import prioritize_vulnerabilities, format_sca
+        from .security.sca import format_sca, prioritize_vulnerabilities
 
         # Read the existing graph (do NOT rebuild — that would clear the
         # vulnerabilities imported via 'import-vulns'). Flow: build -> import-vulns -> sca.
