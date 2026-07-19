@@ -1,7 +1,6 @@
 # tests/test_quickstart.py
 from pathlib import Path
 
-import pytest
 
 from cybergraph.cli import main
 from cybergraph.quickstart import run_quickstart
