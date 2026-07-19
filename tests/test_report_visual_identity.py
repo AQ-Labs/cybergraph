@@ -67,3 +67,30 @@ def test_dark_palette_brightens_nodes_and_dims_edges(tmp_path: Path) -> None:
     assert "#38bdf8" in html  # neon entrypoint
     assert "#f87171" in html  # neon sink
     assert "rgba(148, 163, 184, 0.35)" in html  # dimmed base edges
+
+
+def test_explainer_cards_replace_dot_legend(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "class='explainer'" in html
+    for word in ("NODE", "EDGE", "ZONE"):
+        assert word in html
+    assert "Attack Surface" in html and "Sensitive Sinks" in html
+
+
+def test_guided_first_view_highlights_top_risk(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "highlightPath('0')" in html
+    assert "pathNarrative" in html
+    assert "Start here: the #1 risk" in html
+
+
+def test_plain_language_labels_prefer_routes(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "displayLabel" in html
+    assert "props.route" in html
+
+
+def test_howto_intro_present(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "How to read this report" in html
+    assert '<details class="howto">' in html
