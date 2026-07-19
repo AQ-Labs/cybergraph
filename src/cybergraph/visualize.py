@@ -369,6 +369,10 @@ _HTML_TEMPLATE = """<!doctype html>
     .ex-line { width: 18px; height: 3px; border-radius: 2px; display: inline-block; background: #f59e0b; box-shadow: none; }
     .ex-hull { width: 16px; height: 12px; border-radius: 5px; border: 2px dashed #a78bfa; background: transparent; box-shadow: none; }
     .ex-samples { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11.5px; color: var(--muted); }
+    .howto { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; margin: 0 0 12px; font-size: 13px; }
+    .howto summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+    .howto ul { margin: 8px 0 4px; padding-left: 20px; }
+    .howto li { margin: 5px 0; line-height: 1.5; }
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
     .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
@@ -410,6 +414,15 @@ _HTML_TEMPLATE = """<!doctype html>
     __TOP_RISKS_TABLE__
 
     <h2>Interactive Graph Explorer</h2>
+    <details class="howto">
+      <summary>How to read this report</summary>
+      <ul>
+        <li><strong>Your codebase is drawn as a graph:</strong> every dot is a route, function, or secret; every line is a relationship between them.</li>
+        <li><strong>The glowing amber trail is the #1 risk</strong> — the most dangerous route user input can take from an entrypoint to a sensitive sink. The panel on the right tells its story.</li>
+        <li><strong>Click any risk card above the graph</strong> to trace a different attack path, or click a node to see its evidence, findings, and connections.</li>
+        <li><strong>Use the view menu</strong> to zoom out: module map for architecture, raw graph for everything; filters narrow by layer or severity.</li>
+      </ul>
+    </details>
     <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
     __TRUNCATION_BANNER__
     <div class="risk-strip" id="cg-risk-strip"></div>
