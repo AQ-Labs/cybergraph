@@ -1,7 +1,7 @@
 # tests/test_history_schema.py
 from pathlib import Path
 
-from cybergraph.graph import GraphStore, Finding
+from cybergraph.graph import GraphStore
 
 
 def test_history_tables_exist_and_version_seeded(tmp_path: Path):
