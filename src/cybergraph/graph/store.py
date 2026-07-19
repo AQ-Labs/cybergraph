@@ -48,6 +48,42 @@ CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    git_sha TEXT DEFAULT '',
+    git_branch TEXT DEFAULT '',
+    node_count INTEGER DEFAULT 0,
+    edge_count INTEGER DEFAULT 0,
+    finding_count INTEGER DEFAULT 0,
+    top_risk_score INTEGER DEFAULT 0,
+    top_risk_label TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS scan_findings (
+    scan_id INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    PRIMARY KEY (scan_id, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS finding_history (
+    fingerprint TEXT PRIMARY KEY,
+    rule_id TEXT DEFAULT '',
+    tool TEXT DEFAULT '',
+    file_path TEXT DEFAULT '',
+    severity TEXT DEFAULT '',
+    message TEXT DEFAULT '',
+    line_start INTEGER DEFAULT 0,
+    first_seen_scan INTEGER DEFAULT 0,
+    last_seen_scan INTEGER DEFAULT 0,
+    first_seen_ts TEXT DEFAULT '',
+    last_seen_ts TEXT DEFAULT '',
+    fixed_ts TEXT DEFAULT '',
+    status TEXT DEFAULT 'open',
+    reopened_count INTEGER DEFAULT 0
+);
 """
 
 
@@ -58,6 +94,10 @@ class GraphStore:
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self.conn.execute(
+            "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '2')"
+        )
+        self.conn.commit()
 
     @classmethod
     def open_for_repo(cls, repo_root: Path) -> "GraphStore":

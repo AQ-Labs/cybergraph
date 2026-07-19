@@ -185,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
+    visualize.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets")
 
     top_risks = sub.add_parser("top-risks", help="Show the highest-priority risks across graph layers")
     top_risks.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
@@ -258,6 +259,18 @@ def build_parser() -> argparse.ArgumentParser:
     config_show = config_sub.add_parser("show", help="Show the effective configuration")
     config_show.add_argument("repo", nargs="?", default=".", help="Repository root")
 
+    history = sub.add_parser("history", help="Show recorded scan history and changes since last scan")
+    history.add_argument("repo", nargs="?", default=".", help="Repository root")
+    history.add_argument("--limit", type=int, default=20, help="Maximum scans to list")
+
+    quickstart = sub.add_parser(
+        "quickstart", help="Zero-to-report: init, build, analyze, and open the HTML report"
+    )
+    quickstart.add_argument("repo", nargs="?", default=".", help="Repository root")
+    quickstart.add_argument("--yes", action="store_true", help="Run non-interactively")
+    quickstart.add_argument("--no-open", action="store_true", help="Do not open the report in a browser")
+    quickstart.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets in the report")
+
     return parser
 
 
@@ -285,6 +298,21 @@ def _validate_json_report(path: Path) -> str | None:
     except OSError as exc:
         return f"Could not read report {path}: {exc}"
     return None
+
+
+def _record_history(repo: Path, *, top_risk_score: int = 0, top_risk_label: str = "", quiet: bool = False):
+    """Best-effort scan recording; never fails the calling command.
+
+    ``quiet=True`` (used by ``analyze --json``) suppresses the on-error warning so
+    it can never corrupt machine-readable stdout."""
+    try:
+        from .history import record_scan
+
+        return record_scan(repo, top_risk_score=top_risk_score, top_risk_label=top_risk_label)
+    except Exception as exc:  # history is a side benefit, not a hard requirement
+        if not quiet:
+            print(f"(history not recorded: {exc})")
+        return None
 
 
 def _resolve_repo(args: argparse.Namespace) -> Path:
@@ -328,10 +356,12 @@ def main(argv: list[str] | None = None) -> int:
         counts = build_graph(repo)
         print(f"Built security graph for {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+        _record_history(repo)
     elif args.command == "scan":
         counts = scan_repo(repo)
         print(f"Scanned {repo}")
         print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+        _record_history(repo)
     elif args.command == "import-report":
         report_path = Path(args.report).resolve()
         error = _validate_json_report(report_path)
@@ -431,7 +461,9 @@ def main(argv: list[str] | None = None) -> int:
         output = export_sarif(repo, Path(args.output).resolve())
         print(f"Wrote SARIF report: {output}")
     elif args.command == "visualize":
-        output = generate_html_report(repo, Path(args.output).resolve() if args.output else None)
+        output = generate_html_report(
+            repo, Path(args.output).resolve() if args.output else None, with_source=args.with_source
+        )
         print(f"Wrote CyberGraph HTML report: {output}")
     elif args.command == "top-risks":
         from .security.investigate import collect_top_risks, format_top_risks
@@ -516,6 +548,17 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_report:
                 output = generate_html_report(repo, repo / ".cybergraph" / "report.html")
                 print(f"\nHTML report: {output}")
+        top = result.top_risks[0] if result.top_risks else None
+        hist = _record_history(
+            repo,
+            top_risk_score=(top.risk_score if top else 0),
+            top_risk_label=(top.risk_label if top else ""),
+            quiet=args.json,
+        )
+        if not args.json and hist is not None and not hist.is_first:
+            # ASCII only: a non-cp1252 char here crashes real Windows consoles.
+            print(f"Changes since last scan: +{len(hist.new)} new, -{len(hist.fixed)} fixed, "
+                  f"{len(hist.regressed)} regressed")
     elif args.command == "config":
         from .config import load_config
         from .llm import load_llm_config_from_env
@@ -528,6 +571,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Custom sinks: {list(cfg.custom_sinks)}")
         print(f"Suppressed rules: {list(cfg.suppressed_rules)}")
         print(f"Suppressed paths: {list(cfg.suppressed_paths)}")
+    elif args.command == "history":
+        from .history import format_history, list_scans, scan_delta
+
+        rows = list_scans(repo, limit=args.limit)
+        print(format_history(rows, scan_delta(repo)))
+    elif args.command == "quickstart":
+        import os
+        import sys
+        import webbrowser
+
+        from .quickstart import run_quickstart
+
+        result = run_quickstart(repo, with_source=args.with_source)
+        for step in result.steps:
+            print(step)
+        can_open = (not args.no_open) and sys.stdout.isatty() and not os.environ.get("CI")
+        if can_open:
+            try:
+                webbrowser.open(result.report_path.as_uri())
+            except Exception:
+                pass
+        print(f"\nOpen the report: {result.report_path}")
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0

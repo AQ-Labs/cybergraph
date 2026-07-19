@@ -50,9 +50,11 @@ Supported Python: 3.10, 3.11, 3.12.
 ## Quick start
 
 ```bash
+cybergraph quickstart .        # zero-to-report: init, build, analyze, open report
 cybergraph init .
 cybergraph doctor .
 cybergraph analyze .          # build + run every analysis, print top risks
+cybergraph history .          # what's new / fixed / regressed since the last scan
 cybergraph config show .      # inspect effective config + LLM/graph state
 cybergraph build path/to/repo
 cybergraph ask "Which functions reach SQL execution?" --repo path/to/repo
