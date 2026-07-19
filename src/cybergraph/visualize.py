@@ -20,7 +20,7 @@ from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.layers import summarize_layers
 
 
-def generate_html_report(repo_root: Path, output: Path | None = None) -> Path:
+def generate_html_report(repo_root: Path, output: Path | None = None, *, with_source: bool = False) -> Path:
     repo_root = repo_root.resolve()
     output = output or repo_root / ".cybergraph" / "report.html"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +56,10 @@ def generate_html_report(repo_root: Path, output: Path | None = None) -> Path:
     layers = summarize_layers(repo_root)
     attack_paths = find_attack_paths(repo_root, limit=25)
     graph_data = build_graph_data(repo_root)
+    if with_source:
+        from cybergraph.report_source import attach_source_snippets
+
+        attach_source_snippets(repo_root, graph_data)
     output.write_text(
         _render_html(
             repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
@@ -90,6 +94,7 @@ def _render_html(
         "__FINDINGS_TABLE__": _findings_table(findings),
         "__ATTACK_PATHS_LIST__": _attack_paths(attack_paths),
         "__LEGEND__": _legend(),
+        "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
         "__GRAPH_JSON__": _embed_json(graph_data),
         "__CYTOSCAPE_SRC__": _load_cytoscape_source(),
     }
@@ -124,6 +129,19 @@ EDGE_KINDS = [
     ("USES_RESOURCE", "#475569"),
     ("AFFECTS_DEPENDENCY", "#7c3aed"),
 ]
+
+
+def _truncation_banner(graph_data: dict) -> str:
+    if not graph_data.get("truncated"):
+        return ""
+    shown = len(graph_data.get("nodes", []))
+    total = int(graph_data.get("counts", {}).get("nodes", shown))
+    return (
+        "<div style='margin:0 0 12px;padding:10px 12px;border-radius:8px;"
+        "background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:13px;'>"
+        f"Showing {shown} of {total} nodes — raise <code>--max-nodes</code> to see the full graph."
+        "</div>"
+    )
 
 
 def _legend() -> str:
@@ -169,8 +187,6 @@ def _findings_table(findings) -> str:
     )
     return (
         "<div class='toolbar'>"
-        "<input data-filter='findings-search' type='search' "
-        "placeholder='Search findings by rule, file, message, or tool'>"
         "<select data-filter='findings-severity' aria-label='Filter findings by severity'>"
         "<option value=''>All severities</option>"
         "<option value='critical'>Critical</option>"
@@ -244,20 +260,32 @@ _HTML_TEMPLATE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CyberGraph Report</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif; }
-    body { margin: 0; background: #f5f7fb; color: #111827; }
-    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; }
+    :root {
+      color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif;
+      --bg: #f5f7fb; --fg: #111827; --panel: #ffffff; --border: #d8e0ea;
+      --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+    }
+    :root[data-theme="dark"] { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+    :root[data-theme="light"] { color-scheme: light; --bg: #f5f7fb; --fg: #111827; --panel: #ffffff;
+              --border: #d8e0ea; --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc; }
+    body { margin: 0; background: var(--bg); color: var(--fg); }
+    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; position: relative; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
-    .muted { color: #667085; }
+    .muted { color: var(--muted); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .stat, table { background: white; border: 1px solid #d8e0ea; border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
+    .stat, table { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
     .stat { padding: 16px; }
     .stat strong { display: block; font-size: 26px; margin-top: 4px; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #d0d7de; text-align: left; vertical-align: top; }
-    th { background: #f0f3f6; font-size: 13px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--th); font-size: 13px; }
     tr:last-child td { border-bottom: 0; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #eef6ff; color: #075985; font-size: 12px; }
     .path { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
@@ -269,7 +297,7 @@ _HTML_TEMPLATE = """<!doctype html>
     code { color: #7c2d12; }
     .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
     .graph-card, .details {
-      background: white; border: 1px solid #d8e0ea; border-radius: 16px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
@@ -277,7 +305,7 @@ _HTML_TEMPLATE = """<!doctype html>
     .graph-title { font-weight: 700; }
     .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
     .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
-    #cy { height: 640px; background: linear-gradient(135deg, #f8fafc, #ffffff 58%, #f1f5f9); }
+    #cy { height: 640px; background: var(--cy-bg); }
     .details { padding: 14px; height: 668px; overflow: auto; font-size: 13px; }
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
@@ -292,13 +320,27 @@ _HTML_TEMPLATE = """<!doctype html>
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: #64748b; font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
+    .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .cg-snippet .ln { display: flex; gap: 10px; padding: 1px 8px; white-space: pre; }
+    .cg-snippet .ln .num { color: var(--muted, #94a3b8); user-select: none; min-width: 30px; text-align: right; }
+    .cg-snippet .ln.hl { background: rgba(245, 158, 11, 0.18); }
     @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
   </style>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('cybergraph-theme');
+        if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header>
     <h1>CyberGraph Security Report</h1>
     <div>__REPO__</div>
+    <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;border-radius:6px;padding:6px 10px;">Theme</button>
   </header>
   <main>
     <section class="grid">
@@ -313,6 +355,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
     <h2>Interactive Graph Explorer</h2>
     <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
+    __TRUNCATION_BANNER__
     <div class="risk-strip" id="cg-risk-strip"></div>
     <div class="toolbar">
       <select id="cg-mode" aria-label="Graph view mode">
@@ -590,7 +633,8 @@ _HTML_TEMPLATE = """<!doctype html>
         style: [
           { selector: 'node', style: {
             'background-color': function (ele) { return GROUP_COLORS[ele.data('group')] || '#94a3b8'; },
-            'label': 'data(label)', 'font-size': 10, 'font-weight': 600, 'color': '#0b1220',
+            'label': 'data(label)', 'font-size': 10, 'font-weight': 600,
+            'color': '#0b1220', 'text-outline-width': 2, 'text-outline-color': '#f8fafc',
             'text-wrap': 'ellipsis', 'text-max-width': 110, 'width': 24, 'height': 24,
             'border-width': 1, 'border-color': '#ffffff'
           } },
@@ -742,6 +786,15 @@ _HTML_TEMPLATE = """<!doctype html>
         }
         const neighbors = node.neighborhood('node').map(function (n) { return n.data('label'); });
         if (neighbors.length) html += '<div class="kv"><strong>Connected:</strong> ' + esc(neighbors.slice(0, 12).join(', ')) + '</div>';
+        const snip = d.snippet;
+        if (snip && snip.lines && snip.lines.length) {
+          html += '<div class="kv"><strong>Source:</strong> <code>' + esc(snip.file) + '</code></div>';
+          html += '<div class="cg-snippet">';
+          snip.lines.forEach(function (ln) {
+            html += '<div class="ln' + (ln.highlight ? ' hl' : '') + '"><span class="num">' + esc(ln.n) + '</span><span>' + ln.text + '</span></div>';
+          });
+          html += '</div>';
+        }
         document.getElementById('cg-details').innerHTML = html;
       }
 
@@ -781,7 +834,7 @@ _HTML_TEMPLATE = """<!doctype html>
     })();
   </script>
   <script>
-    const findingSearch = document.querySelector('[data-filter="findings-search"]');
+    const findingSearch = document.getElementById('cg-search');
     const findingSeverity = document.querySelector('[data-filter="findings-severity"]');
     function filterFindings() {
       const query = (findingSearch?.value || '').toLowerCase();
@@ -794,6 +847,11 @@ _HTML_TEMPLATE = """<!doctype html>
     }
     findingSearch?.addEventListener('input', filterFindings);
     findingSeverity?.addEventListener('change', filterFindings);
+    document.getElementById('cg-theme-toggle')?.addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try { localStorage.setItem('cybergraph-theme', cur); } catch (e) {}
+    });
   </script>
 </body>
 </html>
