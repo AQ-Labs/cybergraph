@@ -145,12 +145,41 @@ def _truncation_banner(graph_data: dict) -> str:
 
 
 def _legend() -> str:
-    items = "".join(
+    """Three explainer cards (Node / Edge / Zone) instead of a flat dot strip."""
+    dots = "".join(
         f"<span class='legend-item'><span class='legend-dot' style='background:{color}'></span>"
         f"{html.escape(label)}</span>"
         for _, label, color in NODE_GROUPS
     )
-    return f"<div class='legend'>{items}</div>"
+    return (
+        "<div class='explainer'>"
+        "<div class='ex-card'>"
+        "<div class='ex-title'><span class='ex-glyph' style='background:#38bdf8'></span>NODE</div>"
+        "<p>One thing in your code: a route, function, secret, or resource. "
+        "Color is its security role; bigger means riskier.</p>"
+        f"<div class='ex-samples'>{dots}</div>"
+        "</div>"
+        "<div class='ex-card'>"
+        "<div class='ex-title'><span class='ex-glyph ex-line'></span>EDGE</div>"
+        "<p>A relationship between two nodes. Gray means a call, red means it "
+        "reaches a dangerous sink, green means a guard protects it, and the "
+        "glowing amber trail is a highlighted attack path.</p>"
+        "<div class='ex-samples'>"
+        "<span class='legend-item'><span class='ex-line' style='background:#94a3b8'></span>calls</span>"
+        "<span class='legend-item'><span class='ex-line' style='background:#dc2626'></span>reaches sink</span>"
+        "<span class='legend-item'><span class='ex-line' style='background:#16a34a'></span>guards</span>"
+        "<span class='legend-item'><span class='ex-line' style='background:#f59e0b'></span>attack path</span>"
+        "</div>"
+        "</div>"
+        "<div class='ex-card'>"
+        "<div class='ex-title'><span class='ex-glyph ex-hull'></span>ZONE</div>"
+        "<p>A security layer of the app. Reading left to right: "
+        "<strong>Attack Surface</strong> (entrypoints) &rarr; <strong>Guards</strong> "
+        "(auth and validation) &rarr; <strong>Application Logic</strong> &rarr; "
+        "<strong>Sensitive Sinks</strong> (database, shell, files, network).</p>"
+        "</div>"
+        "</div>"
+    )
 
 
 def _layers_table(layers) -> str:
@@ -330,9 +359,16 @@ _HTML_TEMPLATE = """<!doctype html>
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
     .details .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; color: white; }
-    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 14px; font-size: 12px; color: var(--muted); }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+    .explainer { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 8px 0 14px; }
+    .ex-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+    .ex-card p { margin: 6px 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+    .ex-title { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+    .ex-glyph { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px rgba(56, 189, 248, 0.8); }
+    .ex-line { width: 18px; height: 3px; border-radius: 2px; display: inline-block; background: #f59e0b; box-shadow: none; }
+    .ex-hull { width: 16px; height: 12px; border-radius: 5px; border: 2px dashed #a78bfa; background: transparent; box-shadow: none; }
+    .ex-samples { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 11.5px; color: var(--muted); }
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
     .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
