@@ -34,6 +34,23 @@ GROUP_VULNERABILITY = "vulnerability"
 GROUP_INFRASTRUCTURE = "infrastructure"
 GROUP_CALL = "call"
 
+# Security zones: plain-English clusters used by the report's Zones view.
+ZONE_BY_GROUP = {
+    GROUP_ENTRYPOINT: ("attack-surface", "Attack Surface"),
+    GROUP_GUARD: ("guards", "Guards"),
+    GROUP_VALIDATOR: ("guards", "Guards"),
+    GROUP_SINK: ("sinks", "Sensitive Sinks"),
+    GROUP_SECRET: ("secrets", "Secrets"),
+    GROUP_DEPENDENCY: ("supply-chain", "Supply Chain"),
+    GROUP_VULNERABILITY: ("supply-chain", "Supply Chain"),
+    GROUP_INFRASTRUCTURE: ("infrastructure", "Infrastructure"),
+}
+ZONE_DEFAULT = ("logic", "Application Logic")
+
+
+def _zone(group: str) -> str:
+    return ZONE_BY_GROUP.get(group, ZONE_DEFAULT)[0]
+
 # Edge kind -> the group a *synthesized* (otherwise unknown) target should take.
 _EDGE_TARGET_GROUP = {
     "REACHES_SINK": GROUP_SINK,
@@ -76,6 +93,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
             "id": row["key"],
             "label": row["name"],
             "group": _node_group(row["kind"], props),
+            "zone": _zone(_node_group(row["kind"], props)),
             "kind": row["kind"],
             "file": row["file_path"] or "",
             "line": row["line_start"] or 0,
@@ -173,6 +191,7 @@ def _ensure_node(nodes: dict[str, dict[str, Any]], key: str, group: str) -> str:
             "id": key,
             "label": key.rsplit("::", 1)[-1],
             "group": group,
+            "zone": _zone(group),
             "kind": "Synthetic",
             "file": "",
             "line": 0,
@@ -185,6 +204,7 @@ def _ensure_node(nodes: dict[str, dict[str, Any]], key: str, group: str) -> str:
         # A node first seen via a generic CALLS edge can be upgraded once a more
         # specific security relationship (sink/guard/secret/validator) targets it.
         existing["group"] = group
+        existing["zone"] = _zone(group)
     return key
 
 
