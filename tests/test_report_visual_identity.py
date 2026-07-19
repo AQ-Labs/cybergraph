@@ -94,3 +94,34 @@ def test_howto_intro_present(tmp_path: Path) -> None:
     html = _report_html(tmp_path)
     assert "How to read this report" in html
     assert '<details class="howto">' in html
+
+
+def test_exported_nodes_carry_security_zones(tmp_path: Path) -> None:
+    from cybergraph.graph_export import build_graph_data
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "import sqlite3\n"
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/items')\n"
+        "def get_items(q: str):\n"
+        "    db = sqlite3.connect('x.db')\n"
+        "    return db.execute('select ' + q)\n",
+        encoding="utf-8",
+    )
+    build_graph(repo)
+    data = build_graph_data(repo)
+    zones = {node.get("zone") for node in data["nodes"]}
+    assert None not in zones
+    assert "attack-surface" in zones
+    assert "sinks" in zones
+
+
+def test_zones_view_present_in_report(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "View: security zones" in html
+    assert "buildZoneElements" in html
+    assert "'zone:' + zone" in html  # compound parents
+    assert "Attack Surface → Guards" in html or "Attack Surface \u2192 Guards" in html
