@@ -342,8 +342,8 @@ def main(argv: list[str] | None = None) -> int:
     from .env import load_dotenv
     load_dotenv(repo)
 
-    _READ_COMMANDS = {"explain", "paths", "layers", "sca", "ask"}
-    if args.command in _READ_COMMANDS and not _graph_built(repo):
+    read_commands = {"explain", "paths", "layers", "sca", "ask"}
+    if args.command in read_commands and not _graph_built(repo):
         print(f"No graph found at {repo / '.cybergraph' / 'graph.db'}. "
               f"Run 'cybergraph build {repo}' first (or 'cybergraph analyze {repo}').")
         return 0

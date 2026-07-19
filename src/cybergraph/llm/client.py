@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
-class LLMUnavailable(RuntimeError):
+class LLMUnavailableError(RuntimeError):
     """Raised when an LLM is requested but cannot be constructed/used."""
+
+
+# Backward-compatible alias for the pre-N818 name.
+LLMUnavailable = LLMUnavailableError
 
 
 @runtime_checkable
@@ -94,7 +98,7 @@ def build_client(config: LLMConfig) -> LLMClient:
         return _AnthropicClient(config)
     if config.provider in {"openai", "kimi", "moonshot"}:
         return _OpenAICompatibleClient(config)
-    raise LLMUnavailable(f"Unknown LLM provider: {config.provider!r}")
+    raise LLMUnavailableError(f"Unknown LLM provider: {config.provider!r}")
 
 
 class _AnthropicClient:
@@ -102,7 +106,7 @@ class _AnthropicClient:
         try:
             import anthropic  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise LLMUnavailable(
+            raise LLMUnavailableError(
                 "Install cybergraph[llm] (anthropic) to use the Anthropic provider."
             ) from exc
         self._config = config
@@ -129,7 +133,7 @@ class _OpenAICompatibleClient:
         try:
             import openai  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise LLMUnavailable(
+            raise LLMUnavailableError(
                 "Install cybergraph[llm] (openai) to use OpenAI/Kimi providers."
             ) from exc
         self._config = config

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from cybergraph.build import build_graph
-from cybergraph.security import spec_inference as S
+from cybergraph.security import spec_inference as si
 
 
 # --- mock client (no network) -----------------------------------------------
@@ -26,7 +26,7 @@ def test_validate_keeps_only_grounded_and_novel():
         "sink": ["run_report_sql", "execute", "ghost_sink"],
         "sanitizer": ["scrub_html"],
     }
-    specs = S.validate_proposals(proposals, calls)
+    specs = si.validate_proposals(proposals, calls)
 
     # grounded + novel -> accepted
     assert "run_report_sql" in specs.sinks
@@ -39,12 +39,12 @@ def test_validate_keeps_only_grounded_and_novel():
 
 
 def test_validate_dedupes_and_lowercases():
-    specs = S.validate_proposals({"sink": ["RunSql", "runsql"]}, ["runsql"])
+    specs = si.validate_proposals({"sink": ["RunSql", "runsql"]}, ["runsql"])
     assert specs.sinks == ("runsql",)
 
 
 def test_abstain_when_no_client_returns_empty():
-    specs = S.propose_specs(Path("."), client=None)
+    specs = si.propose_specs(Path("."), client=None)
     assert specs.total_accepted == 0
     assert specs.rejected == ()
 
@@ -52,7 +52,7 @@ def test_abstain_when_no_client_returns_empty():
 def test_propose_with_client_validates_against_supplied_calls():
     calls = ["fetch_remote", "scrub_html", "execute"]
     client = _Client(sinks=["fetch_remote", "execute"], sanitizers=["scrub_html"], sources=["nope_src"])
-    specs = S.propose_specs(Path("."), client=client, calls=calls)
+    specs = si.propose_specs(Path("."), client=client, calls=calls)
 
     assert specs.sinks == ("fetch_remote",)          # grounded + novel
     assert specs.sanitizers == ("scrub_html",)       # grounded + novel
@@ -61,7 +61,7 @@ def test_propose_with_client_validates_against_supplied_calls():
 
 
 def test_propose_empty_calls_abstains():
-    specs = S.propose_specs(Path("."), client=_Client(sinks=["x"]), calls=[])
+    specs = si.propose_specs(Path("."), client=_Client(sinks=["x"]), calls=[])
     assert specs.total_accepted == 0
 
 
@@ -77,9 +77,9 @@ def test_candidate_calls_reflects_real_call_sites(tmp_path: Path):
     )
     build_graph(repo)
 
-    calls = S.candidate_calls(repo)
+    calls = si.candidate_calls(repo)
     assert "run_report_sql" in calls
 
     # End-to-end: a client proposing the real, novel call name yields a validated sink.
-    specs = S.propose_specs(repo, client=_Client(sinks=["run_report_sql"]))
+    specs = si.propose_specs(repo, client=_Client(sinks=["run_report_sql"]))
     assert "run_report_sql" in specs.sinks

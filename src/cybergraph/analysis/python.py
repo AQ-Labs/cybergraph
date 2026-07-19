@@ -72,7 +72,7 @@ def analyze_python_file(
     findings: list[Finding] = []
 
     for item in ast.walk(tree):
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
             key = f"{rel}::{item.name}"
             props = classify_name(item.name, auth_markers, validation_markers, secret_markers, custom_sinks)
             decorators = _decorator_texts(item)
@@ -306,7 +306,7 @@ def _ensure_input_node(
 def _assigned_names(target: ast.AST) -> list[str]:
     if isinstance(target, ast.Name):
         return [target.id]
-    if isinstance(target, (ast.Tuple, ast.List)):
+    if isinstance(target, ast.Tuple | ast.List):
         names: list[str] = []
         for elt in target.elts:
             names.extend(_assigned_names(elt))

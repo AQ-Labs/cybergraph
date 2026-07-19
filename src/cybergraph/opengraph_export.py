@@ -75,9 +75,9 @@ def _clean_properties(node: dict[str, Any]) -> dict[str, Any]:
         props["finding_count"] = len(node["findings"])
     for key, value in (node.get("properties") or {}).items():
         prop_key = str(key).lower()
-        if isinstance(value, (str, int, float, bool)):
+        if isinstance(value, str | int | float | bool):
             props[prop_key] = value
-        elif isinstance(value, list) and all(isinstance(v, (str, int, float, bool)) for v in value):
+        elif isinstance(value, list) and all(isinstance(v, str | int | float | bool) for v in value):
             props[prop_key] = value
         else:
             props[prop_key] = json.dumps(value, sort_keys=True)

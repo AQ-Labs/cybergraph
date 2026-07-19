@@ -12,6 +12,7 @@ from .client import (
     LLMClient,
     LLMConfig,
     LLMUnavailable,
+    LLMUnavailableError,
     build_client,
     load_llm_config_from_env,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "LLMClient",
     "LLMConfig",
     "LLMUnavailable",
+    "LLMUnavailableError",
     "build_client",
     "load_llm_config_from_env",
 ]
