@@ -50,10 +50,18 @@ def build_parser() -> argparse.ArgumentParser:
     import_report = sub.add_parser("import-report", help="Import findings from Semgrep, SARIF, or Gitleaks JSON")
     import_report.add_argument("report", help="Path to scanner report JSON")
     import_report.add_argument("--repo", default=".", help="Repository root containing the graph")
+    import_report.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     import_vulns = sub.add_parser("import-vulns", help="Import OSV Scanner or npm audit vulnerability JSON")
     import_vulns.add_argument("report", help="Path to vulnerability report JSON")
     import_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
+    import_vulns.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     import_strix = sub.add_parser(
         "import-strix",
@@ -63,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="Path to a Strix run directory or its vulnerabilities.json"
     )
     import_strix.add_argument("--repo", default=".", help="Repository root containing the graph")
+    import_strix.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     enrich_vulns = sub.add_parser(
         "enrich-vulns",
@@ -70,10 +82,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enrich_vulns.add_argument("report", help="Path to advisory enrichment JSON")
     enrich_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
+    enrich_vulns.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     ask = sub.add_parser("ask", help="Ask a security question against the graph")
     ask.add_argument("question", help="Security review question")
     ask.add_argument("--repo", default=".", help="Repository root containing the graph")
+    ask.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     explain = sub.add_parser(
         "explain", help="Answer a security question with cited, confidence-scored graph evidence"
@@ -86,6 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Phrase the answer with a configured LLM (CYBERGRAPH_LLM_* env), grounded in evidence",
     )
     explain.add_argument("--limit", type=int, default=8, help="Maximum evidence records to retrieve")
+    explain.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     paths = sub.add_parser("paths", help="Explain entrypoint-to-sink attack paths")
     paths.add_argument("--repo", default=".", help="Repository root containing the graph")
@@ -95,9 +119,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable interprocedural traversal (intra-function only; for ablation)",
     )
+    paths.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     layers = sub.add_parser("layers", help="Summarize detected security layers")
     layers.add_argument("--repo", default=".", help="Repository root containing the graph")
+    layers.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     secrets = sub.add_parser(
         "secrets",
@@ -128,15 +160,27 @@ def build_parser() -> argparse.ArgumentParser:
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     review.add_argument("--repo", default=".", help="Repository root to review")
+    review.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root to review (optional positional; alias for --repo)",
+    )
 
     comment = sub.add_parser("pr-comment", help="Generate a markdown PR security review comment")
     comment.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     comment.add_argument("--repo", default=".", help="Repository root to review")
     comment.add_argument("--output", default="cybergraph-pr-comment.md", help="Output markdown path")
+    comment.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root to review (optional positional; alias for --repo)",
+    )
 
     sarif = sub.add_parser("sarif", help="Export CyberGraph findings as SARIF")
     sarif.add_argument("--repo", default=".", help="Repository root containing the graph")
     sarif.add_argument("--output", default="cybergraph.sarif", help="Output SARIF path")
+    sarif.add_argument(
+        "repo_pos", nargs="?", default=None,
+        help="Repository root containing the graph (optional positional; alias for --repo)",
+    )
 
     visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
     visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
@@ -243,14 +287,32 @@ def _validate_json_report(path: Path) -> str | None:
     return None
 
 
+def _resolve_repo(args: argparse.Namespace) -> Path:
+    """Resolve the target repo consistently across commands.
+
+    Preference order: an optional positional ``repo_pos`` (added to commands
+    that were previously ``--repo``-only), then ``--repo``/an existing
+    positional ``repo`` (both share the ``repo`` dest), then ``"."``.
+    """
+    repo_pos = getattr(args, "repo_pos", None)
+    if repo_pos:
+        return Path(repo_pos).resolve()
+    repo_flag = getattr(args, "repo", None)
+    if repo_flag:
+        return Path(repo_flag).resolve()
+    return Path(".").resolve()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
 
-    from .env import load_dotenv
-    load_dotenv(Path(".").resolve())
-
     args = parser.parse_args(argv)
-    repo = Path(getattr(args, "repo", ".")).resolve()
+    repo = _resolve_repo(args)
+
+    # Resolved AFTER the repo argument is known so a repo other than cwd gets
+    # its own .env picked up (load_dotenv also checks cwd on top of repo_root).
+    from .env import load_dotenv
+    load_dotenv(repo)
 
     _READ_COMMANDS = {"explain", "paths", "layers", "sca", "ask"}
     if args.command in _READ_COMMANDS and not _graph_built(repo):

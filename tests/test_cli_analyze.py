@@ -35,3 +35,42 @@ def test_analyze_json_is_valid_and_versioned(tmp_path, capsys):
     doc = json.loads(out)
     assert doc["schema"] == "cybergraph.analysis/1"
     assert doc["counts"]["nodes"] > 0
+
+
+def test_analyze_json_emits_only_json(tmp_path, capsys):
+    repo = _repo(tmp_path)
+    code = main(["analyze", str(repo), "--json", "--no-report"])
+    out = capsys.readouterr().out
+    assert code == 0
+    stripped = out.strip()
+    assert stripped.startswith("{")
+    assert stripped.endswith("}")
+    # a single JSON document -- no extra lines (e.g. no "HTML report:" leakage)
+    doc = json.loads(stripped)
+    assert json.loads(out) == doc
+
+
+def test_analyze_text_no_color_has_no_ansi(tmp_path, capsys):
+    repo = _repo(tmp_path)
+    code = main(["analyze", str(repo), "--no-color", "--no-report"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "\x1b[" not in out
+
+
+def test_analyze_writes_report_by_default_and_skips_with_flag(tmp_path, capsys):
+    repo = _repo(tmp_path)
+    code = main(["analyze", str(repo), "--no-color"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "HTML report:" in out
+    assert (repo / ".cybergraph" / "report.html").is_file()
+
+    # --no-report: neither the file nor the message should appear on a fresh run
+    report_path = repo / ".cybergraph" / "report.html"
+    report_path.unlink()
+    code = main(["analyze", str(repo), "--no-color", "--no-report"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "HTML report:" not in out
+    assert not report_path.is_file()
