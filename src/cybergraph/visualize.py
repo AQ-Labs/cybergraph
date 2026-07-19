@@ -534,6 +534,15 @@ _HTML_TEMPLATE = """<!doctype html>
         return String(id || '?').split('::').pop().split('/').pop();
       }
 
+      // Entrypoints read best as their route ("GET /items"), not the handler name.
+      function displayLabel(n) {
+        const props = (n && n.properties) || {};
+        if (n && n.group === 'entrypoint' && props.route) {
+          return String((props.method ? props.method + ' ' : '') + props.route);
+        }
+        return (n && n.label) || tail(n && n.id);
+      }
+
       function moduleName(file) {
         if (!file) return 'synthetic';
         const parts = String(file).split('/').filter(Boolean);
@@ -554,7 +563,9 @@ _HTML_TEMPLATE = """<!doctype html>
           properties: {},
           synthetic: true
         };
-        return Object.assign({}, base, overrides || {});
+        const merged = Object.assign({}, base, overrides || {});
+        merged.label = displayLabel(merged);
+        return merged;
       }
 
       function makeEdge(source, target, kind, id, extra) {
@@ -575,7 +586,9 @@ _HTML_TEMPLATE = """<!doctype html>
 
       function buildRawElements() {
         const elements = [];
-        rawNodes.forEach(function (n) { elements.push({ data: Object.assign({}, n) }); });
+        rawNodes.forEach(function (n) {
+          elements.push({ data: Object.assign({}, n, { label: displayLabel(n) }) });
+        });
         rawEdges.forEach(function (e) {
           elements.push({
             data: {
@@ -900,6 +913,7 @@ _HTML_TEMPLATE = """<!doctype html>
         const color = groupColor(d.group);
         let html = '<h3>' + esc(d.label) + '</h3>';
         html += '<div class="kv"><span class="tag" style="background:' + color + '">' + esc(d.group) + '</span></div>';
+        if (d.id && d.id !== d.label) html += '<div class="kv muted"><code>' + esc(d.id) + '</code></div>';
         if (d.file) html += '<div class="kv"><strong>Location:</strong> <code>' + esc(d.file) + ':' + esc(d.line) + '</code></div>';
         html += '<div class="kv"><strong>Kind:</strong> ' + esc(d.kind) + '</div>';
         if (d.severity) html += '<div class="kv"><strong>Severity:</strong> ' + esc(d.severity) + '</div>';
