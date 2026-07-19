@@ -16,6 +16,10 @@ from cybergraph.security.layers import summarize_layers
 from cybergraph.security.sca import prioritize_vulnerabilities
 from cybergraph.security.secrets import find_secret_exposures
 
+# Default max_nodes used by the HTML report / graph export (export-json --max-nodes).
+# The orchestrator uses the same cap as the signal for whether the graph was truncated.
+REPORT_NODE_CAP = 600
+
 
 def _stage(name, fn, timings, errors, default):
     """Run one analysis stage, isolating failures so the run always completes."""
@@ -60,7 +64,7 @@ def run_full_analysis(repo_root: Path, *, limit: int = 10) -> AnalysisResult:
         iac_paths=iac_paths,
         cloud_code_paths=cloud_code_paths,
         layers=layers,
-        truncated=False,
+        truncated=counts.get("nodes", 0) > REPORT_NODE_CAP,
         timings=timings,
         llm_configured=load_llm_config_from_env() is not None,
         errors=errors,
