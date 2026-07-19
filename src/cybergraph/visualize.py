@@ -849,6 +849,27 @@ _HTML_TEMPLATE = """<!doctype html>
         });
       }
 
+      function pathNarrative(p, rank) {
+        const risk = p.risk || {};
+        let html = '<h3>' + (rank === 0 ? 'Start here: the #1 risk' : 'Attack path') + '</h3>';
+        html += '<p>User input entering <strong>' + esc(tail(p.entrypoint)) + '</strong> can reach ' +
+          '<strong>' + esc(tail(p.sink)) + '</strong>' +
+          (p.data_reachable ? ' carrying user-controlled data' : '') +
+          (p.sanitized ? ', passing a sanitizer on the way' : ' with no sanitizer on the way') + '.</p>';
+        if (risk.label) {
+          html += '<div class="kv"><span class="tag" style="background:#dc2626">' +
+            esc(risk.label) + ' ' + esc(risk.score || '') + '/100</span></div>';
+        }
+        if (p.taint_sources && p.taint_sources.length) {
+          html += '<div class="kv"><strong>Tainted input:</strong> ' + esc(p.taint_sources.slice(0, 6).join(', ')) + '</div>';
+        }
+        html += '<div class="kv"><strong>Route taken:</strong><br><code>' +
+          esc((p.nodes || []).map(tail).join(' → ')) + '</code></div>';
+        if (risk.rationale) html += '<div class="kv"><strong>Why it matters:</strong> ' + esc(risk.rationale) + '</div>';
+        html += '<p class="muted">The glowing trail on the left is this path. Click any node for its evidence, or pick another risk card above.</p>';
+        document.getElementById('cg-details').innerHTML = html;
+      }
+
       function highlightPath(idx) {
         if (document.getElementById('cg-mode').value !== 'paths') {
           document.getElementById('cg-mode').value = 'paths';
@@ -858,6 +879,7 @@ _HTML_TEMPLATE = """<!doctype html>
         if (idx === '' || idx === null) return;
         const p = attackPaths[Number(idx)];
         if (!p) return;
+        pathNarrative(p, Number(idx));
         const ids = p.nodes || [];
         const inPath = cy.collection();
         ids.forEach(function (id) { inPath.merge(cy.getElementById(id)); });
@@ -945,6 +967,11 @@ _HTML_TEMPLATE = """<!doctype html>
         .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
       renderMode('paths');
+      // Guided first view: open on the #1 risk with its story, not a blank canvas.
+      if (attackPaths.length) {
+        document.getElementById('cg-path').value = '0';
+        highlightPath('0');
+      }
     })();
   </script>
   <script>
