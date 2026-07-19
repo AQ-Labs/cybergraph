@@ -79,6 +79,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
             "kind": row["kind"],
             "file": row["file_path"] or "",
             "line": row["line_start"] or 0,
+            "line_end": row["line_end"] or 0,
             "properties": props,
             "severity": "",
             "findings": [],
@@ -202,8 +203,7 @@ def _attach_findings(nodes: dict[str, dict[str, Any]], finding_rows) -> None:
         if not node["file"] or node["file"] not in by_file:
             continue
         start = node["line"] or 0
-        end = node["properties"].get("line_end") if isinstance(node["properties"], dict) else None
-        end = end or start
+        end = node.get("line_end") or start
         for finding in by_file[node["file"]]:
             line = finding["line"]
             within = start <= line <= max(end, start) if node["kind"] == "Function" else line == start

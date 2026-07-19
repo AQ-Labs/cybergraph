@@ -20,7 +20,7 @@ from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.layers import summarize_layers
 
 
-def generate_html_report(repo_root: Path, output: Path | None = None) -> Path:
+def generate_html_report(repo_root: Path, output: Path | None = None, *, with_source: bool = False) -> Path:
     repo_root = repo_root.resolve()
     output = output or repo_root / ".cybergraph" / "report.html"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +56,10 @@ def generate_html_report(repo_root: Path, output: Path | None = None) -> Path:
     layers = summarize_layers(repo_root)
     attack_paths = find_attack_paths(repo_root, limit=25)
     graph_data = build_graph_data(repo_root)
+    if with_source:
+        from cybergraph.report_source import attach_source_snippets
+
+        attach_source_snippets(repo_root, graph_data)
     output.write_text(
         _render_html(
             repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
@@ -292,6 +296,10 @@ _HTML_TEMPLATE = """<!doctype html>
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: #64748b; font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
+    .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .cg-snippet .ln { display: flex; gap: 10px; padding: 1px 8px; white-space: pre; }
+    .cg-snippet .ln .num { color: var(--muted, #94a3b8); user-select: none; min-width: 30px; text-align: right; }
+    .cg-snippet .ln.hl { background: rgba(245, 158, 11, 0.18); }
     @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
   </style>
 </head>
@@ -742,6 +750,15 @@ _HTML_TEMPLATE = """<!doctype html>
         }
         const neighbors = node.neighborhood('node').map(function (n) { return n.data('label'); });
         if (neighbors.length) html += '<div class="kv"><strong>Connected:</strong> ' + esc(neighbors.slice(0, 12).join(', ')) + '</div>';
+        const snip = d.snippet;
+        if (snip && snip.lines && snip.lines.length) {
+          html += '<div class="kv"><strong>Source:</strong> <code>' + esc(snip.file) + '</code></div>';
+          html += '<div class="cg-snippet">';
+          snip.lines.forEach(function (ln) {
+            html += '<div class="ln' + (ln.highlight ? ' hl' : '') + '"><span class="num">' + esc(ln.n) + '</span><span>' + ln.text + '</span></div>';
+          });
+          html += '</div>';
+        }
         document.getElementById('cg-details').innerHTML = html;
       }
 
