@@ -429,6 +429,7 @@ _HTML_TEMPLATE = """<!doctype html>
     <div class="toolbar">
       <select id="cg-mode" aria-label="Graph view mode">
         <option value="paths">View: attack paths</option>
+        <option value="zones">View: security zones</option>
         <option value="risks">View: top-risk neighborhoods</option>
         <option value="modules">View: module map</option>
         <option value="raw">View: raw graph</option>
@@ -743,6 +744,75 @@ _HTML_TEMPLATE = """<!doctype html>
         };
       }
 
+      // Security zones, ordered so the canvas reads like an attack narrative.
+      const ZONE_ORDER = ['attack-surface', 'guards', 'logic', 'secrets', 'sinks', 'supply-chain', 'infrastructure'];
+      const ZONE_META = {
+        'attack-surface': { label: 'Attack Surface', group: 'entrypoint' },
+        'guards': { label: 'Guards', group: 'guard' },
+        'logic': { label: 'Application Logic', group: 'function' },
+        'secrets': { label: 'Secrets', group: 'secret' },
+        'sinks': { label: 'Sensitive Sinks', group: 'sink' },
+        'supply-chain': { label: 'Supply Chain', group: 'dependency' },
+        'infrastructure': { label: 'Infrastructure', group: 'infrastructure' }
+      };
+      function zoneColor(zone) {
+        const meta = ZONE_META[zone] || ZONE_META.logic;
+        return groupColor(meta.group);
+      }
+
+      function buildZoneElements() {
+        const byZone = new Map();
+        rawNodes.forEach(function (n) {
+          const zone = n.zone || 'logic';
+          if (!byZone.has(zone)) byZone.set(zone, []);
+          byZone.get(zone).push(n);
+        });
+        const elements = [];
+        let column = 0;
+        ZONE_ORDER.forEach(function (zone) {
+          const members = byZone.get(zone);
+          if (!members || !members.length) return;
+          elements.push({ data: {
+            id: 'zone:' + zone,
+            label: (ZONE_META[zone] || {}).label || zone,
+            kind: 'Zone',
+            zone: zone,
+            group: '',
+            synthetic: true,
+            properties: { nodes: members.length }
+          } });
+          // Risky members first so they surface at the top of each hull.
+          members.sort(function (a, b) {
+            return (SEV_RANK[b.severity || ''] - SEV_RANK[a.severity || '']) ||
+              ((b.findings || []).length - (a.findings || []).length);
+          });
+          const shown = members.slice(0, 40);
+          const perColumn = 14;
+          shown.forEach(function (n, i) {
+            elements.push({
+              data: Object.assign({}, n, { label: displayLabel(n), parent: 'zone:' + zone }),
+              position: {
+                x: 140 + column * 300 + Math.floor(i / perColumn) * 130,
+                y: 90 + (i % perColumn) * 52
+              }
+            });
+          });
+          column += 1;
+        });
+        const included = new Set(elements.map(function (el) { return el.data.id; }));
+        rawEdges.forEach(function (e) {
+          if (included.has(e.source) && included.has(e.target)) {
+            elements.push(makeEdge(e.source, e.target, e.kind, e.id));
+          }
+        });
+        return {
+          elements: elements,
+          layout: { name: 'preset', fit: true, padding: 36 },
+          title: 'Security Zones',
+          subtitle: 'Your app as an attack narrative: Attack Surface → Guards → Logic → Sensitive Sinks. Dashed hulls are zones.'
+        };
+      }
+
       const cy = cytoscape({
         container: document.getElementById('cy'),
         elements: [],
@@ -766,6 +836,18 @@ _HTML_TEMPLATE = """<!doctype html>
           { selector: 'node[group = "dataflow"]', style: { 'shape': 'hexagon' } },
           { selector: 'node[group = "vulnerability"]', style: { 'shape': 'diamond', 'width': 30, 'height': 30 } },
           { selector: 'node[kind = "Module"]', style: { 'width': 44, 'height': 44, 'font-size': 11, 'text-max-width': 140 } },
+          { selector: 'node[kind = "Zone"]', style: {
+            'shape': 'round-rectangle',
+            'background-color': function (ele) { return zoneColor(ele.data('zone')); },
+            'background-opacity': 0.06,
+            'border-style': 'dashed', 'border-width': 2,
+            'border-color': function (ele) { return zoneColor(ele.data('zone')); },
+            'label': 'data(label)', 'font-size': 13, 'font-weight': 700,
+            'color': function (ele) { return zoneColor(ele.data('zone')); },
+            'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -8,
+            'text-outline-width': 0, 'text-max-width': 280, 'text-wrap': 'none',
+            'padding': 18, 'underlay-opacity': 0
+          } },
           { selector: 'node[severity = "medium"]', style: {
             'border-width': 2, 'border-color': '#d97706',
             'width': SEV_SIZE.medium, 'height': SEV_SIZE.medium
@@ -805,6 +887,7 @@ _HTML_TEMPLATE = """<!doctype html>
       function renderMode(mode) {
         const builders = {
           paths: buildAttackPathElements,
+          zones: buildZoneElements,
           risks: buildRiskNeighborhoodElements,
           modules: buildModuleElements,
           raw: buildRawElements
@@ -862,6 +945,7 @@ _HTML_TEMPLATE = """<!doctype html>
         const minSev = SEV_RANK[document.getElementById('cg-severity').value] ?? -1;
         cy.batch(function () {
           cy.nodes().forEach(function (n) {
+            if (n.data('kind') === 'Zone') return; // hulls stay; their children filter individually
             const hay = (n.data('label') + ' ' + (n.data('file') || '') + ' ' + n.data('group')).toLowerCase();
             const matchText = !q || hay.indexOf(q) !== -1;
             const matchLayer = !layer || n.data('group') === layer;
