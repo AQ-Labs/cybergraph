@@ -138,7 +138,7 @@ def _truncation_banner(graph_data: dict) -> str:
     total = int(graph_data.get("counts", {}).get("nodes", shown))
     return (
         "<div style='margin:0 0 12px;padding:10px 12px;border-radius:8px;"
-        "background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:13px;'>"
+        "background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-border);font-size:13px;'>"
         f"Showing {shown} of {total} nodes — raise <code>--max-nodes</code> to see the full graph."
         "</div>"
     )
@@ -264,15 +264,35 @@ _HTML_TEMPLATE = """<!doctype html>
       color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif;
       --bg: #f5f7fb; --fg: #111827; --panel: #ffffff; --border: #d8e0ea;
       --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc;
+      --input-bg: #ffffff; --input-fg: #161b22; --input-border: #b6c2cf; --hover: #eef2f7;
+      --pill-bg: #eef6ff; --pill-fg: #075985; --accent: #1d4ed8; --accent-bg: #eff6ff;
+      --node-label: #0b1220; --node-outline: #f8fafc; --node-border: #ffffff;
+      --edge-base: #cbd5e1; --glow-opacity: 0;
+      --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-border: #fde68a; --code: #7c2d12;
     }
     @media (prefers-color-scheme: dark) {
       :root { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
-              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #070d1a;
+              --input-bg: #0f172a; --input-fg: #e5e7eb; --input-border: #334155; --hover: #1e293b;
+              --pill-bg: #172554; --pill-fg: #93c5fd; --accent: #60a5fa; --accent-bg: #172554;
+              --node-label: #e2e8f0; --node-outline: #070d1a; --node-border: #1e293b;
+              --edge-base: rgba(148, 163, 184, 0.4); --glow-opacity: 0.22;
+              --warn-bg: #452a03; --warn-fg: #fcd34d; --warn-border: #78500a; --code: #fdba74; }
     }
     :root[data-theme="dark"] { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
-              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #070d1a;
+              --input-bg: #0f172a; --input-fg: #e5e7eb; --input-border: #334155; --hover: #1e293b;
+              --pill-bg: #172554; --pill-fg: #93c5fd; --accent: #60a5fa; --accent-bg: #172554;
+              --node-label: #e2e8f0; --node-outline: #070d1a; --node-border: #1e293b;
+              --edge-base: rgba(148, 163, 184, 0.4); --glow-opacity: 0.22;
+              --warn-bg: #452a03; --warn-fg: #fcd34d; --warn-border: #78500a; --code: #fdba74; }
     :root[data-theme="light"] { color-scheme: light; --bg: #f5f7fb; --fg: #111827; --panel: #ffffff;
-              --border: #d8e0ea; --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc; }
+              --border: #d8e0ea; --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc;
+              --input-bg: #ffffff; --input-fg: #161b22; --input-border: #b6c2cf; --hover: #eef2f7;
+              --pill-bg: #eef6ff; --pill-fg: #075985; --accent: #1d4ed8; --accent-bg: #eff6ff;
+              --node-label: #0b1220; --node-outline: #f8fafc; --node-border: #ffffff;
+              --edge-base: #cbd5e1; --glow-opacity: 0;
+              --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-border: #fde68a; --code: #7c2d12; }
     body { margin: 0; background: var(--bg); color: var(--fg); }
     header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; position: relative; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
@@ -287,38 +307,38 @@ _HTML_TEMPLATE = """<!doctype html>
     th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
     th { background: var(--th); font-size: 13px; }
     tr:last-child td { border-bottom: 0; }
-    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #eef6ff; color: #075985; font-size: 12px; }
-    .path { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-fg); font-size: 12px; }
+    .path { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
     .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; align-items: center; }
-    .toolbar input, .toolbar select, .toolbar button { border: 1px solid #b6c2cf; border-radius: 6px; padding: 9px 10px; background: white; color: #161b22; font-size: 13px; }
+    .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--input-border); border-radius: 6px; padding: 9px 10px; background: var(--input-bg); color: var(--input-fg); font-size: 13px; }
     .toolbar input { min-width: min(360px, 100%); flex: 1; }
     .toolbar button { cursor: pointer; }
-    .toolbar button:hover { background: #eef2f7; }
-    code { color: #7c2d12; }
+    .toolbar button:hover { background: var(--hover); }
+    code { color: var(--code); }
     .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
     .graph-card, .details {
       background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
-    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: linear-gradient(180deg, #ffffff, #f8fafc); }
+    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--th); }
     .graph-title { font-weight: 700; }
-    .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
-    .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
+    .graph-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 12px; white-space: nowrap; }
     #cy { height: 640px; background: var(--cy-bg); }
     .details { padding: 14px; height: 668px; overflow: auto; font-size: 13px; }
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
     .details .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; color: white; }
-    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 14px; font-size: 12px; color: #475467; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 14px; font-size: 12px; color: var(--muted); }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; }
     .legend-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
-    .mode-help { margin: -4px 0 12px; color: #64748b; font-size: 13px; }
+    .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
-    .risk-card { border: 1px solid #e2e8f0; background: #fff; border-radius: 12px; padding: 11px; cursor: pointer; }
+    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
     .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
-    .risk-card span { color: #64748b; font-size: 12px; }
+    .risk-card span { color: var(--muted); font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
     .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .cg-snippet .ln { display: flex; gap: 10px; padding: 1px 8px; white-space: pre; }
