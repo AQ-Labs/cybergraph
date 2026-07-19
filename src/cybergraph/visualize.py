@@ -248,20 +248,32 @@ _HTML_TEMPLATE = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CyberGraph Report</title>
   <style>
-    :root { color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif; }
-    body { margin: 0; background: #f5f7fb; color: #111827; }
-    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; }
+    :root {
+      color-scheme: light; font-family: Inter, Segoe UI, Arial, sans-serif;
+      --bg: #f5f7fb; --fg: #111827; --panel: #ffffff; --border: #d8e0ea;
+      --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+    }
+    :root[data-theme="dark"] { color-scheme: dark; --bg: #0b1220; --fg: #e5e7eb; --panel: #111827;
+              --border: #243044; --muted: #94a3b8; --th: #1a2334; --cy-bg: #0b1220; }
+    :root[data-theme="light"] { color-scheme: light; --bg: #f5f7fb; --fg: #111827; --panel: #ffffff;
+              --border: #d8e0ea; --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc; }
+    body { margin: 0; background: var(--bg); color: var(--fg); }
+    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; position: relative; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
-    .muted { color: #667085; }
+    .muted { color: var(--muted); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    .stat, table { background: white; border: 1px solid #d8e0ea; border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
+    .stat, table { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
     .stat { padding: 16px; }
     .stat strong { display: block; font-size: 26px; margin-top: 4px; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #d0d7de; text-align: left; vertical-align: top; }
-    th { background: #f0f3f6; font-size: 13px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--th); font-size: 13px; }
     tr:last-child td { border-bottom: 0; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #eef6ff; color: #075985; font-size: 12px; }
     .path { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
@@ -273,7 +285,7 @@ _HTML_TEMPLATE = """<!doctype html>
     code { color: #7c2d12; }
     .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
     .graph-card, .details {
-      background: white; border: 1px solid #d8e0ea; border-radius: 16px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
@@ -281,7 +293,7 @@ _HTML_TEMPLATE = """<!doctype html>
     .graph-title { font-weight: 700; }
     .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
     .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
-    #cy { height: 640px; background: linear-gradient(135deg, #f8fafc, #ffffff 58%, #f1f5f9); }
+    #cy { height: 640px; background: var(--cy-bg); }
     .details { padding: 14px; height: 668px; overflow: auto; font-size: 13px; }
     .details h3 { margin: 0 0 8px; font-size: 15px; }
     .details .kv { margin: 4px 0; }
@@ -302,11 +314,21 @@ _HTML_TEMPLATE = """<!doctype html>
     .cg-snippet .ln.hl { background: rgba(245, 158, 11, 0.18); }
     @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
   </style>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('cybergraph-theme');
+        if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <header>
     <h1>CyberGraph Security Report</h1>
     <div>__REPO__</div>
+    <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;border-radius:6px;padding:6px 10px;">Theme</button>
   </header>
   <main>
     <section class="grid">
@@ -598,7 +620,8 @@ _HTML_TEMPLATE = """<!doctype html>
         style: [
           { selector: 'node', style: {
             'background-color': function (ele) { return GROUP_COLORS[ele.data('group')] || '#94a3b8'; },
-            'label': 'data(label)', 'font-size': 10, 'font-weight': 600, 'color': '#0b1220',
+            'label': 'data(label)', 'font-size': 10, 'font-weight': 600,
+            'color': '#0b1220', 'text-outline-width': 2, 'text-outline-color': '#f8fafc',
             'text-wrap': 'ellipsis', 'text-max-width': 110, 'width': 24, 'height': 24,
             'border-width': 1, 'border-color': '#ffffff'
           } },
@@ -811,6 +834,11 @@ _HTML_TEMPLATE = """<!doctype html>
     }
     findingSearch?.addEventListener('input', filterFindings);
     findingSeverity?.addEventListener('change', filterFindings);
+    document.getElementById('cg-theme-toggle')?.addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', cur);
+      try { localStorage.setItem('cybergraph-theme', cur); } catch (e) {}
+    });
   </script>
 </body>
 </html>
