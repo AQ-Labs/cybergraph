@@ -88,6 +88,14 @@ def _render_html(
         "__EDGES__": str(counts["edges"]),
         "__FINDINGS__": str(counts["findings"]),
         "__ATTACK_PATHS__": str(len(attack_paths)),
+        "__FINDINGS_ACCENT__": _stat_accent(
+            sum(1 for row in findings if row["severity"] == "critical"),
+            sum(1 for row in findings if row["severity"] == "high"),
+        ),
+        "__PATHS_ACCENT__": _stat_accent(
+            sum(1 for p in attack_paths if p.risk and p.risk.label == "critical"),
+            sum(1 for p in attack_paths if p.risk and p.risk.label == "high"),
+        ),
         "__TOP_RISKS_TABLE__": _top_risks_table(graph_data.get("top_risks", [])),
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
@@ -129,6 +137,18 @@ EDGE_KINDS = [
     ("USES_RESOURCE", "#475569"),
     ("AFFECTS_DEPENDENCY", "#7c3aed"),
 ]
+
+
+def _stat_accent(critical: int, high: int) -> str:
+    """Severity sub-line for a stat tile; empty when nothing is elevated."""
+    parts = []
+    if critical:
+        parts.append(f"<span class='stat-crit'>{critical} critical</span>")
+    if high:
+        parts.append(f"<span class='stat-high'>{high} high</span>")
+    if not parts:
+        return ""
+    return f"<span class='stat-sub'>{' · '.join(parts)}</span>"
 
 
 def _truncation_banner(graph_data: dict) -> str:
@@ -364,6 +384,9 @@ _HTML_TEMPLATE = """<!doctype html>
     .stat, table { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04); }
     .stat { padding: 16px; }
     .stat strong { display: block; font-size: 26px; margin-top: 4px; }
+    .stat-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
+    .stat-crit { color: #dc2626; font-weight: 700; }
+    .stat-high { color: #d97706; font-weight: 600; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; }
     th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
     th { background: var(--th); font-size: 13px; }
@@ -446,8 +469,8 @@ _HTML_TEMPLATE = """<!doctype html>
     <section class="grid">
       <div class="stat"><span class="muted">Nodes</span><strong>__NODES__</strong></div>
       <div class="stat"><span class="muted">Edges</span><strong>__EDGES__</strong></div>
-      <div class="stat"><span class="muted">Findings</span><strong>__FINDINGS__</strong></div>
-      <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong></div>
+      <div class="stat"><span class="muted">Findings</span><strong>__FINDINGS__</strong>__FINDINGS_ACCENT__</div>
+      <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong>__PATHS_ACCENT__</div>
     </section>
 
     <h2>Top Risks</h2>
