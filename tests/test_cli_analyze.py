@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
 
 from cybergraph.cli import main
 

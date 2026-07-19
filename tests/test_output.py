@@ -1,4 +1,3 @@
-import os
 
 from cybergraph.output import render_text, should_color
 from cybergraph.report_model import AnalysisResult
