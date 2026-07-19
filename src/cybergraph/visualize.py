@@ -199,21 +199,55 @@ def _layers_table(layers) -> str:
     )
 
 
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
 def _findings_table(findings) -> str:
+    """Group findings by rule into expandable cards instead of one flat table."""
     if not findings:
         return "<p class='muted'>No findings stored yet.</p>"
-    rows = "".join(
-        "<tr data-finding-row "
-        f"data-severity='{html.escape(row['severity'])}' "
-        f"data-search='{html.escape(_finding_search_text(row))}'>"
-        f"<td><span class='pill'>{html.escape(row['severity'])}</span></td>"
-        f"<td>{html.escape(row['rule_id'])}</td>"
-        f"<td>{html.escape(row['message'])}</td>"
-        f"<td><code>{html.escape(row['file_path'] or '-')}:{row['line_start']}</code></td>"
-        f"<td>{html.escape(row['tool'])}</td>"
-        "</tr>"
-        for row in findings
+
+    groups: dict[str, list] = {}
+    for row in findings:
+        groups.setdefault(row["rule_id"], []).append(row)
+
+    def group_severity(rows) -> str:
+        return min((r["severity"] for r in rows), key=lambda s: _SEVERITY_ORDER.get(s, 5))
+
+    ordered = sorted(
+        groups.items(),
+        key=lambda kv: (_SEVERITY_ORDER.get(group_severity(kv[1]), 5), -len(kv[1]), kv[0]),
     )
+
+    cards = []
+    for rule_id, rows in ordered:
+        severity = group_severity(rows)
+        inner = "".join(
+            "<tr data-finding-row "
+            f"data-severity='{html.escape(row['severity'])}' "
+            f"data-search='{html.escape(_finding_search_text(row))}'>"
+            f"<td><span class='pill'>{html.escape(row['severity'])}</span></td>"
+            f"<td>{html.escape(row['message'])}</td>"
+            f"<td><code>{html.escape(row['file_path'] or '-')}:{row['line_start']}</code></td>"
+            f"<td>{html.escape(row['tool'])}</td>"
+            "</tr>"
+            for row in rows
+        )
+        count = len(rows)
+        cards.append(
+            f"<details class='finding-group sev-{html.escape(severity)}' data-finding-group "
+            f"{'open' if severity in ('critical', 'high') else ''}>"
+            "<summary>"
+            f"<span class='pill'>{html.escape(severity)}</span> "
+            f"<strong>{html.escape(rule_id)}</strong>"
+            f"<span class='fg-count'>{count} finding{'s' if count != 1 else ''}</span>"
+            f"<span class='fg-sample'>{html.escape(rows[0]['message'])}</span>"
+            "</summary>"
+            "<table><thead><tr><th>Severity</th><th>Message</th><th>Location</th>"
+            f"<th>Tool</th></tr></thead><tbody>{inner}</tbody></table>"
+            "</details>"
+        )
+
     return (
         "<div class='toolbar'>"
         "<select data-filter='findings-severity' aria-label='Filter findings by severity'>"
@@ -225,8 +259,7 @@ def _findings_table(findings) -> str:
         "<option value='info'>Info</option>"
         "</select>"
         "</div>"
-        "<table><thead><tr><th>Severity</th><th>Rule</th><th>Message</th><th>Location</th>"
-        f"<th>Tool</th></tr></thead><tbody>{rows}</tbody></table>"
+        + "".join(cards)
     )
 
 
@@ -373,6 +406,14 @@ _HTML_TEMPLATE = """<!doctype html>
     .howto summary { cursor: pointer; font-weight: 600; color: var(--accent); }
     .howto ul { margin: 8px 0 4px; padding-left: 20px; }
     .howto li { margin: 5px 0; line-height: 1.5; }
+    .finding-group { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; padding: 0; margin: 0 0 8px; overflow: hidden; }
+    .finding-group.sev-critical, .finding-group.sev-high { border-left-color: #dc2626; }
+    .finding-group.sev-medium { border-left-color: #d97706; }
+    .finding-group.sev-low, .finding-group.sev-info { border-left-color: #64748b; }
+    .finding-group summary { cursor: pointer; padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .finding-group .fg-count { color: var(--muted); font-size: 12px; }
+    .finding-group .fg-sample { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+    .finding-group table { border: 0; border-radius: 0; box-shadow: none; border-top: 1px solid var(--border); }
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
     .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
@@ -1095,6 +1136,12 @@ _HTML_TEMPLATE = """<!doctype html>
         const matchesText = row.dataset.search.includes(query);
         const matchesSeverity = !severity || row.dataset.severity === severity;
         row.hidden = !(matchesText && matchesSeverity);
+      });
+      document.querySelectorAll('[data-finding-group]').forEach((group) => {
+        const anyVisible = Array.from(group.querySelectorAll('[data-finding-row]'))
+          .some((row) => !row.hidden);
+        group.hidden = !anyVisible;
+        if ((query || severity) && anyVisible) group.open = true;
       });
     }
     findingSearch?.addEventListener('input', filterFindings);
