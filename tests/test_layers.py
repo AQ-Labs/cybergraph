@@ -46,7 +46,9 @@ def test_layer_summary_counts_vulnerability_edges(tmp_path: Path) -> None:
             Node("Dependency", "requirements.txt::fastapi", "fastapi"),
             Node("Vulnerability", "vulnerability::GHSA-demo", "GHSA-demo"),
         ])
-        store.add_edges([Edge("AFFECTS_DEPENDENCY", "vulnerability::GHSA-demo", "requirements.txt::fastapi")])
+        store.add_edges([
+            Edge("AFFECTS_DEPENDENCY", "vulnerability::GHSA-demo", "requirements.txt::fastapi")
+        ])
     finally:
         store.close()
 

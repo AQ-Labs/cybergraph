@@ -25,7 +25,8 @@ def build_sarif(repo_root: Path) -> dict[str, Any]:
     try:
         rows = store.conn.execute(
             """
-            SELECT rule_id, severity, message, file_path, line_start, line_end, cwe, owasp, tool, evidence
+            SELECT rule_id, severity, message, file_path, line_start, line_end,
+                   cwe, owasp, tool, evidence
             FROM findings
             ORDER BY rule_id, file_path, line_start
             """

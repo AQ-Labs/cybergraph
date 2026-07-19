@@ -35,7 +35,10 @@ SPRING_ROUTE_RE = re.compile(
     r"\s*(?:\(\s*(?:value\s*=\s*)?\"(?P<path>[^\"]*)\")?"
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
-ASSIGN_RE = re.compile(r"\b(?:final\s+)?(?:var|String|int|long|boolean|Path|File|[\w<>]+)\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)")
+ASSIGN_RE = re.compile(
+    r"\b(?:final\s+)?(?:var|String|int|long|boolean|Path|File|[\w<>]+)"
+    r"\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)"
+)
 
 SINK_CALLS = {
     "executequery", "executeupdate", "statement.execute",
@@ -45,7 +48,10 @@ SINK_CALLS = {
     "files.write", "files.readallbytes", "filewriter", "filereader", "fileinputstream",
 }
 SECRET_MARKERS = {"system.getenv", "@value", "secret", "password", "token", "apikey", "api_key"}
-INPUT_MARKERS = {"getparameter", "@requestparam", "@pathvariable", "request.getheader", "request.getinputstream"}
+INPUT_MARKERS = {
+    "getparameter", "@requestparam", "@pathvariable", "request.getheader",
+    "request.getinputstream",
+}
 SECRET_EXPOSURE_SINKS = {
     "system.out.print",
     "logger.info",
@@ -89,7 +95,9 @@ def analyze_java_file(
             key = f"{rel}::{name}"
             current_function = key
             tainted_by_function.setdefault(current_function, {})
-            nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_java_name(name)))
+            nodes.append(
+                Node("Function", key, name, rel, line_no, line_no, _classify_java_name(name))
+            )
             if pending_route is not None:
                 route_key = f"{rel}::route:{pending_route['path']}:{pending_route['line']}"
                 nodes.append(
@@ -99,9 +107,14 @@ def analyze_java_file(
                         {"framework": "spring", "method": pending_route["method"]},
                     )
                 )
-                edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, route_key, rel, pending_route["line"]))
+                edges.append(
+                    Edge(EDGE_EXPOSES_ENTRYPOINT, rel, route_key, rel, pending_route["line"])
+                )
                 edges.append(Edge("CALLS", route_key, name, rel, line_no))
-                _add_route_params(key, line, rel, line_no, pending_route["path"], nodes, edges, tainted_by_function[key])
+                _add_route_params(
+                    key, line, rel, line_no, pending_route["path"],
+                    nodes, edges, tainted_by_function[key],
+                )
                 pending_route = None
 
         sink_source = current_function or rel
@@ -131,7 +144,9 @@ def analyze_java_file(
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
-            if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)) and _is_secret_exposure(call_name):
+            if any(
+                marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)
+            ) and _is_secret_exposure(call_name):
                 edges.append(
                     Edge(
                         EDGE_EXPOSES_SECRET,
@@ -206,7 +221,12 @@ def _add_route_params(
             )
         )
         edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, line_no))
-        edges.append(Edge(EDGE_TAINTS, input_key, function_key, rel, line_no, {"reason": "route parameter"}))
+        edges.append(
+            Edge(
+                EDGE_TAINTS, input_key, function_key, rel, line_no,
+                {"reason": "route parameter"},
+            )
+        )
         tainted[name] = input_key
 
 
@@ -222,7 +242,10 @@ def _line_input_source(
         return ""
     input_key = f"{owner_key}::input:request:{line_no}"
     nodes.append(
-        Node("Input", input_key, "request", rel, line_no, line_no, {"source": "request", "user_controlled": True})
+        Node(
+            "Input", input_key, "request", rel, line_no, line_no,
+            {"source": "request", "user_controlled": True},
+        )
     )
     edges.append(Edge(EDGE_READS_INPUT, owner_key, input_key, rel, line_no))
     return input_key

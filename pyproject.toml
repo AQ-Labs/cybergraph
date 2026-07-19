@@ -50,6 +50,11 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# The GitHub Actions workflow template embeds YAML run commands that cannot be
+# wrapped without changing the emitted workflow file.
+"src/cybergraph/init_project.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

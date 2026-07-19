@@ -40,7 +40,10 @@ def test_should_suppress_only_on_grounded_false_positive():
 def test_parse_verdict_defaults_to_uncertain_on_garbage():
     assert tri._parse_verdict("not json at all")[0] == tri.VERDICT_UNCERTAIN
     assert tri._parse_verdict('{"verdict": "bogus"}')[0] == tri.VERDICT_UNCERTAIN
-    assert tri._parse_verdict('{"verdict": "false_positive", "evidence": "x"}')[0] == tri.VERDICT_FALSE_POSITIVE
+    assert (
+        tri._parse_verdict('{"verdict": "false_positive", "evidence": "x"}')[0]
+        == tri.VERDICT_FALSE_POSITIVE
+    )
 
 
 def test_abstain_when_no_client_keeps_everything():
@@ -70,7 +73,9 @@ def test_findings_load_and_grounded_fp_is_suppressed(tmp_path: Path):
     assert findings, "expected at least one finding from the vulnerable app"
 
     # FP verdict citing a token that really appears in the slice ('select') -> suppressed.
-    sup = tri.triage_findings(repo, findings=findings, client=_Client(tri.VERDICT_FALSE_POSITIVE, "select"))
+    sup = tri.triage_findings(
+        repo, findings=findings, client=_Client(tri.VERDICT_FALSE_POSITIVE, "select")
+    )
     assert any(r.suppressed for r in sup)
 
 
@@ -79,11 +84,15 @@ def test_recall_guard_keeps_findings_on_ungrounded_or_uncertain_verdicts(tmp_pat
     findings = tri.load_findings(repo)
 
     # FP but hallucinated evidence (not in slice) -> nothing suppressed.
-    halluc = tri.triage_findings(repo, findings=findings, client=_Client(tri.VERDICT_FALSE_POSITIVE, "zzzz_not_present"))
+    halluc = tri.triage_findings(
+        repo, findings=findings, client=_Client(tri.VERDICT_FALSE_POSITIVE, "zzzz_not_present")
+    )
     assert not any(r.suppressed for r in halluc)
 
     # uncertain and true_positive -> nothing suppressed.
     unc = tri.triage_findings(repo, findings=findings, client=_Client(tri.VERDICT_UNCERTAIN))
-    tp = tri.triage_findings(repo, findings=findings, client=_Client(tri.VERDICT_TRUE_POSITIVE, "select"))
+    tp = tri.triage_findings(
+        repo, findings=findings, client=_Client(tri.VERDICT_TRUE_POSITIVE, "select")
+    )
     assert not any(r.suppressed for r in unc)
     assert not any(r.suppressed for r in tp)

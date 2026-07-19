@@ -78,7 +78,10 @@ def _resolved_edge(edge: Edge, target: str, confidence: str, via: str, candidate
         target,
         edge.file_path,
         edge.line,
-        {"confidence": confidence, "via": via, "candidates": candidates, "ambiguous": via == "ambiguous"},
+        {
+            "confidence": confidence, "via": via, "candidates": candidates,
+            "ambiguous": via == "ambiguous",
+        },
     )
 
 

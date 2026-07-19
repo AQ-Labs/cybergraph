@@ -43,7 +43,9 @@ def _git_head(repo_root: Path) -> tuple[str, str]:
     return sha, branch
 
 
-def record_scan(repo_root: Path, *, top_risk_score: int = 0, top_risk_label: str = "") -> ScanResult:
+def record_scan(
+    repo_root: Path, *, top_risk_score: int = 0, top_risk_label: str = ""
+) -> ScanResult:
     repo_root = Path(repo_root).resolve()
     store = GraphStore.open_for_repo(repo_root)
     conn = store.conn
@@ -172,12 +174,15 @@ def scan_delta(repo_root: Path) -> Delta:
         regressed, new = [], []
         for fp in sorted(appeared):
             row = conn.execute(
-                "SELECT first_seen_scan FROM finding_history WHERE fingerprint = ?", (fp,)).fetchone()
+                "SELECT first_seen_scan FROM finding_history WHERE fingerprint = ?", (fp,)
+            ).fetchone()
             if row is not None and row["first_seen_scan"] < curr:
                 regressed.append(fp)
             else:
                 new.append(fp)
-        return Delta(is_first=False, new=new, fixed=fixed, regressed=regressed, persisting=persisting)
+        return Delta(
+            is_first=False, new=new, fixed=fixed, regressed=regressed, persisting=persisting
+        )
     finally:
         store.close()
 

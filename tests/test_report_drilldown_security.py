@@ -47,7 +47,9 @@ def test_quoted_literal_on_secret_key_is_redacted():
 
 # --- unit: anchoring on the finding line, not the node line -----------------
 def test_snippet_anchors_on_finding_line_not_node_line(tmp_path: Path):
-    (tmp_path / "f.py").write_text("\n".join(f"line{n}" for n in range(1, 11)) + "\n", encoding="utf-8")
+    (tmp_path / "f.py").write_text(
+        "\n".join(f"line{n}" for n in range(1, 11)) + "\n", encoding="utf-8"
+    )
     g = {"nodes": [{
         "id": "f.py", "file": "f.py", "line": 1,   # File node at line 1
         "findings": [{"rule_id": "CG-X", "severity": "high", "message": "m", "line": 5}],
@@ -82,6 +84,8 @@ def test_dockerfile_secret_absent_from_generated_report(tmp_path: Path):
         encoding="utf-8",
     )
     build_graph(repo)
-    html = generate_html_report(repo, tmp_path / "r.html", with_source=True).read_text(encoding="utf-8")
+    html = generate_html_report(repo, tmp_path / "r.html", with_source=True).read_text(
+        encoding="utf-8"
+    )
     assert "AKIAtotallyrealsecret123" not in html   # the whole point
     assert "redacted" in html                        # redaction actually fired

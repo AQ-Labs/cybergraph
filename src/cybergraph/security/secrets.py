@@ -96,7 +96,9 @@ def format_secret_exposures(exposures: list[SecretExposure]) -> str:
             f"{exposure.function} -> {exposure.sink} ({reachable}) at {location}"
         )
         lines.append(f"  {exposure.rationale}")
-        lines.append("  Fix: keep secrets out of logs, responses, subprocesses, and third-party calls.")
+        lines.append(
+            "  Fix: keep secrets out of logs, responses, subprocesses, and third-party calls."
+        )
     return "\n".join(lines)
 
 
@@ -115,7 +117,9 @@ def _reachable_from_entrypoints(entrypoints: set[str], callgraph: dict[str, set[
 
 def _score_secret_exposure(sink: str, entrypoint_reachable: bool) -> RiskScore:
     lowered = sink.lower()
-    external = any(token in lowered for token in ("response", "res.", "http", "fetch", "axios", "post"))
+    external = any(
+        token in lowered for token in ("response", "res.", "http", "fetch", "axios", "post")
+    )
     process = any(token in lowered for token in ("exec", "process", "subprocess", "command"))
     return score_risk(
         reachability=1.0 if entrypoint_reachable else 0.55,

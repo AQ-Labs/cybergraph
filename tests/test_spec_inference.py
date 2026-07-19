@@ -51,7 +51,9 @@ def test_abstain_when_no_client_returns_empty():
 
 def test_propose_with_client_validates_against_supplied_calls():
     calls = ["fetch_remote", "scrub_html", "execute"]
-    client = _Client(sinks=["fetch_remote", "execute"], sanitizers=["scrub_html"], sources=["nope_src"])
+    client = _Client(
+        sinks=["fetch_remote", "execute"], sanitizers=["scrub_html"], sources=["nope_src"]
+    )
     specs = si.propose_specs(Path("."), client=client, calls=calls)
 
     assert specs.sinks == ("fetch_remote",)          # grounded + novel

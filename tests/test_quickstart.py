@@ -27,7 +27,9 @@ def test_cli_quickstart_no_open_never_opens_browser(tmp_path: Path, capsys, monk
     repo = _repo(tmp_path)
     import webbrowser
     opened = {"n": 0}
-    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: opened.__setitem__("n", opened["n"] + 1))
+    monkeypatch.setattr(
+        webbrowser, "open", lambda *a, **k: opened.__setitem__("n", opened["n"] + 1)
+    )
     code = main(["quickstart", str(repo), "--no-open", "--yes"])
     out = capsys.readouterr().out
     assert code == 0

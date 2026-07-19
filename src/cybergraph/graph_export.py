@@ -226,10 +226,16 @@ def _attach_findings(nodes: dict[str, dict[str, Any]], finding_rows) -> None:
         end = node.get("line_end") or start
         for finding in by_file[node["file"]]:
             line = finding["line"]
-            within = start <= line <= max(end, start) if node["kind"] == "Function" else line == start
-            if within or (node["kind"] != "Function" and node["group"] != GROUP_FILE and line == start):
+            within = (
+                start <= line <= max(end, start) if node["kind"] == "Function" else line == start
+            )
+            if within or (
+                node["kind"] != "Function" and node["group"] != GROUP_FILE and line == start
+            ):
                 node["findings"].append(finding)
-                if _SEVERITY_RANK.get(finding["severity"], -1) > _SEVERITY_RANK.get(node["severity"], -1):
+                if _SEVERITY_RANK.get(finding["severity"], -1) > _SEVERITY_RANK.get(
+                    node["severity"], -1
+                ):
                     node["severity"] = finding["severity"]
 
 

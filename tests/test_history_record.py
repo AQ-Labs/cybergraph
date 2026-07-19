@@ -99,7 +99,10 @@ def test_severity_refreshed_on_persist_and_regression(tmp_path: Path):
     record_scan(tmp_path)
     s = GraphStore.open_for_repo(tmp_path)
     try:
-        assert s.conn.execute("SELECT severity FROM finding_history").fetchone()["severity"] == "critical"
+        assert (
+            s.conn.execute("SELECT severity FROM finding_history").fetchone()["severity"]
+            == "critical"
+        )
     finally:
         s.close()
 

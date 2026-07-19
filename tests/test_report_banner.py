@@ -8,4 +8,7 @@ def test_banner_when_truncated():
 
 
 def test_no_banner_when_not_truncated():
-    assert _truncation_banner({"truncated": False, "nodes": [0] * 10, "counts": {"nodes": 10}}) == ""
+    assert (
+        _truncation_banner({"truncated": False, "nodes": [0] * 10, "counts": {"nodes": 10}})
+        == ""
+    )

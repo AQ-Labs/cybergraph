@@ -47,7 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="Run built-in lightweight security analyzers")
     scan.add_argument("repo", nargs="?", default=".", help="Repository root to scan")
 
-    import_report = sub.add_parser("import-report", help="Import findings from Semgrep, SARIF, or Gitleaks JSON")
+    import_report = sub.add_parser(
+        "import-report", help="Import findings from Semgrep, SARIF, or Gitleaks JSON"
+    )
     import_report.add_argument("report", help="Path to scanner report JSON")
     import_report.add_argument("--repo", default=".", help="Repository root containing the graph")
     import_report.add_argument(
@@ -55,7 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repository root containing the graph (optional positional; alias for --repo)",
     )
 
-    import_vulns = sub.add_parser("import-vulns", help="Import OSV Scanner or npm audit vulnerability JSON")
+    import_vulns = sub.add_parser(
+        "import-vulns", help="Import OSV Scanner or npm audit vulnerability JSON"
+    )
     import_vulns.add_argument("report", help="Path to vulnerability report JSON")
     import_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
     import_vulns.add_argument(
@@ -78,7 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     enrich_vulns = sub.add_parser(
         "enrich-vulns",
-        help="Merge offline advisory intelligence (EPSS/KEV/CVSS/exploit data) into vulnerabilities",
+        help="Merge offline advisory intelligence (EPSS/KEV/CVSS/exploit data)"
+             " into vulnerabilities",
     )
     enrich_vulns.add_argument("report", help="Path to advisory enrichment JSON")
     enrich_vulns.add_argument("--repo", default=".", help="Repository root containing the graph")
@@ -105,7 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Phrase the answer with a configured LLM (CYBERGRAPH_LLM_* env), grounded in evidence",
     )
-    explain.add_argument("--limit", type=int, default=8, help="Maximum evidence records to retrieve")
+    explain.add_argument(
+        "--limit", type=int, default=8, help="Maximum evidence records to retrieve"
+    )
     explain.add_argument(
         "repo_pos", nargs="?", default=None,
         help="Repository root containing the graph (optional positional; alias for --repo)",
@@ -149,13 +156,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     strix_run = sub.add_parser(
         "strix-run",
-        help="Run Strix scoped to reachable paths and import validated findings (needs Docker + strix)",
+        help="Run Strix scoped to reachable paths and import validated findings"
+             " (needs Docker + strix)",
     )
     strix_run.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
     strix_run.add_argument(
-        "--scan-mode", default="quick", choices=["quick", "standard", "deep"], help="Strix scan depth"
+        "--scan-mode", default="quick", choices=["quick", "standard", "deep"],
+        help="Strix scan depth"
     )
-    strix_run.add_argument("--limit", type=int, default=15, help="Maximum paths to include in scope")
+    strix_run.add_argument(
+        "--limit", type=int, default=15, help="Maximum paths to include in scope"
+    )
 
     review = sub.add_parser("review", help="Review security impact of a change set")
     review.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
@@ -168,7 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
     comment = sub.add_parser("pr-comment", help="Generate a markdown PR security review comment")
     comment.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     comment.add_argument("--repo", default=".", help="Repository root to review")
-    comment.add_argument("--output", default="cybergraph-pr-comment.md", help="Output markdown path")
+    comment.add_argument(
+        "--output", default="cybergraph-pr-comment.md", help="Output markdown path"
+    )
     comment.add_argument(
         "repo_pos", nargs="?", default=None,
         help="Repository root to review (optional positional; alias for --repo)",
@@ -183,22 +196,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     visualize = sub.add_parser("visualize", help="Generate a self-contained HTML security report")
-    visualize.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    visualize.add_argument(
+        "repo", nargs="?", default=".", help="Repository root containing the graph"
+    )
     visualize.add_argument("--output", help="Output HTML path. Defaults to .cybergraph/report.html")
-    visualize.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets")
+    visualize.add_argument(
+        "--with-source", action="store_true", help="Embed (secret-redacted) source snippets"
+    )
 
-    top_risks = sub.add_parser("top-risks", help="Show the highest-priority risks across graph layers")
-    top_risks.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
+    top_risks = sub.add_parser(
+        "top-risks", help="Show the highest-priority risks across graph layers"
+    )
+    top_risks.add_argument(
+        "repo", nargs="?", default=".", help="Repository root containing the graph"
+    )
     top_risks.add_argument("--limit", type=int, default=10, help="Maximum risks to show")
 
     investigate = sub.add_parser("investigate", help="Export a Markdown investigation summary")
-    investigate.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
-    investigate.add_argument("--output", help="Output Markdown path. Defaults to .cybergraph/investigation.md")
+    investigate.add_argument(
+        "repo", nargs="?", default=".", help="Repository root containing the graph"
+    )
+    investigate.add_argument(
+        "--output", help="Output Markdown path. Defaults to .cybergraph/investigation.md"
+    )
     investigate.add_argument("--limit", type=int, default=10, help="Maximum risks to include")
 
     export_json = sub.add_parser("export-json", help="Export the security graph as Cytoscape JSON")
-    export_json.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
-    export_json.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/graph.json")
+    export_json.add_argument(
+        "repo", nargs="?", default=".", help="Repository root containing the graph"
+    )
+    export_json.add_argument(
+        "--output", help="Output JSON path. Defaults to .cybergraph/graph.json"
+    )
     export_json.add_argument("--max-nodes", type=int, default=600, help="Maximum nodes to include")
 
     triage = sub.add_parser(
@@ -208,7 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
     triage.add_argument(
         "--llm",
         action="store_true",
-        help="Use a configured LLM (CYBERGRAPH_LLM_*) to refute false positives, grounded in graph evidence",
+        help="Use a configured LLM (CYBERGRAPH_LLM_*) to refute false positives,"
+             " grounded in graph evidence",
     )
 
     infer_specs = sub.add_parser(
@@ -219,7 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
     infer_specs.add_argument(
         "--llm",
         action="store_true",
-        help="Use a configured LLM (CYBERGRAPH_LLM_*) to propose specs, validated against real call sites",
+        help="Use a configured LLM (CYBERGRAPH_LLM_*) to propose specs,"
+             " validated against real call sites",
     )
 
     sca = sub.add_parser(
@@ -231,7 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
         "iac-paths", help="Trace cloud attack paths (public exposure -> privileged IaC resource)"
     )
     iac_paths.add_argument("repo", nargs="?", default=".", help="Repository root to analyze")
-    iac_paths.add_argument("--max-depth", type=int, default=6, help="Maximum reference-traversal depth")
+    iac_paths.add_argument(
+        "--max-depth", type=int, default=6, help="Maximum reference-traversal depth"
+    )
 
     cloud_code = sub.add_parser(
         "cloud-code", help="Correlate public IaC resources with application code paths"
@@ -241,8 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
     opengraph = sub.add_parser(
         "opengraph", help="Export the graph as BloodHound OpenGraph JSON for attack-path interop"
     )
-    opengraph.add_argument("repo", nargs="?", default=".", help="Repository root containing the graph")
-    opengraph.add_argument("--output", help="Output JSON path. Defaults to .cybergraph/opengraph.json")
+    opengraph.add_argument(
+        "repo", nargs="?", default=".", help="Repository root containing the graph"
+    )
+    opengraph.add_argument(
+        "--output", help="Output JSON path. Defaults to .cybergraph/opengraph.json"
+    )
     opengraph.add_argument("--max-nodes", type=int, default=5000, help="Maximum nodes to include")
 
     analyze = sub.add_parser(
@@ -259,7 +296,9 @@ def build_parser() -> argparse.ArgumentParser:
     config_show = config_sub.add_parser("show", help="Show the effective configuration")
     config_show.add_argument("repo", nargs="?", default=".", help="Repository root")
 
-    history = sub.add_parser("history", help="Show recorded scan history and changes since last scan")
+    history = sub.add_parser(
+        "history", help="Show recorded scan history and changes since last scan"
+    )
     history.add_argument("repo", nargs="?", default=".", help="Repository root")
     history.add_argument("--limit", type=int, default=20, help="Maximum scans to list")
 
@@ -268,8 +307,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     quickstart.add_argument("repo", nargs="?", default=".", help="Repository root")
     quickstart.add_argument("--yes", action="store_true", help="Run non-interactively")
-    quickstart.add_argument("--no-open", action="store_true", help="Do not open the report in a browser")
-    quickstart.add_argument("--with-source", action="store_true", help="Embed (secret-redacted) source snippets in the report")
+    quickstart.add_argument(
+        "--no-open", action="store_true", help="Do not open the report in a browser"
+    )
+    quickstart.add_argument(
+        "--with-source", action="store_true",
+        help="Embed (secret-redacted) source snippets in the report",
+    )
 
     return parser
 
@@ -300,7 +344,9 @@ def _validate_json_report(path: Path) -> str | None:
     return None
 
 
-def _record_history(repo: Path, *, top_risk_score: int = 0, top_risk_label: str = "", quiet: bool = False):
+def _record_history(
+    repo: Path, *, top_risk_score: int = 0, top_risk_label: str = "", quiet: bool = False
+):
     """Best-effort scan recording; never fails the calling command.
 
     ``quiet=True`` (used by ``analyze --json``) suppresses the on-error warning so
@@ -355,12 +401,18 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "build":
         counts = build_graph(repo)
         print(f"Built security graph for {repo}")
-        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+        print(
+            f"Nodes: {counts['nodes']} | Edges: {counts['edges']}"
+            f" | Findings: {counts['findings']}"
+        )
         _record_history(repo)
     elif args.command == "scan":
         counts = scan_repo(repo)
         print(f"Scanned {repo}")
-        print(f"Nodes: {counts['nodes']} | Edges: {counts['edges']} | Findings: {counts['findings']}")
+        print(
+            f"Nodes: {counts['nodes']} | Edges: {counts['edges']}"
+            f" | Findings: {counts['findings']}"
+        )
         _record_history(repo)
     elif args.command == "import-report":
         report_path = Path(args.report).resolve()
@@ -442,7 +494,9 @@ def main(argv: list[str] | None = None) -> int:
         from .security.strix_plan import write_strix_instructions
 
         build_graph(repo)
-        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "strix-plan.md"
+        output = (
+            Path(args.output).resolve() if args.output else repo / ".cybergraph" / "strix-plan.md"
+        )
         written = write_strix_instructions(repo, output, limit=args.limit)
         print(f"Wrote Strix instruction file: {written}")
     elif args.command == "strix-run":
@@ -474,8 +528,15 @@ def main(argv: list[str] | None = None) -> int:
         from .security.investigate import export_investigation_markdown
 
         build_graph(repo)
-        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "investigation.md"
-        print(f"Wrote CyberGraph investigation: {export_investigation_markdown(repo, output, limit=args.limit)}")
+        output = (
+            Path(args.output).resolve()
+            if args.output
+            else repo / ".cybergraph" / "investigation.md"
+        )
+        print(
+            "Wrote CyberGraph investigation: "
+            f"{export_investigation_markdown(repo, output, limit=args.limit)}"
+        )
     elif args.command == "export-json":
         output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "graph.json"
         export_graph_json(repo, output, max_nodes=args.max_nodes)
@@ -529,7 +590,9 @@ def main(argv: list[str] | None = None) -> int:
         from .opengraph_export import export_opengraph
 
         build_graph(repo)
-        output = Path(args.output).resolve() if args.output else repo / ".cybergraph" / "opengraph.json"
+        output = (
+            Path(args.output).resolve() if args.output else repo / ".cybergraph" / "opengraph.json"
+        )
         export_opengraph(repo, output, max_nodes=args.max_nodes)
         print(f"Wrote BloodHound OpenGraph JSON: {output}")
     elif args.command == "analyze":

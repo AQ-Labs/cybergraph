@@ -39,13 +39,16 @@ _CATEGORY_KEYWORDS: dict[str, set[str]] = {
     },
     CATEGORY_AUTH: {
         "auth", "authentication", "authenticated", "authorize", "authorization", "login",
-        "guard", "guarded", "permission", "role", "protected", "session", "token", "unauthenticated",
+        "guard", "guarded", "permission", "role", "protected", "session", "token",
+        "unauthenticated",
     },
     CATEGORY_ENTRYPOINT: {
         "route", "routes", "endpoint", "endpoints", "entrypoint", "entrypoints", "exposed",
         "handler", "handlers", "api", "webhook",
     },
-    CATEGORY_SECRET: {"secret", "secrets", "password", "credential", "credentials", "apikey", "key"},
+    CATEGORY_SECRET: {
+        "secret", "secrets", "password", "credential", "credentials", "apikey", "key",
+    },
     CATEGORY_DEPENDENCY: {
         "dependency", "dependencies", "package", "packages", "vulnerable", "vulnerability",
         "cve", "osv", "library", "advisory",
@@ -112,7 +115,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
     records: list[EvidenceRecord] = []
     try:
         for row in store.conn.execute(
-            "SELECT target, file_path, line FROM edges WHERE kind = 'EXPOSES_ENTRYPOINT' ORDER BY target"
+            "SELECT target, file_path, line FROM edges"
+            " WHERE kind = 'EXPOSES_ENTRYPOINT' ORDER BY target"
         ):
             records.append(
                 EvidenceRecord(
@@ -123,7 +127,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 )
             )
         for row in store.conn.execute(
-            "SELECT source, target, file_path, line FROM edges WHERE kind = 'GUARDS' ORDER BY source"
+            "SELECT source, target, file_path, line FROM edges"
+            " WHERE kind = 'GUARDS' ORDER BY source"
         ):
             records.append(
                 EvidenceRecord(
@@ -134,7 +139,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 )
             )
         for row in store.conn.execute(
-            "SELECT source, target, file_path, line FROM edges WHERE kind = 'SANITIZES' ORDER BY source"
+            "SELECT source, target, file_path, line FROM edges"
+            " WHERE kind = 'SANITIZES' ORDER BY source"
         ):
             records.append(
                 EvidenceRecord(
@@ -145,7 +151,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 )
             )
         for row in store.conn.execute(
-            "SELECT source, target, file_path, line FROM edges WHERE kind = 'REACHES_SINK' ORDER BY source"
+            "SELECT source, target, file_path, line FROM edges"
+            " WHERE kind = 'REACHES_SINK' ORDER BY source"
         ):
             records.append(
                 EvidenceRecord(
@@ -156,7 +163,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 )
             )
         for row in store.conn.execute(
-            "SELECT source, target, file_path, line FROM edges WHERE kind = 'USES_SECRET' ORDER BY source"
+            "SELECT source, target, file_path, line FROM edges"
+            " WHERE kind = 'USES_SECRET' ORDER BY source"
         ):
             records.append(
                 EvidenceRecord(
@@ -179,7 +187,9 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                     "finding", _finding_category(row["message"], row["rule_id"]),
                     f"{row['severity']} {row['rule_id']}",
                     f"{row['message']} Fix: {remediation_for_rule(row['rule_id'], row['message'])}",
-                    Citation(file=row["file_path"], line=row["line_start"] or 0, rule=row["rule_id"]),
+                    Citation(
+                        file=row["file_path"], line=row["line_start"] or 0, rule=row["rule_id"]
+                    ),
                 )
             )
         for row in store.conn.execute(
@@ -196,7 +206,8 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
                 EvidenceRecord(
                     "dependency_vuln", CATEGORY_DEPENDENCY,
                     f"{row['vulnerability']} affects {row['dependency']}",
-                    f"Vulnerability `{row['vulnerability']}` affects dependency `{row['dependency']}`",
+                    f"Vulnerability `{row['vulnerability']}` "
+                    f"affects dependency `{row['dependency']}`",
                     Citation(rule=row["vulnerability"]),
                 )
             )
@@ -272,7 +283,9 @@ def answer_grounded(
 
     if use_llm and client is not None:
         answer = _llm_answer(client, question, records, confidence)
-        return GroundedAnswer(question, category, confidence, tuple(records), answer, True, citations)
+        return GroundedAnswer(
+            question, category, confidence, tuple(records), answer, True, citations
+        )
 
     return GroundedAnswer(
         question, category, confidence, tuple(records),
@@ -289,7 +302,10 @@ def format_grounded_answer(answer: GroundedAnswer) -> str:
 def _deterministic_text(
     question: str, category: str, confidence: str, records: list[EvidenceRecord]
 ) -> str:
-    lines = [f"Question: {question}", f"Category: {category}", f"Confidence: {confidence}", "", "Evidence:"]
+    lines = [
+        f"Question: {question}", f"Category: {category}", f"Confidence: {confidence}",
+        "", "Evidence:",
+    ]
     for index, record in enumerate(records, start=1):
         lines.append(f"[{index}] {record.title} ({record.citation.render()}) - {record.detail}")
     lines.append("")
@@ -309,20 +325,36 @@ def _synthesis(category: str, confidence: str, records: list[EvidenceRecord]) ->
     if category == CATEGORY_SINK:
         if "attack_path" in kinds:
             return (
-                "At least one entrypoint reaches a sensitive sink. Use the cited narrative to verify "
+                "At least one entrypoint reaches a sensitive sink. "
+                "Use the cited narrative to verify "
                 "the source, missing controls, and recommended fix."
             )
         if "sink" in kinds:
-            return "Sensitive sinks are reachable; apply the listed remediation and confirm inputs are sanitized."
+            return (
+                "Sensitive sinks are reachable; apply the listed remediation "
+                "and confirm inputs are sanitized."
+            )
     if category == CATEGORY_AUTH:
-        return "Authentication/authorization guards above are the controls protecting these entrypoints."
+        return (
+            "Authentication/authorization guards above are the controls "
+            "protecting these entrypoints."
+        )
     if category == CATEGORY_ENTRYPOINT:
-        return "These are the external entrypoints; check each has appropriate guards and validation."
+        return (
+            "These are the external entrypoints; check each has appropriate "
+            "guards and validation."
+        )
     if category == CATEGORY_SECRET:
         return "These functions touch secrets; confirm they are not logged or sent to sinks."
     if category == CATEGORY_DEPENDENCY:
-        return "These dependencies carry known vulnerabilities; check whether they are reachable from production code."
-    return "Inspect the cited evidence to confirm whether the control or sink is reachable in the relevant flow."
+        return (
+            "These dependencies carry known vulnerabilities; check whether they "
+            "are reachable from production code."
+        )
+    return (
+        "Inspect the cited evidence to confirm whether the control or sink is "
+        "reachable in the relevant flow."
+    )
 
 
 def _insufficient_text(question: str) -> str:
@@ -330,7 +362,8 @@ def _insufficient_text(question: str) -> str:
         f"Question: {question}\n"
         f"Confidence: {CONFIDENCE_INSUFFICIENT}\n\n"
         "Insufficient evidence in the security graph to answer this question. "
-        "Build the graph with `cybergraph build` and import scanner reports, or ask a more specific "
+        "Build the graph with `cybergraph build` and import scanner reports, "
+        "or ask a more specific "
         "security question (entrypoints, sink reachability, auth coverage, secrets, dependencies)."
     )
 

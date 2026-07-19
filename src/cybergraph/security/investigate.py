@@ -135,7 +135,10 @@ def collect_top_risks(repo_root: Path, limit: int = 10) -> list[TopRisk]:
 
 def format_top_risks(risks: list[TopRisk]) -> str:
     if not risks:
-        return "No prioritized risks found. Build the graph and import vulnerability reports for more context."
+        return (
+            "No prioritized risks found. "
+            "Build the graph and import vulnerability reports for more context."
+        )
     lines = [f"Top risks: {len(risks)}"]
     for risk in risks:
         lines.append(

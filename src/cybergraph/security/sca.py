@@ -80,11 +80,20 @@ def _rationale(
     where = ", ".join(files[:3]) if files else ""
     intel = _intel_suffix(props)
     if tier == TIER_ENTRYPOINT:
-        return f"{sev} severity; `{package}` is imported in {where}, which exposes an entrypoint — reachable from external input.{intel}"
+        return (
+            f"{sev} severity; `{package}` is imported in {where}, "
+            f"which exposes an entrypoint — reachable from external input.{intel}"
+        )
     if tier == TIER_IMPORTED:
-        return f"{sev} severity; `{package}` is imported in {where} but not in an entrypoint file.{intel}"
+        return (
+            f"{sev} severity; `{package}` is imported in {where} "
+            f"but not in an entrypoint file.{intel}"
+        )
     if not linked:
-        return f"{sev} severity; no matching dependency node in the graph — retained for review (verify package name/ecosystem).{intel}"
+        return (
+            f"{sev} severity; no matching dependency node in the graph — "
+            f"retained for review (verify package name/ecosystem).{intel}"
+        )
     return (
         f"{sev} severity; `{package}` is declared but no import was found in scanned code — "
         f"likely unreachable (transitive/dynamic use possible). Retained, not dropped.{intel}"
@@ -189,7 +198,9 @@ def format_sca(results: list[VulnPriority]) -> str:
             f"(severity={r.severity}, {r.reach_tier}, score={r.score})"
         )
         if r.risk:
-            lines.append(f"      Risk: {r.risk.label.upper()} {r.risk.score}/100 ({r.risk.rationale})")
+            lines.append(
+                f"      Risk: {r.risk.label.upper()} {r.risk.score}/100 ({r.risk.rationale})"
+            )
         lines.append(f"      {r.rationale}")
     return "\n".join(lines)
 

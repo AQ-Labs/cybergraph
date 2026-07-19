@@ -61,7 +61,10 @@ def _findings(repo: Path) -> dict[str, str]:
 def _nodes(repo: Path, kind: str) -> list[str]:
     store = GraphStore.open_for_repo(repo.resolve())
     try:
-        return [r["name"] for r in store.conn.execute("SELECT name FROM nodes WHERE kind = ?", (kind,))]
+        return [
+            r["name"]
+            for r in store.conn.execute("SELECT name FROM nodes WHERE kind = ?", (kind,))
+        ]
     finally:
         store.close()
 
