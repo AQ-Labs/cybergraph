@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .build import build_graph
+from .graph import GraphStore
 from .rag import answer_grounded, answer_question, format_grounded_answer
-from .security import find_attack_paths, format_attack_paths
+from .security import find_attack_paths, format_attack_paths, load_scanner_findings
 
 try:
     from fastmcp import FastMCP
@@ -98,6 +99,22 @@ if FastMCP is not None:
 
         paths = find_iac_attack_paths(Path(repo_root).resolve(), max_depth=max_depth)
         return {"count": len(paths), "text": format_iac_attack_paths(paths)}
+
+    @mcp.tool()
+    def import_scanner_report_tool(report_path: str, repo_root: str = ".") -> dict[str, Any]:
+        """Import findings from a Semgrep, SARIF, or Gitleaks JSON report into the graph."""
+        store = GraphStore.open_for_repo(Path(repo_root).resolve())
+        findings = load_scanner_findings(Path(report_path).resolve())
+        store.add_findings(findings)
+        store.close()
+        return {"imported": len(findings)}
+
+    @mcp.tool()
+    def import_vulnerabilities_tool(report_path: str, repo_root: str = ".") -> dict[str, Any]:
+        """Import an OSV Scanner or npm audit vulnerability JSON report into the graph."""
+        from .security.vulnerabilities import import_vulnerability_report
+
+        return import_vulnerability_report(Path(repo_root).resolve(), Path(report_path).resolve())
 else:
     mcp = None
 
