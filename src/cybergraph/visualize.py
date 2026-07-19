@@ -286,22 +286,21 @@ def _vulnerable_dependencies_table(rows) -> str:
 
 
 def _top_risks_table(risks) -> str:
+    """Clickable risk cards; attack-path cards jump to and highlight the path."""
     if not risks:
         return "<p class='muted'>No prioritized risks found yet.</p>"
-    rows = "".join(
-        "<tr>"
-        f"<td><span class='pill'>{html.escape(str(risk['risk_label']))}</span></td>"
-        f"<td>{html.escape(str(risk['risk_score']))}/100</td>"
-        f"<td>{html.escape(str(risk['category']))}</td>"
-        f"<td>{html.escape(str(risk['title']))}</td>"
-        f"<td>{html.escape(str(risk['detail']))}</td>"
-        "</tr>"
+    cards = "".join(
+        "<button type='button' class='risk-card' data-risk-jump "
+        f"data-title='{html.escape(str(risk['title']))}' "
+        f"data-category='{html.escape(str(risk['category']))}'>"
+        f"<strong><span class='risk-score'>{html.escape(str(risk['risk_score']))}</span>"
+        f"{html.escape(str(risk['title']))}</strong>"
+        f"<span>{html.escape(str(risk['risk_label']))} · {html.escape(str(risk['category']))}"
+        f" · {html.escape(str(risk['detail']))}</span>"
+        "</button>"
         for risk in risks
     )
-    return (
-        "<table><thead><tr><th>Risk</th><th>Score</th><th>Category</th><th>Title</th>"
-        f"<th>Detail</th></tr></thead><tbody>{rows}</tbody></table>"
-    )
+    return f"<div class='risk-strip'>{cards}</div>"
 
 
 def _attack_paths(paths) -> str:
@@ -466,7 +465,6 @@ _HTML_TEMPLATE = """<!doctype html>
     </details>
     <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
     __TRUNCATION_BANNER__
-    <div class="risk-strip" id="cg-risk-strip"></div>
     <div class="toolbar">
       <select id="cg-mode" aria-label="Graph view mode">
         <option value="paths">View: attack paths</option>
@@ -961,23 +959,27 @@ _HTML_TEMPLATE = """<!doctype html>
         pathSelect.appendChild(opt);
       });
 
-      const riskStrip = document.getElementById('cg-risk-strip');
-      attackPaths.slice(0, 6).forEach(function (p, i) {
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = 'risk-card';
-        const score = (p.risk && p.risk.score) || '?';
-        card.innerHTML = '<strong><span class="risk-score">' + esc(score) + '</span>' +
-          esc(tail(p.entrypoint)) + ' → ' + esc(tail(p.sink)) + '</strong><span>' +
-          esc((p.risk && p.risk.label) || 'risk') + ' · ' +
-          esc(p.data_reachable ? 'data-reachable' : 'structural') + '</span>';
+      // Top Risks cards double as navigation: attack-path cards jump to the
+      // explorer and light up the matching path.
+      document.querySelectorAll('[data-risk-jump]').forEach(function (card) {
         card.addEventListener('click', function () {
-          document.getElementById('cg-mode').value = 'paths';
-          renderMode('paths');
-          document.getElementById('cg-path').value = String(i);
-          highlightPath(String(i));
+          const title = card.getAttribute('data-title') || '';
+          let index = -1;
+          attackPaths.some(function (p, i) {
+            if (title.indexOf(tail(p.entrypoint)) !== -1 && title.indexOf(tail(p.sink)) !== -1) {
+              index = i;
+              return true;
+            }
+            return false;
+          });
+          document.getElementById('cy').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (index >= 0) {
+            document.getElementById('cg-mode').value = 'paths';
+            renderMode('paths');
+            document.getElementById('cg-path').value = String(index);
+            highlightPath(String(index));
+          }
         });
-        riskStrip.appendChild(card);
       });
 
       function applyFilters() {
