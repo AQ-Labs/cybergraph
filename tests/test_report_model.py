@@ -40,3 +40,14 @@ def test_to_json_has_stable_schema_and_counts():
     }
     assert doc["layers"][0]["key"] == "sink"
     assert doc["errors"] == {}
+
+
+def test_to_json_top_level_keys_are_frozen():
+    import json
+
+    doc = to_json(_sample())
+    assert set(doc) == {
+        "schema", "repo", "counts", "truncated", "llm_configured", "timings",
+        "errors", "top_risks", "component_counts", "layers",
+    }
+    json.dumps(doc)  # the versioned schema must always be JSON-serializable
