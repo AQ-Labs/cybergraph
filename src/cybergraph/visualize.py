@@ -447,6 +447,10 @@ _HTML_TEMPLATE = """<!doctype html>
     .cg-snippet .ln { display: flex; gap: 10px; padding: 1px 8px; white-space: pre; }
     .cg-snippet .ln .num { color: var(--muted, #94a3b8); user-select: none; min-width: 30px; text-align: right; }
     .cg-snippet .ln.hl { background: rgba(245, 158, 11, 0.18); }
+    @keyframes cg-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .grid, .risk-strip, .explainer, .explorer { animation: cg-fade 0.45s ease-out both; }
+    .explorer { animation-delay: 0.08s; }
+    @media (prefers-reduced-motion: reduce) { .grid, .risk-strip, .explainer, .explorer { animation: none; } }
     @media (max-width: 820px) { .explorer { grid-template-columns: 1fr; } .details { height: auto; } }
   </style>
   <script>
@@ -1066,7 +1070,29 @@ _HTML_TEMPLATE = """<!doctype html>
         }
         cy.elements().addClass('cg-dim');
         inPath.removeClass('cg-dim').addClass('cg-hl');
-        if (inPath.length) cy.animate({ fit: { eles: inPath, padding: 60 }, duration: 350 });
+        if (inPath.length) {
+          cy.animate({ fit: { eles: inPath, padding: 60 }, duration: 350 });
+          pulse(inPath.nodes());
+        }
+      }
+
+      // One soft glow pulse to draw the eye to a freshly highlighted path.
+      function pulse(nodes) {
+        try {
+          nodes.forEach(function (n) {
+            n.animate(
+              { style: { 'underlay-opacity': 0.45, 'underlay-padding': 14 } },
+              { duration: 260, complete: function () {
+                n.animate(
+                  { style: { 'underlay-opacity': activeTheme().glow, 'underlay-padding': 6 } },
+                  { duration: 420, complete: function () {
+                    n.removeStyle('underlay-opacity underlay-padding');
+                  } }
+                );
+              } }
+            );
+          });
+        } catch (e) { /* animation is decorative; never break the explorer */ }
       }
 
       function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
