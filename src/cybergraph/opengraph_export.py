@@ -11,7 +11,8 @@ string-targeted edges), and map it to the OpenGraph schema:
 
     {"metadata": {"source_kind": "CyberGraph"},
      "graph": {"nodes": [{"id", "kinds": [...], "properties": {...}}],
-               "edges": [{"kind", "start": {"value","match_by"}, "end": {...}, "properties": {...}}]}}
+               "edges": [{"kind", "start": {"value","match_by"},
+                          "end": {...}, "properties": {...}}]}}
 
 Per the schema: node ``id`` is top-level, ``kinds`` is a non-empty list (the first
 entry drives the BloodHound icon), property names are lowercase, and edge ``kind``
@@ -75,9 +76,11 @@ def _clean_properties(node: dict[str, Any]) -> dict[str, Any]:
         props["finding_count"] = len(node["findings"])
     for key, value in (node.get("properties") or {}).items():
         prop_key = str(key).lower()
-        if isinstance(value, (str, int, float, bool)):
+        if isinstance(value, str | int | float | bool):
             props[prop_key] = value
-        elif isinstance(value, list) and all(isinstance(v, (str, int, float, bool)) for v in value):
+        elif isinstance(value, list) and all(
+            isinstance(v, str | int | float | bool) for v in value
+        ):
             props[prop_key] = value
         else:
             props[prop_key] = json.dumps(value, sort_keys=True)

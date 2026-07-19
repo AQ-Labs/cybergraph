@@ -22,7 +22,11 @@ def _write_osv(path: Path, entries: list[tuple[str, str]]) -> None:
         {
             "package": {"name": pkg, "ecosystem": "PyPI", "version": "1.0.0"},
             "vulnerabilities": [
-                {"id": vid, "summary": f"{pkg} flaw", "severity": [{"type": "CVSS_V3", "score": _CVSS_HIGH}]}
+                {
+                    "id": vid,
+                    "summary": f"{pkg} flaw",
+                    "severity": [{"type": "CVSS_V3", "score": _CVSS_HIGH}],
+                }
             ],
         }
         for pkg, vid in entries

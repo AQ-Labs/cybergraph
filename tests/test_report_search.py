@@ -19,7 +19,10 @@ def _repo(tmp_path: Path) -> Path:
 def test_single_unified_search_box(tmp_path: Path):
     html = generate_html_report(_repo(tmp_path), tmp_path / "r.html").read_text(encoding="utf-8")
     # the findings table no longer has its own text search input
-    assert "data-filter='findings-search'" not in html and 'data-filter="findings-search"' not in html
+    assert (
+        "data-filter='findings-search'" not in html
+        and 'data-filter="findings-search"' not in html
+    )
     # exactly one search input remains: the shared #cg-search
     assert html.count('type="search"') + html.count("type='search'") == 1
     # the findings filter is wired to the shared box

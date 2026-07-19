@@ -44,7 +44,11 @@ def _redact_line(text: str) -> tuple[str, bool]:
     always masks recognizable key patterns anywhere. Ordinary code passes through."""
     redacted = False
     match = _ASSIGN_RE.search(text)
-    if match and _SECRET_KEY_RE.search(match.group(1)) and _LITERAL_VALUE_RE.match(match.group("val").strip()):
+    if (
+        match
+        and _SECRET_KEY_RE.search(match.group(1))
+        and _LITERAL_VALUE_RE.match(match.group("val").strip())
+    ):
         text = text[: match.start("val")] + _REDACTION
         redacted = True
     masked = _SECRET_VALUE_RE.sub(_REDACTION, text)
@@ -80,9 +84,14 @@ def attach_source_snippets(
 
         # Anchor on a finding line when present — fixes File nodes (line 1) whose
         # finding is deeper in the file. Highlight every finding line in the window.
-        finding_lines = sorted({int(f.get("line") or 0) for f in findings if int(f.get("line") or 0) > 0})
+        finding_lines = sorted(
+            {int(f.get("line") or 0) for f in findings if int(f.get("line") or 0) > 0}
+        )
         if finding_lines:
-            anchor = min(finding_lines, key=lambda ln: abs(ln - node_line)) if node_line else finding_lines[0]
+            anchor = (
+                min(finding_lines, key=lambda ln: abs(ln - node_line))
+                if node_line else finding_lines[0]
+            )
         else:
             anchor = node_line
 
@@ -90,7 +99,9 @@ def attach_source_snippets(
             continue
         if rel not in cache:
             try:
-                cache[rel] = (repo_root / rel).read_text(encoding="utf-8", errors="ignore").splitlines()
+                cache[rel] = (
+                    (repo_root / rel).read_text(encoding="utf-8", errors="ignore").splitlines()
+                )
             except OSError:
                 cache[rel] = None
         lines = cache[rel]
@@ -107,7 +118,8 @@ def attach_source_snippets(
             if redact_secrets:
                 raw, was_redacted = _redact_line(raw)
             rendered.append(
-                {"n": n, "text": html.escape(raw), "highlight": n in highlight, "redacted": was_redacted}
+                {"n": n, "text": html.escape(raw), "highlight": n in highlight,
+                 "redacted": was_redacted}
             )
         node["snippet"] = {"file": rel, "start": lo, "lines": rendered}
         attached += 1

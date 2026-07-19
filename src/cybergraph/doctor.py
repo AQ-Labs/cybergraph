@@ -116,7 +116,9 @@ def _check_optional_dependencies() -> DoctorCheck:
     for extra, modules in _OPTIONAL_EXTRAS.items():
         missing = [module for module in modules if find_spec(module) is None]
         if missing:
-            statuses.append(f"{extra}: missing {', '.join(missing)} (pip install cybergraph[{extra}])")
+            statuses.append(
+                f"{extra}: missing {', '.join(missing)} (pip install cybergraph[{extra}])"
+            )
         else:
             statuses.append(f"{extra}: available")
     return DoctorCheck("optional extras", True, "; ".join(statuses))

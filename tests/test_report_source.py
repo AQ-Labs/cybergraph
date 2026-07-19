@@ -29,14 +29,18 @@ def test_attaches_highlighted_snippet_for_finding_node(tmp_path: Path):
 
 def test_start_of_file_clamps_without_negative(tmp_path: Path):
     _write(tmp_path, "app.py", "run(x)\nb = 2\n")
-    g = _graph(tmp_path, {"line": 1, "findings": [{"rule_id": "CG-X", "severity": "high", "message": "m"}]})
+    g = _graph(
+        tmp_path, {"line": 1, "findings": [{"rule_id": "CG-X", "severity": "high", "message": "m"}]}
+    )
     attach_source_snippets(tmp_path, g, context=3)
     assert [ln["n"] for ln in g["nodes"][0]["snippet"]["lines"]] == [1, 2]
 
 
 def test_html_is_escaped(tmp_path: Path):
     _write(tmp_path, "app.py", "x = '<b>&</b>'\n")
-    g = _graph(tmp_path, {"line": 1, "findings": [{"rule_id": "CG-X", "severity": "high", "message": "m"}]})
+    g = _graph(
+        tmp_path, {"line": 1, "findings": [{"rule_id": "CG-X", "severity": "high", "message": "m"}]}
+    )
     attach_source_snippets(tmp_path, g)
     text = g["nodes"][0]["snippet"]["lines"][0]["text"]
     assert "&lt;b&gt;" in text and "<b>" not in text
@@ -45,7 +49,8 @@ def test_html_is_escaped(tmp_path: Path):
 def test_secret_finding_line_is_redacted(tmp_path: Path):
     _write(tmp_path, "Dockerfile", "FROM x\nENV API_KEY=supersecretvalue\n")
     g = _graph(tmp_path, {"id": "Dockerfile", "file": "Dockerfile", "line": 2,
-                          "findings": [{"rule_id": "CG-DOCKER-SECRET", "severity": "critical", "message": "m"}]})
+                          "findings": [{"rule_id": "CG-DOCKER-SECRET", "severity": "critical",
+                                         "message": "m"}]})
     attach_source_snippets(tmp_path, g, context=0)
     line = g["nodes"][0]["snippet"]["lines"][0]
     assert line["highlight"] is True
@@ -55,7 +60,8 @@ def test_secret_finding_line_is_redacted(tmp_path: Path):
 
 def test_node_without_finding_or_file_gets_no_snippet(tmp_path: Path):
     g = {"nodes": [{"id": "n", "file": "", "line": 0, "findings": []},
-                   {"id": "m", "file": "missing.py", "line": 5, "findings": [{"rule_id": "R", "severity": "low", "message": "x"}]}]}
+                   {"id": "m", "file": "missing.py", "line": 5,
+                    "findings": [{"rule_id": "R", "severity": "low", "message": "x"}]}]}
     attach_source_snippets(tmp_path, g)
     assert "snippet" not in g["nodes"][0]  # no file
     assert "snippet" not in g["nodes"][1]  # file missing -> best-effort skip

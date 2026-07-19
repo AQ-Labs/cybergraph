@@ -52,10 +52,10 @@ def to_json(result: AnalysisResult) -> dict[str, Any]:
         },
         "layers": [
             {
-                "key": l.key, "label": l.label,
-                "node_count": l.node_count, "edge_count": l.edge_count,
-                "finding_count": l.finding_count,
+                "key": layer.key, "label": layer.label,
+                "node_count": layer.node_count, "edge_count": layer.edge_count,
+                "finding_count": layer.finding_count,
             }
-            for l in result.layers
+            for layer in result.layers
         ],
     }

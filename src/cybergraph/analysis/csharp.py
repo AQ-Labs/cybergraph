@@ -16,8 +16,8 @@ from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
     EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
@@ -35,7 +35,10 @@ MINIMAL_API_RE = re.compile(
     r"\bapp\.Map(?P<verb>Get|Post|Put|Patch|Delete)\s*\(\s*\"(?P<path>[^\"]+)\""
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
-ASSIGN_RE = re.compile(r"\b(?:var|string|int|long|bool|Path|FileInfo|[\w<>]+)\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)")
+ASSIGN_RE = re.compile(
+    r"\b(?:var|string|int|long|bool|Path|FileInfo|[\w<>]+)"
+    r"\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)"
+)
 
 SINK_CALLS = {
     "executereader", "executenonquery", "executescalar",
@@ -46,7 +49,10 @@ SECRET_MARKERS = {
     "environment.getenvironmentvariable", "configuration[", "_configuration[",
     "secret", "password", "token", "apikey", "api_key",
 }
-INPUT_MARKERS = {"request.query", "request.form", "request.headers", "request.body", "fromquery", "frombody", "fromroute"}
+INPUT_MARKERS = {
+    "request.query", "request.form", "request.headers", "request.body",
+    "fromquery", "frombody", "fromroute",
+}
 SECRET_EXPOSURE_SINKS = {
     "console.writeline",
     "logger.loginformation",
@@ -100,7 +106,9 @@ def analyze_csharp_file(
             key = f"{rel}::{name}"
             current_function = key
             tainted_by_function.setdefault(current_function, {})
-            nodes.append(Node("Function", key, name, rel, line_no, line_no, _classify_csharp_name(name)))
+            nodes.append(
+                Node("Function", key, name, rel, line_no, line_no, _classify_csharp_name(name))
+            )
             if pending_route is not None:
                 route_key = f"{rel}::route:{pending_route['path']}:{pending_route['line']}"
                 nodes.append(
@@ -110,9 +118,14 @@ def analyze_csharp_file(
                         {"framework": "aspnet", "method": pending_route["method"]},
                     )
                 )
-                edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, route_key, rel, pending_route["line"]))
+                edges.append(
+                    Edge(EDGE_EXPOSES_ENTRYPOINT, rel, route_key, rel, pending_route["line"])
+                )
                 edges.append(Edge("CALLS", route_key, name, rel, line_no))
-                _add_route_params(key, line, rel, line_no, pending_route["path"], nodes, edges, tainted_by_function[key])
+                _add_route_params(
+                    key, line, rel, line_no, pending_route["path"],
+                    nodes, edges, tainted_by_function[key],
+                )
                 pending_route = None
 
         sink_source = current_function or rel
@@ -142,7 +155,9 @@ def analyze_csharp_file(
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
-            if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)) and _is_secret_exposure(call_name):
+            if any(
+                marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)
+            ) and _is_secret_exposure(call_name):
                 edges.append(
                     Edge(
                         EDGE_EXPOSES_SECRET,
@@ -217,7 +232,12 @@ def _add_route_params(
             )
         )
         edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, line_no))
-        edges.append(Edge(EDGE_TAINTS, input_key, function_key, rel, line_no, {"reason": "route parameter"}))
+        edges.append(
+            Edge(
+                EDGE_TAINTS, input_key, function_key, rel, line_no,
+                {"reason": "route parameter"},
+            )
+        )
         tainted[name] = input_key
 
 
@@ -233,7 +253,10 @@ def _line_input_source(
         return ""
     input_key = f"{owner_key}::input:request:{line_no}"
     nodes.append(
-        Node("Input", input_key, "request", rel, line_no, line_no, {"source": "request", "user_controlled": True})
+        Node(
+            "Input", input_key, "request", rel, line_no, line_no,
+            {"source": "request", "user_controlled": True},
+        )
     )
     edges.append(Edge(EDGE_READS_INPUT, owner_key, input_key, rel, line_no))
     return input_key

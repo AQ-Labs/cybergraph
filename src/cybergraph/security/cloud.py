@@ -80,7 +80,10 @@ def find_cloud_code_paths(repo_root: Path) -> list[CloudCodePath]:
 
 def format_cloud_code_paths(paths: list[CloudCodePath]) -> str:
     if not paths:
-        return "No cloud-to-code correlations found. Build the graph and ensure code references IaC resource names."
+        return (
+            "No cloud-to-code correlations found. "
+            "Build the graph and ensure code references IaC resource names."
+        )
     lines = [f"Cloud-to-code correlations: {len(paths)}"]
     for path in paths:
         exposure = "public" if path.public_exposure else "internal"
@@ -97,7 +100,9 @@ def format_cloud_code_paths(paths: list[CloudCodePath]) -> str:
 
 def _resources(store: GraphStore) -> dict[str, dict]:
     resources: dict[str, dict] = {}
-    for row in store.conn.execute("SELECT key, name, properties FROM nodes WHERE kind = 'Resource'"):
+    for row in store.conn.execute(
+        "SELECT key, name, properties FROM nodes WHERE kind = 'Resource'"
+    ):
         resources[row["key"]] = {"name": row["name"], "props": _loads(row["properties"])}
     return resources
 

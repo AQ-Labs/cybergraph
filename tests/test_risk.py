@@ -75,7 +75,11 @@ def test_sca_format_includes_risk(tmp_path: Path) -> None:
                     {
                         "packages": [
                             {
-                                "package": {"name": "usedpkg", "ecosystem": "PyPI", "version": "1.0"},
+                                "package": {
+                                    "name": "usedpkg",
+                                    "ecosystem": "PyPI",
+                                    "version": "1.0",
+                                },
                                 "vulnerabilities": [
                                     {
                                         "id": "CVE-USED",

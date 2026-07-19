@@ -59,7 +59,9 @@ def _load_sarif(data: dict[str, Any]) -> list[Finding]:
                 Finding(
                     rule_id=rule_id,
                     severity=result.get("level", "warning"),
-                    message=result.get("message", {}).get("text", rule.get("name", "SARIF finding")),
+                    message=result.get("message", {}).get(
+                        "text", rule.get("name", "SARIF finding")
+                    ),
                     file_path=location.get("artifactLocation", {}).get("uri", ""),
                     line_start=int(region.get("startLine", 0) or 0),
                     line_end=int(region.get("endLine", region.get("startLine", 0)) or 0),

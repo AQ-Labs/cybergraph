@@ -17,8 +17,8 @@ from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
     EDGE_EXPOSES_SECRET,
     EDGE_FLOWS_TO,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
@@ -81,7 +81,10 @@ def analyze_go_file(
             current_function = f"{rel}::{name}"
             tainted_by_function.setdefault(current_function, {})
             nodes.append(
-                Node("Function", current_function, name, rel, line_no, line_no, _classify_go_name(name))
+                Node(
+                    "Function", current_function, name, rel, line_no, line_no,
+                    _classify_go_name(name),
+                )
             )
 
         for route_match in (NET_HTTP_RE.search(line), ROUTER_VERB_RE.search(line)):
@@ -133,7 +136,9 @@ def analyze_go_file(
 
         for call in CALL_RE.finditer(line):
             call_name = call.group("name")
-            if any(marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)) and _is_secret_exposure(call_name):
+            if any(
+                marker in lowered_line for marker in SECRET_MARKERS | set(secret_markers)
+            ) and _is_secret_exposure(call_name):
                 edges.append(
                     Edge(
                         EDGE_EXPOSES_SECRET,

@@ -118,7 +118,9 @@ def _traverse(
                     continue
                 seen_paths.add(key)
                 taint_sources = taints.get((node, sink_name), ())
-                risk = _score_attack_path(sink_name, bool(taint_sources), sanitized, _RANK_CONF[conf_rank])
+                risk = _score_attack_path(
+                    sink_name, bool(taint_sources), sanitized, _RANK_CONF[conf_rank]
+                )
                 reasons = _path_reasons(
                     path=path,
                     sink_name=sink_name,
@@ -162,7 +164,10 @@ def _traverse(
 
 def format_attack_paths(paths: list[AttackPath]) -> str:
     if not paths:
-        return "No entrypoint-to-sink paths found yet. Build the graph and check route decorators/sink calls."
+        return (
+            "No entrypoint-to-sink paths found yet. "
+            "Build the graph and check route decorators/sink calls."
+        )
     lines = ["Potential attack paths:"]
     for path in paths:
         flags = f"confidence={path.confidence}"
@@ -188,7 +193,9 @@ def _score_attack_path(
     confidence: str,
 ) -> RiskScore:
     lowered = sink_name.lower()
-    impact = 0.9 if any(token in lowered for token in ("exec", "shell", "eval", "command")) else 0.75
+    impact = (
+        0.9 if any(token in lowered for token in ("exec", "shell", "eval", "command")) else 0.75
+    )
     if any(token in lowered for token in ("execute", "query", "sql")):
         impact = max(impact, 0.85)
     if any(token in lowered for token in ("open", "read", "write", "file")):
@@ -207,7 +214,9 @@ def _load_taints(store: GraphStore) -> dict[tuple[str, str], tuple[str, ...]]:
     """Map (function, sink) pairs to user-controlled data-flow source labels."""
     source_names = {
         row["key"]: row["name"]
-        for row in store.conn.execute("SELECT key, name FROM nodes WHERE kind IN ('Input', 'DataFlow')")
+        for row in store.conn.execute(
+            "SELECT key, name FROM nodes WHERE kind IN ('Input', 'DataFlow')"
+        )
     }
     taints: dict[tuple[str, str], set[str]] = {}
     for row in store.conn.execute(

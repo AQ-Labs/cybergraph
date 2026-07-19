@@ -37,5 +37,7 @@ def resolve_resource_references(nodes: list[Node], edges: list[Edge]) -> list[Ed
         if pair in seen:
             continue
         seen.add(pair)
-        resolved.append(Edge(EDGE_REFERENCES_RESOLVED, edge.source, target_key, edge.file_path, edge.line))
+        resolved.append(
+            Edge(EDGE_REFERENCES_RESOLVED, edge.source, target_key, edge.file_path, edge.line)
+        )
     return resolved

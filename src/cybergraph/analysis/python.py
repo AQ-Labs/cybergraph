@@ -6,7 +6,6 @@ import ast
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
-from cybergraph.suppressions import is_inline_suppressed
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
     AUTHZ_KEYWORDS,
@@ -16,8 +15,8 @@ from cybergraph.security.ontology import (
     EDGE_FLOWS_TO,
     EDGE_GUARDS,
     EDGE_IMPORTS,
-    EDGE_READS_INPUT,
     EDGE_REACHES_SINK,
+    EDGE_READS_INPUT,
     EDGE_SANITIZES,
     EDGE_TAINTS,
     EDGE_USES_SECRET,
@@ -26,6 +25,7 @@ from cybergraph.security.ontology import (
     SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
+from cybergraph.suppressions import is_inline_suppressed
 
 SECRET_EXPOSURE_SINKS = {
     "print",
@@ -72,9 +72,11 @@ def analyze_python_file(
     findings: list[Finding] = []
 
     for item in ast.walk(tree):
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
             key = f"{rel}::{item.name}"
-            props = classify_name(item.name, auth_markers, validation_markers, secret_markers, custom_sinks)
+            props = classify_name(
+                item.name, auth_markers, validation_markers, secret_markers, custom_sinks
+            )
             decorators = _decorator_texts(item)
             props["decorators"] = decorators
             route = _route_metadata(item)
@@ -97,10 +99,15 @@ def analyze_python_file(
             tainted_values = _route_inputs(item, key, rel, route, nodes, edges)
             for decorator in decorators:
                 lowered_decorator = decorator.lower()
-                if any(kw in lowered_decorator for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)):
+                if any(
+                    kw in lowered_decorator
+                    for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)
+                ):
                     edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
             for dependency in _fastapi_depends_guards(item, auth_markers):
-                edges.append(Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"}))
+                edges.append(
+                    Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"})
+                )
 
             _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
 
@@ -108,7 +115,9 @@ def analyze_python_file(
                 call_name = _call_name(call)
                 if not call_name:
                     continue
-                edges.append(Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno)))
+                edges.append(
+                    Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno))
+                )
                 lowered = call_name.lower()
                 if any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)):
                     line_no = getattr(call, "lineno", item.lineno)
@@ -126,7 +135,12 @@ def analyze_python_file(
                             )
                     )
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
-                    edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, getattr(call, "lineno", item.lineno)))
+                    edges.append(
+                        Edge(
+                            EDGE_USES_SECRET, key, call_name, rel,
+                            getattr(call, "lineno", item.lineno),
+                        )
+                    )
                 call_text = ast.unparse(call).lower() if hasattr(ast, "unparse") else lowered
                 if _is_secret_exposure(call_name, call_text, secret_markers):
                     edges.append(
@@ -140,7 +154,12 @@ def analyze_python_file(
                         )
                     )
                 if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
-                    edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, getattr(call, "lineno", item.lineno)))
+                    edges.append(
+                        Edge(
+                            EDGE_SANITIZES, key, call_name, rel,
+                            getattr(call, "lineno", item.lineno),
+                        )
+                    )
 
     _add_django_url_routes(tree, rel, nodes, edges)
     _add_imports(tree, rel, edges)
@@ -199,7 +218,12 @@ def _route_inputs(
             )
         )
         edges.append(Edge(EDGE_READS_INPUT, function_key, input_key, rel, item.lineno))
-        edges.append(Edge(EDGE_TAINTS, input_key, function_key, rel, item.lineno, {"reason": "route parameter"}))
+        edges.append(
+            Edge(
+                EDGE_TAINTS, input_key, function_key, rel, item.lineno,
+                {"reason": "route parameter"},
+            )
+        )
         tainted[arg.arg] = input_key
     return tainted
 
@@ -237,7 +261,12 @@ def _add_python_dataflows(
                             {"user_controlled": True, "source": source_key},
                         )
                     )
-                    edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, getattr(node, "lineno", item.lineno)))
+                    edges.append(
+                        Edge(
+                            EDGE_FLOWS_TO, source_key, flow_key, rel,
+                            getattr(node, "lineno", item.lineno),
+                        )
+                    )
                     tainted[name] = flow_key
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             source_key = _tainted_source_key(node.value, tainted) if node.value is not None else ""
@@ -259,7 +288,12 @@ def _add_python_dataflows(
                         {"user_controlled": True, "source": source_key},
                     )
                 )
-                edges.append(Edge(EDGE_FLOWS_TO, source_key, flow_key, rel, getattr(node, "lineno", item.lineno)))
+                edges.append(
+                    Edge(
+                        EDGE_FLOWS_TO, source_key, flow_key, rel,
+                        getattr(node, "lineno", item.lineno),
+                    )
+                )
                 tainted[name] = flow_key
         elif isinstance(node, ast.Call):
             call_name = _call_name(node)
@@ -306,7 +340,7 @@ def _ensure_input_node(
 def _assigned_names(target: ast.AST) -> list[str]:
     if isinstance(target, ast.Name):
         return [target.id]
-    if isinstance(target, (ast.Tuple, ast.List)):
+    if isinstance(target, ast.Tuple | ast.List):
         names: list[str] = []
         for elt in target.elts:
             names.extend(_assigned_names(elt))
@@ -370,7 +404,9 @@ def classify_name(
     return {
         "auth_related": any(kw in lowered for kw in AUTH_KEYWORDS | set(auth_markers)),
         "authorization_related": any(kw in lowered for kw in AUTHZ_KEYWORDS),
-        "validation_related": any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)),
+        "validation_related": any(
+            kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)
+        ),
         "secret_related": any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)),
         "crypto_related": any(kw in lowered for kw in CRYPTO_KEYWORDS),
         "sink_related": any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)),
@@ -411,9 +447,13 @@ def _call_name(call: ast.Call) -> str:
     return _callable_name(call.func)
 
 
-def _fastapi_depends_guards(node: ast.FunctionDef | ast.AsyncFunctionDef, auth_markers: tuple[str, ...]) -> list[str]:
+def _fastapi_depends_guards(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, auth_markers: tuple[str, ...]
+) -> list[str]:
     guards: list[str] = []
-    defaults = list(node.args.defaults) + [default for default in node.args.kw_defaults if default is not None]
+    defaults = list(node.args.defaults) + [
+        default for default in node.args.kw_defaults if default is not None
+    ]
     for default in defaults:
         if not isinstance(default, ast.Call):
             continue

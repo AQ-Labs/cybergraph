@@ -29,12 +29,12 @@ from cybergraph.config import CyberGraphConfig
 from cybergraph.graph import Edge, Finding, Node
 
 from .csharp import analyze_csharp_file
+from .dockerfile import analyze_dockerfile_file
 from .go import analyze_go_file
 from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
 from .terraform import analyze_terraform_file
-from .dockerfile import analyze_dockerfile_file
 
 AnalyzerResult = tuple[list[Node], list[Edge], list[Finding]]
 

@@ -29,7 +29,8 @@ from cybergraph.suppressions import is_inline_suppressed
 
 RESOURCE_RE = re.compile(r'resource\s+"(?P<type>[^"]+)"\s+"(?P<name>[^"]+)"\s*\{')
 # A reference to another resource: <provider_type>.<name>(.attr) e.g. aws_security_group.web.id.
-# The type must contain an underscore (provider_resource), which excludes var/local/module/each/data.
+# The type must contain an underscore (provider_resource), which excludes
+# var/local/module/each/data.
 REFERENCE_RE = re.compile(r"\b(?P<type>[a-z][a-z0-9]*_[a-z0-9_]+)\.(?P<name>[A-Za-z0-9_-]+)")
 OPEN_CIDR_RE = re.compile(r'"(?:0\.0\.0\.0/0|::/0)"')
 WILDCARD_ACTION_RE = re.compile(r'"?actions?"?\s*[=:]\s*\[?\s*"\*"', re.IGNORECASE)
@@ -67,11 +68,14 @@ def analyze_terraform_file(
         public_ingress = bool(OPEN_CIDR_RE.search(body)) and (
             "security_group" in rtype or "firewall" in rtype or "ingress" in body
         )
-        wildcard_iam = ("iam" in rtype or "policy" in rtype) and bool(WILDCARD_ACTION_RE.search(body))
+        wildcard_iam = ("iam" in rtype or "policy" in rtype) and bool(
+            WILDCARD_ACTION_RE.search(body)
+        )
         public_bucket = (
             rtype.endswith("s3_bucket") and bool(PUBLIC_ACL_RE.search(body))
         ) or (
-            rtype.endswith("s3_bucket_public_access_block") and bool(PUBLIC_ACCESS_BLOCK_RE.search(body))
+            rtype.endswith("s3_bucket_public_access_block")
+            and bool(PUBLIC_ACCESS_BLOCK_RE.search(body))
         )
 
         props = {"resource_type": rtype, "layer": "infrastructure"}

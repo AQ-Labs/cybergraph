@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cybergraph.config import load_config
 from cybergraph.analysis import (
     analyze_dependency_manifest,
     is_dependency_manifest,
     iter_source_files,
 )
+from cybergraph.analysis.cloud_refs import link_code_resource_usage
+from cybergraph.analysis.dep_usage import link_dependency_usage
 from cybergraph.analysis.registry import analyze_source_file
 from cybergraph.analysis.resolve import resolve_calls
-from cybergraph.analysis.dep_usage import link_dependency_usage
 from cybergraph.analysis.resource_refs import resolve_resource_references
-from cybergraph.analysis.cloud_refs import link_code_resource_usage
+from cybergraph.config import load_config
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 from cybergraph.suppressions import filter_suppressed_findings
 

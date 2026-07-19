@@ -43,7 +43,9 @@ def _confidence(hops: int) -> str:
     return "low"
 
 
-def find_iac_attack_paths(repo_root: Path, max_depth: int = 6, limit: int = 20) -> list[IacAttackPath]:
+def find_iac_attack_paths(
+    repo_root: Path, max_depth: int = 6, limit: int = 20
+) -> list[IacAttackPath]:
     """Return paths from publicly exposed resources to privileged resources."""
     store = GraphStore.open_for_repo(Path(repo_root).resolve())
     try:

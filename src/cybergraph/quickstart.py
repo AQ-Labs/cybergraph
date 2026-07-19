@@ -33,7 +33,10 @@ def run_quickstart(repo_root: Path, *, with_source: bool = False) -> QuickstartR
 
     result = run_full_analysis(repo_root)
     top = result.top_risks[0] if result.top_risks else None
-    top_risk = f"{top.risk_label.upper()} {top.risk_score}/100 {top.category}: {top.title}" if top else None
+    top_risk = (
+        f"{top.risk_label.upper()} {top.risk_score}/100 {top.category}: {top.title}"
+        if top else None
+    )
     steps.append(f"[3/4] analyze ... {len(result.top_risks)} risk(s)"
                  + (f"; top: {top_risk}" if top_risk else ""))
 

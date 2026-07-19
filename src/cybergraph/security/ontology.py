@@ -13,16 +13,46 @@ class SecurityLayer:
 
 
 LAYERS: tuple[SecurityLayer, ...] = (
-    SecurityLayer("entrypoint", "Entrypoints", "External inputs such as routes, handlers, CLIs, and webhooks."),
-    SecurityLayer("authentication", "Authentication", "Identity checks and session/token verification."),
-    SecurityLayer("authorization", "Authorization", "Permission, role, policy, and ownership checks."),
-    SecurityLayer("validation", "Validation", "Input validation, parsing, canonicalization, and sanitization."),
-    SecurityLayer("secrets", "Secrets", "Credential, token, key, and environment variable handling."),
-    SecurityLayer("crypto", "Cryptography", "Hashing, signing, encryption, verification, and key use."),
-    SecurityLayer("sink", "Sensitive Sinks", "Database, shell, filesystem, network, template, and deserialization sinks."),
-    SecurityLayer("dataflow", "Data Flow", "User-controlled inputs and their propagation toward sensitive operations."),
-    SecurityLayer("dependency", "Dependencies", "Third-party packages and known vulnerable components."),
-    SecurityLayer("infrastructure", "Infrastructure", "Cloud/IaC resources: networking, storage, identity, and their misconfigurations."),
+    SecurityLayer(
+        "entrypoint", "Entrypoints",
+        "External inputs such as routes, handlers, CLIs, and webhooks.",
+    ),
+    SecurityLayer(
+        "authentication", "Authentication",
+        "Identity checks and session/token verification.",
+    ),
+    SecurityLayer(
+        "authorization", "Authorization",
+        "Permission, role, policy, and ownership checks.",
+    ),
+    SecurityLayer(
+        "validation", "Validation",
+        "Input validation, parsing, canonicalization, and sanitization.",
+    ),
+    SecurityLayer(
+        "secrets", "Secrets",
+        "Credential, token, key, and environment variable handling.",
+    ),
+    SecurityLayer(
+        "crypto", "Cryptography",
+        "Hashing, signing, encryption, verification, and key use.",
+    ),
+    SecurityLayer(
+        "sink", "Sensitive Sinks",
+        "Database, shell, filesystem, network, template, and deserialization sinks.",
+    ),
+    SecurityLayer(
+        "dataflow", "Data Flow",
+        "User-controlled inputs and their propagation toward sensitive operations.",
+    ),
+    SecurityLayer(
+        "dependency", "Dependencies",
+        "Third-party packages and known vulnerable components.",
+    ),
+    SecurityLayer(
+        "infrastructure", "Infrastructure",
+        "Cloud/IaC resources: networking, storage, identity, and their misconfigurations.",
+    ),
 )
 
 SOURCE_KEYWORDS = {

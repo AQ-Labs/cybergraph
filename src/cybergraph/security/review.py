@@ -20,7 +20,7 @@ class SecurityReview:
     changed_entrypoints: tuple[str, ...]
     changed_sink_edges: tuple[str, ...]
     attack_path_count: int
-    risk_deltas: tuple["RiskDelta", ...] = ()
+    risk_deltas: tuple[RiskDelta, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,11 @@ def format_security_review(review: SecurityReview) -> str:
         return f"No changed files found against {review.base}."
 
     risk = "high" if review.attack_path_count or review.finding_count > 3 else "medium"
-    if review.finding_count == 0 and not review.changed_sink_edges and not review.changed_entrypoints:
+    if (
+        review.finding_count == 0
+        and not review.changed_sink_edges
+        and not review.changed_entrypoints
+    ):
         risk = "low"
 
     lines = [
@@ -191,7 +195,9 @@ def _classify_risk_deltas(
         previous = base.get(signature)
         if previous is None:
             deltas.append(_with_status(item, "added"))
-        elif item.risk_score > previous.risk_score or (item.data_reachable and not previous.data_reachable):
+        elif item.risk_score > previous.risk_score or (
+            item.data_reachable and not previous.data_reachable
+        ):
             deltas.append(_with_status(item, "worsened"))
         else:
             deltas.append(_with_status(item, "unchanged"))

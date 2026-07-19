@@ -18,7 +18,11 @@ def link_code_resource_usage(repo_root: Path, nodes: list[Node]) -> list[Edge]:
     for node in code_nodes:
         if node.file_path not in file_text:
             path = repo_root / node.file_path
-            file_text[node.file_path] = path.read_text(encoding="utf-8", errors="ignore").lower() if path.exists() else ""
+            file_text[node.file_path] = (
+                path.read_text(encoding="utf-8", errors="ignore").lower()
+                if path.exists()
+                else ""
+            )
 
     edges: list[Edge] = []
     seen: set[tuple[str, str]] = set()

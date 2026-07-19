@@ -9,7 +9,6 @@ from typing import Any
 
 from cybergraph.graph import Edge, Finding, GraphStore, Node
 
-
 EDGE_AFFECTS_DEPENDENCY = "AFFECTS_DEPENDENCY"
 
 
@@ -135,7 +134,9 @@ def enrich_vulnerabilities(repo_root: Path, report_path: Path) -> dict[str, int]
             if not merged:
                 continue
             matched += 1
-            props.update({key: value for key, value in merged.items() if value not in (None, "", [])})
+            props.update(
+                {key: value for key, value in merged.items() if value not in (None, "", [])}
+            )
             nodes.append(Node("Vulnerability", row["key"], row["name"], "", 0, 0, props))
         store.upsert_nodes(nodes)
         return {"advisories": len(enrichment), "matched_vulnerabilities": matched}
@@ -199,8 +200,16 @@ def _load_npm_audit(data: dict[str, Any]) -> list[VulnerabilityRecord]:
                 summary=summary,
                 source="npm-audit",
                 advisory_urls=tuple(_npm_urls(vuln)),
-                cvss_score=_optional_float(vuln.get("cvss", {}).get("score")) if isinstance(vuln.get("cvss"), dict) else None,
-                cvss_vector=str(vuln.get("cvss", {}).get("vectorString", "")) if isinstance(vuln.get("cvss"), dict) else "",
+                cvss_score=(
+                    _optional_float(vuln.get("cvss", {}).get("score"))
+                    if isinstance(vuln.get("cvss"), dict)
+                    else None
+                ),
+                cvss_vector=(
+                    str(vuln.get("cvss", {}).get("vectorString", ""))
+                    if isinstance(vuln.get("cvss"), dict)
+                    else ""
+                ),
             )
         )
     return records

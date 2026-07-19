@@ -58,7 +58,9 @@ def analyze_dockerfile_file(
             alias = from_match.group("alias")
             if alias:
                 stage_aliases.add(alias.lower())
-            _check_base_image(findings, lines, rel, line_no, from_match.group("image"), stage_aliases)
+            _check_base_image(
+                findings, lines, rel, line_no, from_match.group("image"), stage_aliases
+            )
 
         user_match = USER_RE.match(line)
         if user_match and user_match.group("user").lower() not in {"root", "0"}:

@@ -96,12 +96,18 @@ def retrieve_evidence(repo_root: Path, question: str, limit: int = 8) -> list[Ev
 def answer_question(repo_root: Path, question: str) -> str:
     evidence = retrieve_evidence(repo_root, question)
     if not evidence:
-        return "No matching security evidence found. Run `cybergraph build` first or ask a broader question."
+        return (
+            "No matching security evidence found. "
+            "Run `cybergraph build` first or ask a broader question."
+        )
 
     lines = [f"Question: {question}", "", "Evidence:"]
     for item in evidence:
         location = f"{item.file_path}:{item.line}" if item.line else item.file_path
         lines.append(f"- [{item.kind}] {item.title} at {location} - {item.detail}")
     lines.append("")
-    lines.append("Next step: inspect the listed paths and verify whether the control or sink is reachable in the changed flow.")
+    lines.append(
+        "Next step: inspect the listed paths and verify whether the control or sink "
+        "is reachable in the changed flow."
+    )
     return "\n".join(lines)

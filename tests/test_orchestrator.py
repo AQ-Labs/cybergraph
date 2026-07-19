@@ -63,13 +63,17 @@ def test_truncated_flag_reflects_report_node_cap(tmp_path: Path, monkeypatch):
     import cybergraph.orchestrator as orch
 
     monkeypatch.setattr(
-        orch, "build_graph", lambda _repo: {"nodes": orch.REPORT_NODE_CAP + 1, "edges": 0, "findings": 0}
+        orch,
+        "build_graph",
+        lambda _repo: {"nodes": orch.REPORT_NODE_CAP + 1, "edges": 0, "findings": 0},
     )
     result = run_full_analysis(repo)
     assert result.truncated is True
 
     monkeypatch.setattr(
-        orch, "build_graph", lambda _repo: {"nodes": orch.REPORT_NODE_CAP, "edges": 0, "findings": 0}
+        orch,
+        "build_graph",
+        lambda _repo: {"nodes": orch.REPORT_NODE_CAP, "edges": 0, "findings": 0},
     )
     result = run_full_analysis(repo)
     assert result.truncated is False

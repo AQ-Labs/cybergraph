@@ -176,7 +176,9 @@ def triage_findings(
         try:
             raw = client.complete(_SYSTEM, user)
         except Exception as exc:  # never let one call abort triage; abstain instead
-            results.append(TriageResult(finding, VERDICT_UNCERTAIN, f"triage error: {exc}", "", False))
+            results.append(
+                TriageResult(finding, VERDICT_UNCERTAIN, f"triage error: {exc}", "", False)
+            )
             continue
         verdict, reason, evidence = _parse_verdict(raw)
         suppressed = should_suppress(verdict, evidence, slice_text)

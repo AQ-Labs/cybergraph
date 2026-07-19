@@ -92,7 +92,9 @@ def test_build_graph_suppresses_configured_finding_rules(tmp_path: Path) -> None
     store = GraphStore.open_for_repo(repo)
     try:
         finding_count = store.conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
-        sink_edges = store.conn.execute("SELECT COUNT(*) FROM edges WHERE kind = 'REACHES_SINK'").fetchone()[0]
+        sink_edges = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE kind = 'REACHES_SINK'"
+        ).fetchone()[0]
     finally:
         store.close()
     assert finding_count == 0
