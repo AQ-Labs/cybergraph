@@ -125,3 +125,29 @@ def test_zones_view_present_in_report(tmp_path: Path) -> None:
     assert "buildZoneElements" in html
     assert "'zone:' + zone" in html  # compound parents
     assert "Attack Surface → Guards" in html or "Attack Surface \u2192 Guards" in html
+
+
+def test_findings_grouped_by_rule(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "data-finding-group" in html
+    assert "class='finding-group" in html
+    assert "data-finding-row" in html  # rows survive inside groups
+    assert "fg-count" in html
+
+
+def test_top_risks_render_as_clickable_cards(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "data-risk-jump" in html
+    assert "cg-risk-strip" not in html  # duplicated JS strip removed
+
+
+def test_stat_tiles_show_severity_accents(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "stat-crit" in html or "stat-high" in html
+
+
+def test_motion_is_present_and_reduced_motion_safe(tmp_path: Path) -> None:
+    html = _report_html(tmp_path)
+    assert "@keyframes cg-fade" in html
+    assert "prefers-reduced-motion" in html
+    assert "function pulse(" in html
