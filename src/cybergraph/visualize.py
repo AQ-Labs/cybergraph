@@ -438,17 +438,52 @@ _HTML_TEMPLATE = """<!doctype html>
   <script>
     (function () {
       const data = window.CYBERGRAPH || { nodes: [], edges: [], attack_paths: [] };
-      const GROUP_COLORS = {
-        entrypoint: '#2563eb', function: '#64748b', guard: '#16a34a', validator: '#0d9488',
-        sink: '#dc2626', secret: '#d97706', dataflow: '#0891b2', dependency: '#7c3aed',
-        vulnerability: '#991b1b', infrastructure: '#475569', call: '#cbd5e1', file: '#94a3b8'
+      // Light and dark graph palettes. Dark brightens node fills into a neon
+      // range and dims base edges so glow halos and highlighted paths pop.
+      const THEMES = {
+        light: {
+          groups: {
+            entrypoint: '#2563eb', function: '#64748b', guard: '#16a34a', validator: '#0d9488',
+            sink: '#dc2626', secret: '#d97706', dataflow: '#0891b2', dependency: '#7c3aed',
+            vulnerability: '#991b1b', infrastructure: '#475569', call: '#cbd5e1', file: '#94a3b8'
+          },
+          edges: {
+            EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a', SANITIZES: '#0d9488',
+            REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', EXPOSES_SECRET: '#dc2626',
+            USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed', PATH: '#f59e0b', MODULE_LINK: '#94a3b8'
+          },
+          nodeLabel: '#0b1220', nodeOutline: '#f8fafc', nodeBorder: '#ffffff',
+          edgeFallback: '#cbd5e1', glow: 0
+        },
+        dark: {
+          groups: {
+            entrypoint: '#38bdf8', function: '#94a3b8', guard: '#34d399', validator: '#2dd4bf',
+            sink: '#f87171', secret: '#fbbf24', dataflow: '#22d3ee', dependency: '#a78bfa',
+            vulnerability: '#fb7185', infrastructure: '#7d8ea8', call: '#475569', file: '#64748b'
+          },
+          edges: {
+            EXPOSES_ENTRYPOINT: '#38bdf8', CALLS: 'rgba(148, 163, 184, 0.35)', GUARDS: '#34d399',
+            SANITIZES: '#2dd4bf', REACHES_SINK: '#f87171', USES_SECRET: '#fbbf24',
+            EXPOSES_SECRET: '#f87171', USES_RESOURCE: '#7d8ea8', AFFECTS_DEPENDENCY: '#a78bfa',
+            PATH: '#fbbf24', MODULE_LINK: 'rgba(148, 163, 184, 0.5)'
+          },
+          nodeLabel: '#e2e8f0', nodeOutline: '#070d1a', nodeBorder: '#1e293b',
+          edgeFallback: 'rgba(148, 163, 184, 0.35)', glow: 0.28
+        }
       };
-      const EDGE_COLORS = {
-        EXPOSES_ENTRYPOINT: '#2563eb', CALLS: '#cbd5e1', GUARDS: '#16a34a', SANITIZES: '#0d9488',
-        REACHES_SINK: '#dc2626', USES_SECRET: '#d97706', EXPOSES_SECRET: '#dc2626',
-        USES_RESOURCE: '#475569', AFFECTS_DEPENDENCY: '#7c3aed', PATH: '#f59e0b', MODULE_LINK: '#94a3b8'
-      };
+      function activeTheme() {
+        return document.documentElement.getAttribute('data-theme') === 'dark' ? THEMES.dark : THEMES.light;
+      }
+      function groupColor(group) {
+        const t = activeTheme();
+        return t.groups[group] || t.groups.file;
+      }
+      function edgeColor(kind) {
+        const t = activeTheme();
+        return t.edges[kind] || t.edgeFallback;
+      }
       const SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0, '': -1 };
+      const SEV_SIZE = { critical: 40, high: 33, medium: 27 };
 
       if (typeof cytoscape === 'undefined' || !document.getElementById('cy')) return;
 
@@ -652,23 +687,42 @@ _HTML_TEMPLATE = """<!doctype html>
         wheelSensitivity: 0.2,
         style: [
           { selector: 'node', style: {
-            'background-color': function (ele) { return GROUP_COLORS[ele.data('group')] || '#94a3b8'; },
+            'background-color': function (ele) { return groupColor(ele.data('group')); },
             'label': 'data(label)', 'font-size': 10, 'font-weight': 600,
-            'color': '#0b1220', 'text-outline-width': 2, 'text-outline-color': '#f8fafc',
+            'color': function () { return activeTheme().nodeLabel; },
+            'text-outline-width': 2,
+            'text-outline-color': function () { return activeTheme().nodeOutline; },
             'text-wrap': 'ellipsis', 'text-max-width': 110, 'width': 24, 'height': 24,
-            'border-width': 1, 'border-color': '#ffffff'
+            'border-width': 1,
+            'border-color': function () { return activeTheme().nodeBorder; },
+            'underlay-color': function (ele) { return groupColor(ele.data('group')); },
+            'underlay-opacity': function () { return activeTheme().glow; },
+            'underlay-padding': 6
           } },
           { selector: 'node[group = "entrypoint"]', style: { 'width': 34, 'height': 26, 'shape': 'round-rectangle' } },
           { selector: 'node[group = "sink"]', style: { 'shape': 'triangle', 'width': 30, 'height': 30 } },
           { selector: 'node[group = "dataflow"]', style: { 'shape': 'hexagon' } },
           { selector: 'node[group = "vulnerability"]', style: { 'shape': 'diamond', 'width': 30, 'height': 30 } },
           { selector: 'node[kind = "Module"]', style: { 'width': 44, 'height': 44, 'font-size': 11, 'text-max-width': 140 } },
-          { selector: 'node[severity = "critical"], node[severity = "high"]', style: { 'border-width': 3, 'border-color': '#dc2626' } },
-          { selector: 'node[severity = "medium"]', style: { 'border-width': 2, 'border-color': '#d97706' } },
+          { selector: 'node[severity = "medium"]', style: {
+            'border-width': 2, 'border-color': '#d97706',
+            'width': SEV_SIZE.medium, 'height': SEV_SIZE.medium
+          } },
+          { selector: 'node[severity = "high"]', style: {
+            'border-width': 3, 'border-color': '#dc2626',
+            'width': SEV_SIZE.high, 'height': SEV_SIZE.high
+          } },
+          { selector: 'node[severity = "critical"]', style: {
+            'border-width': 3, 'border-color': '#dc2626',
+            'width': SEV_SIZE.critical, 'height': SEV_SIZE.critical,
+            'underlay-color': '#dc2626',
+            'underlay-opacity': function () { return Math.min(activeTheme().glow + 0.1, 0.4); },
+            'underlay-padding': 9
+          } },
           { selector: 'edge', style: {
             'width': 1.4, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle',
-            'line-color': function (ele) { return EDGE_COLORS[ele.data('kind')] || '#cbd5e1'; },
-            'target-arrow-color': function (ele) { return EDGE_COLORS[ele.data('kind')] || '#cbd5e1'; },
+            'line-color': function (ele) { return edgeColor(ele.data('kind')); },
+            'target-arrow-color': function (ele) { return edgeColor(ele.data('kind')); },
             'arrow-scale': 0.8
           } },
           { selector: 'edge[kind = "REACHES_SINK"], edge[kind = "PATH"]', style: { 'width': 3.2 } },
@@ -785,7 +839,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
       function showDetails(node) {
         const d = node.data();
-        const color = GROUP_COLORS[d.group] || '#94a3b8';
+        const color = groupColor(d.group);
         let html = '<h3>' + esc(d.label) + '</h3>';
         html += '<div class="kv"><span class="tag" style="background:' + color + '">' + esc(d.group) + '</span></div>';
         if (d.file) html += '<div class="kv"><strong>Location:</strong> <code>' + esc(d.file) + ':' + esc(d.line) + '</code></div>';
@@ -850,6 +904,10 @@ _HTML_TEMPLATE = """<!doctype html>
         document.getElementById('cg-path').value = '';
         renderMode('paths');
       });
+      // Re-evaluate the function-based styles when the theme toggle flips.
+      new MutationObserver(function () { cy.style().update(); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
       renderMode('paths');
     })();
   </script>
