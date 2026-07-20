@@ -612,6 +612,16 @@ _HTML_TEMPLATE = """<!doctype html>
     @media (max-width: 820px) {
       .explorer { grid-template-columns: 1fr; } .details { height: auto; }
     }
+    @media print {
+      #cg-nav, #cg-theme-toggle, .toolbar, .graph-head, #cy { display: none !important; }
+      :root, :root[data-theme="dark"], :root[data-theme="light"] {
+        --bg: #ffffff; --fg: #111827; --panel: #ffffff; --border: #d8e0ea; --muted: #444;
+      }
+      body { background: var(--bg); }
+      .posture, .risk-strip, .finding-group { break-inside: avoid; box-shadow: none; }
+      [data-finding-row], [data-finding-group] { display: revert !important; }
+      details[data-finding-group] { }
+    }
   </style>
   <script>
     (function () {
