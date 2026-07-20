@@ -160,6 +160,74 @@ def top_risks_table(risks) -> str:
     )
 
 
+_GRADE_BANDS = [(90, "F"), (85, "E"), (70, "D"), (55, "C"), (40, "B")]
+_GRADE_COLOR = {"A": "#16a34a", "B": "#65a30d", "C": "#d97706", "D": "#ea580c", "E": "#dc2626", "F": "#991b1b"}
+_SEV_ORDER = ["critical", "high", "medium", "low", "info"]
+
+
+def grade(top_risks: list[dict]) -> tuple[str, str]:
+    scores = [int(r.get("risk_score") or 0) for r in top_risks]
+    top = max(scores) if scores else 0
+    letter = "A"
+    for threshold, band in _GRADE_BANDS:
+        if top >= threshold:
+            letter = band
+            break
+    if not scores or top < 40:
+        return "A", "No significant risks detected."
+    return letter, f"Highest risk scored {top}/100 — review the top risks below."
+
+
+def severity_bar(counts_by_sev: dict[str, int]) -> str:
+    total = sum(int(counts_by_sev.get(s, 0)) for s in _SEV_ORDER)
+    if total == 0:
+        return "<div class='sevbar'><div class='sevbar-seg' style='width:100%;background:var(--sev-info)'>No findings</div></div>"
+    segs = []
+    for sev in _SEV_ORDER:
+        n = int(counts_by_sev.get(sev, 0))
+        if n == 0:
+            continue
+        pct = round(100 * n / total, 2)
+        segs.append(
+            f"<div class='sevbar-seg' title='{html.escape(sev)}: {n}' "
+            f"style='width:{pct}%;background:var(--sev-{sev})'>{n}</div>"
+        )
+    return f"<div class='sevbar'>{''.join(segs)}</div>"
+
+
+def posture_section(repo, counts, top_risks, counts_by_sev, delta_html: str) -> str:
+    letter, verdict = grade(top_risks)
+    color = _GRADE_COLOR[letter]
+    chips = "".join(
+        f"<div class='chip'><span class='muted'>{label}</span><strong style='display:block;font-size:26px'>{counts.get(key, 0)}</strong></div>"
+        for label, key in (("Nodes", "nodes"), ("Edges", "edges"), ("Findings", "findings"),
+                            ("Attack Paths", "attack_paths"))
+    )
+    cards = []
+    for r in top_risks[:3]:
+        sev = str(r.get("risk_label") or "info").lower()
+        cards.append(
+            "<div class='card' style='margin:0'>"
+            f"<span class='pill pill--{html.escape(sev)}'>{html.escape(str(r.get('risk_score')))}/100</span> "
+            f"<strong>{html.escape(str(r.get('title')))}</strong>"
+            f"<div class='muted'>{html.escape(str(r.get('category')))} — {html.escape(str(r.get('detail')))}</div>"
+            "<a href='#explorer'>jump to path →</a></div>"
+        )
+    top3 = "".join(cards) or "<p class='muted'>No prioritized risks found yet.</p>"
+    return (
+        "<section id=\"posture\" class='section card'>"
+        "<h2>Security Posture</h2>"
+        "<div style='display:flex;gap:var(--space-5);flex-wrap:wrap;align-items:center'>"
+        f"<div class='badge-grade' style='background:{color}'>{letter}</div>"
+        f"<div style='flex:1;min-width:240px'><p><strong>{html.escape(verdict)}</strong></p>{severity_bar(counts_by_sev)}</div>"
+        "</div>"
+        f"{delta_html}"
+        f"<div class='grid' style='margin-top:var(--space-4)'>{chips}</div>"
+        f"<h3>Top risks</h3><div class='grid'>{top3}</div>"
+        "</section>"
+    )
+
+
 def attack_paths_list(paths) -> str:
     if not paths:
         return "<p class='muted'>No entrypoint-to-sink paths found yet.</p>"

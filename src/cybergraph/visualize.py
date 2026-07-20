@@ -21,6 +21,8 @@ from cybergraph.report_sections import (
     findings_table,
     layers_table,
     legend,
+    posture_section,
+    safe_section,
     top_risks_table,
     truncation_banner,
     vulnerable_dependencies_table,
@@ -65,6 +67,12 @@ def generate_html_report(repo_root: Path, output: Path | None = None, *, with_so
             LIMIT 100
             """
         ).fetchall()
+        sev_counts = {
+            row["severity"]: row["n"]
+            for row in store.conn.execute(
+                "SELECT severity, COUNT(*) AS n FROM findings GROUP BY severity"
+            )
+        }
     finally:
         store.close()
 
@@ -77,7 +85,8 @@ def generate_html_report(repo_root: Path, output: Path | None = None, *, with_so
         attach_source_snippets(repo_root, graph_data)
     output.write_text(
         _render_html(
-            repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+            repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
+            sev_counts,
         ),
         encoding="utf-8",
     )
@@ -98,7 +107,8 @@ def _embed_json(data) -> str:
 
 
 def _render_html(
-    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
+    sev_counts,
 ) -> str:
     template = _read_asset("report/template.html")
     replacements = {
@@ -107,7 +117,14 @@ def _render_html(
         "__EDGES__": str(counts["edges"]),
         "__FINDINGS__": str(counts["findings"]),
         "__ATTACK_PATHS__": str(len(attack_paths)),
-        "__TOP_RISKS_TABLE__": top_risks_table(graph_data.get("top_risks", [])),
+        "__POSTURE__": safe_section(
+            posture_section,
+            html.escape(str(repo_root)),
+            {**counts, "attack_paths": len(attack_paths)},
+            graph_data.get("top_risks", []),
+            sev_counts,
+            "",  # delta filled in Task 5
+        ),
         "__LAYERS_TABLE__": layers_table(layers),
         "__VULN_DEPS_TABLE__": vulnerable_dependencies_table(vulnerable_dependencies),
         "__FINDINGS_TABLE__": findings_table(findings),
