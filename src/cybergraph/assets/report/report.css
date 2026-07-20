@@ -89,3 +89,10 @@
     .sevbar-seg { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 600; }
     .section-error { border-color: var(--sev-medium); }
     #findings-table th[data-sort]:hover { background: var(--sev-info-tint); }
+    @media print {
+      #cg-nav, #cg-theme-toggle, .toolbar, .graph-head, #cy { display: none !important; }
+      :root { --bg: #ffffff; --fg: #111827; --panel: #ffffff; --border: #d8e0ea; --muted: #444; }
+      body { background: #fff; }
+      .card, .section { break-inside: avoid; box-shadow: none; }
+      [data-finding-row] { display: table-row !important; }
+    }
