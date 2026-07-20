@@ -38,20 +38,20 @@
     th { background: var(--th); font-size: 13px; }
     tr:last-child td { border-bottom: 0; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #eef6ff; color: #075985; font-size: 12px; }
-    .path { background: white; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .path { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
     .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; align-items: center; }
-    .toolbar input, .toolbar select, .toolbar button { border: 1px solid #b6c2cf; border-radius: 6px; padding: 9px 10px; background: white; color: #161b22; font-size: 13px; }
+    .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; background: var(--panel); color: var(--fg); font-size: 13px; }
     .toolbar input { min-width: min(360px, 100%); flex: 1; }
     .toolbar button { cursor: pointer; }
     .toolbar button:hover { background: #eef2f7; }
-    code { color: #7c2d12; }
+    code { color: var(--sev-high); }
     .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
     .graph-card, .details {
       background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
-    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: linear-gradient(180deg, #ffffff, #f8fafc); }
+    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: var(--th); }
     .graph-title { font-weight: 700; }
     .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
     .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
@@ -65,7 +65,7 @@
     .legend-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
     .mode-help { margin: -4px 0 12px; color: #64748b; font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0 0 14px; }
-    .risk-card { border: 1px solid #e2e8f0; background: #fff; border-radius: 12px; padding: 11px; cursor: pointer; }
+    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 11px; cursor: pointer; }
     .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: #64748b; font-size: 12px; }
