@@ -20,6 +20,10 @@
     :root[data-theme="light"] { color-scheme: light; --bg: #f5f7fb; --fg: #111827; --panel: #ffffff;
               --border: #d8e0ea; --muted: #667085; --th: #f0f3f6; --cy-bg: #f8fafc; }
     body { margin: 0; background: var(--bg); color: var(--fg); }
+    #cg-nav { position: sticky; top: 0; z-index: 50; display: flex; gap: var(--space-4); align-items: center; padding: var(--space-3) var(--space-5); background: var(--panel); border-bottom: 1px solid var(--border); }
+    #cg-nav .cg-nav-title { font-weight: 700; }
+    #cg-nav a { color: var(--muted); text-decoration: none; font-size: 13px; }
+    #cg-nav a:hover { color: var(--fg); }
     header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617); color: white; padding: 32px 36px; position: relative; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }

@@ -18,6 +18,14 @@ __CSS__
   </script>
 </head>
 <body>
+  <nav id="cg-nav">
+    <span class="cg-nav-title">CyberGraph</span>
+    <a href="#posture">Posture</a>
+    <a href="#explorer">Explorer</a>
+    <a href="#findings">Findings</a>
+    <a href="#deps">Dependencies</a>
+    <a href="#about">About</a>
+  </nav>
   <header>
     <h1>CyberGraph Security Report</h1>
     <div>__REPO__</div>
@@ -26,6 +34,7 @@ __CSS__
   <main>
     __POSTURE__
 
+    <section id="explorer" class="section">
     <h2>Interactive Graph Explorer</h2>
     <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
     __TRUNCATION_BANNER__
@@ -75,15 +84,21 @@ __CSS__
       </div>
       <div class="details" id="cg-details"><p class="muted">Click a node to inspect its security evidence.</p></div>
     </div>
+    </section>
 
+    <section id="deps" class="section card">
     <h2>Security Layers</h2>
     __LAYERS_TABLE__
     <h2>Vulnerable Dependencies</h2>
     __VULN_DEPS_TABLE__
+    </section>
+    <section id="findings" class="section card">
     <h2>Findings</h2>
     __FINDINGS_TABLE__
+    </section>
     <h2>Potential Attack Paths</h2>
     __ATTACK_PATHS_LIST__
+    __ABOUT__
   </main>
 
   <script>__CYTOSCAPE_SRC__</script>

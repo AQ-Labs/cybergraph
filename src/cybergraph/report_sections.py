@@ -268,6 +268,19 @@ def posture_section(repo, counts, top_risks, counts_by_sev, delta_html: str) -> 
     )
 
 
+def about_section(repo: str, version: str, truncated: bool) -> str:
+    note = ("<p class='muted'>Graph was truncated for display — raise "
+            "<code>--max-nodes</code> to render the full graph.</p>") if truncated else ""
+    return (
+        "<section id=\"about\" class='section card'>"
+        "<h2>About this scan</h2>"
+        f"<p class='muted'>Repository: <code>{html.escape(repo)}</code></p>"
+        f"<p class='muted'>CyberGraph version: {html.escape(version)}</p>"
+        f"{note}"
+        "</section>"
+    )
+
+
 def attack_paths_list(paths) -> str:
     if not paths:
         return "<p class='muted'>No entrypoint-to-sink paths found yet.</p>"

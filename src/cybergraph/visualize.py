@@ -17,6 +17,7 @@ from pathlib import Path
 from cybergraph.graph import GraphStore
 from cybergraph.graph_export import build_graph_data
 from cybergraph.report_sections import (
+    about_section,
     attack_paths_list,
     delta_strip,
     findings_table,
@@ -121,6 +122,15 @@ def _embed_json(data) -> str:
     return json.dumps(data).replace("</", "<\\/")
 
 
+def _cybergraph_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("cybergraph")
+    except Exception:
+        return "unknown"
+
+
 def _render_html(
     repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
     sev_counts, delta_html,
@@ -146,6 +156,10 @@ def _render_html(
         "__ATTACK_PATHS_LIST__": attack_paths_list(attack_paths),
         "__LEGEND__": legend(),
         "__TRUNCATION_BANNER__": truncation_banner(graph_data),
+        "__ABOUT__": safe_section(
+            about_section, html.escape(str(repo_root)), _cybergraph_version(),
+            bool(graph_data.get("truncated")),
+        ),
         "__GRAPH_JSON__": _embed_json(graph_data),
         "__CYTOSCAPE_SRC__": _load_cytoscape_source(),
         "__CSS__": _read_asset("report/report.css"),
