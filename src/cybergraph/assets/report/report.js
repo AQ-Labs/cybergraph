@@ -432,3 +432,29 @@
       document.documentElement.setAttribute('data-theme', cur);
       try { localStorage.setItem('cybergraph-theme', cur); } catch (e) {}
     });
+    (function () {
+      const table = document.getElementById('findings-table');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      table.querySelectorAll('th[data-sort]').forEach(function (th, col) {
+        let asc = true;
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', function () {
+          const rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+          const mode = th.getAttribute('data-sort');
+          rows.sort(function (a, b) {
+            let x, y;
+            if (mode === 'rank') {
+              x = Number(a.getAttribute('data-sev-rank')); y = Number(b.getAttribute('data-sev-rank'));
+            } else {
+              x = a.children[col].textContent.toLowerCase(); y = b.children[col].textContent.toLowerCase();
+            }
+            if (x < y) return asc ? -1 : 1;
+            if (x > y) return asc ? 1 : -1;
+            return 0;
+          });
+          asc = !asc;
+          rows.forEach(function (r) { tbody.appendChild(r); });
+        });
+      });
+    })();

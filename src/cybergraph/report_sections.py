@@ -88,14 +88,19 @@ def layers_table(layers) -> str:
     )
 
 
-def findings_table(findings) -> str:
+_SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+
+def findings_table(findings, total_findings: int) -> str:
     if not findings:
         return "<p class='muted'>No findings stored yet.</p>"
     rows = "".join(
         "<tr data-finding-row "
         f"data-severity='{html.escape(row['severity'])}' "
-        f"data-search='{html.escape(finding_search_text(row))}'>"
-        f"<td><span class='pill'>{html.escape(row['severity'])}</span></td>"
+        f"data-sev-rank='{_SEV_RANK.get((row['severity'] or '').lower(), 0)}' "
+        f"data-search='{html.escape(finding_search_text(row))}' "
+        f"style='border-left:4px solid var(--sev-{html.escape((row['severity'] or 'info').lower())})'>"
+        f"<td><span class='pill pill--{html.escape((row['severity'] or 'info').lower())}'>{html.escape(row['severity'])}</span></td>"
         f"<td>{html.escape(row['rule_id'])}</td>"
         f"<td>{html.escape(row['message'])}</td>"
         f"<td><code>{html.escape(row['file_path'] or '-')}:{row['line_start']}</code></td>"
@@ -103,6 +108,15 @@ def findings_table(findings) -> str:
         "</tr>"
         for row in findings
     )
+    shown = len(findings)
+    if total_findings > shown:
+        footer = (
+            f"<p class='muted'>Showing the top {shown} findings by severity "
+            f"({total_findings} total) — run <code>cybergraph sarif</code> or "
+            f"<code>cybergraph export-json</code> for the complete set.</p>"
+        )
+    else:
+        footer = f"<p class='muted'>Showing all {total_findings} findings.</p>"
     return (
         "<div class='toolbar'>"
         "<select data-filter='findings-severity' aria-label='Filter findings by severity'>"
@@ -114,8 +128,11 @@ def findings_table(findings) -> str:
         "<option value='info'>Info</option>"
         "</select>"
         "</div>"
-        "<table><thead><tr><th>Severity</th><th>Rule</th><th>Message</th><th>Location</th>"
-        f"<th>Tool</th></tr></thead><tbody>{rows}</tbody></table>"
+        "<table id='findings-table'><thead><tr>"
+        "<th data-sort='rank'>Severity</th><th data-sort='text'>Rule</th>"
+        "<th data-sort='text'>Message</th><th data-sort='text'>Location</th>"
+        "<th data-sort='text'>Tool</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>{footer}"
     )
 
 

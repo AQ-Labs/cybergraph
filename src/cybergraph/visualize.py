@@ -142,7 +142,7 @@ def _render_html(
         ),
         "__LAYERS_TABLE__": layers_table(layers),
         "__VULN_DEPS_TABLE__": vulnerable_dependencies_table(vulnerable_dependencies),
-        "__FINDINGS_TABLE__": findings_table(findings),
+        "__FINDINGS_TABLE__": findings_table(findings, counts.get("findings", len(findings))),
         "__ATTACK_PATHS_LIST__": attack_paths_list(attack_paths),
         "__LEGEND__": legend(),
         "__TRUNCATION_BANNER__": truncation_banner(graph_data),
