@@ -37,18 +37,6 @@ NODE_GROUPS = [
     ("file", "File", "#94a3b8"),
 ]
 
-EDGE_KINDS = [
-    ("EXPOSES_ENTRYPOINT", "#2563eb"),
-    ("CALLS", "#cbd5e1"),
-    ("GUARDS", "#16a34a"),
-    ("SANITIZES", "#0d9488"),
-    ("REACHES_SINK", "#dc2626"),
-    ("USES_SECRET", "#d97706"),
-    ("EXPOSES_SECRET", "#dc2626"),
-    ("USES_RESOURCE", "#475569"),
-    ("AFFECTS_DEPENDENCY", "#7c3aed"),
-]
-
 
 def truncation_banner(graph_data: dict) -> str:
     if not graph_data.get("truncated"):
@@ -224,10 +212,10 @@ def delta_strip(delta, prev_ts: str | None) -> str:
     if delta is None or getattr(delta, "is_first", True):
         return ""
     when = (prev_ts or "")[:19]  # trim to seconds for display
-    since = f" since scan on {html.escape(when)}" if when else ""
+    since = f"Since scan on {html.escape(when)}" if when else "Since last scan"
     return (
         "<div class='delta-strip'>"
-        f"Since{since}: <strong>{len(delta.new)} new</strong> · "
+        f"{since}: <strong>{len(delta.new)} new</strong> · "
         f"<strong>{len(delta.regressed)} regressed</strong> · "
         f"<strong>{len(delta.fixed)} fixed</strong> · "
         f"<strong>{len(delta.persisting)} persisting</strong>"
@@ -235,7 +223,7 @@ def delta_strip(delta, prev_ts: str | None) -> str:
     )
 
 
-def posture_section(repo, counts, top_risks, counts_by_sev, delta_html: str) -> str:
+def posture_section(counts, top_risks, counts_by_sev, delta_html: str) -> str:
     letter, verdict = grade(top_risks)
     color = _GRADE_COLOR[letter]
     chips = "".join(

@@ -15,3 +15,4 @@ def test_delta_renders_counts_and_date():
     out = delta_strip(d, "2026-07-19T10:00:00+00:00")
     assert "2 new" in out and "1 fixed" in out and "1 regressed" in out and "3 persisting" in out
     assert "2026-07-19" in out
+    assert "Since since" not in out

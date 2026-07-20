@@ -39,7 +39,7 @@ def test_posture_section_lists_top3():
         {"category": "sec", "title": "Secret", "risk_score": 30, "risk_label": "low", "detail": "d3"},
         {"category": "x", "title": "Fourth", "risk_score": 10, "risk_label": "low", "detail": "d4"},
     ]
-    out = posture_section("repo", {"nodes": 5, "edges": 4, "findings": 3}, risks,
+    out = posture_section({"nodes": 5, "edges": 4, "findings": 3}, risks,
                           {"critical": 0, "high": 1, "medium": 1, "low": 1, "info": 0}, "")
     assert "SQL injection" in out and "XSS" in out and "Secret" in out
     assert "Fourth" not in out  # only top 3

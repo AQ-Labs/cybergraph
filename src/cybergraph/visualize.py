@@ -138,13 +138,8 @@ def _render_html(
     template = _read_asset("report/template.html")
     replacements = {
         "__REPO__": html.escape(str(repo_root)),
-        "__NODES__": str(counts["nodes"]),
-        "__EDGES__": str(counts["edges"]),
-        "__FINDINGS__": str(counts["findings"]),
-        "__ATTACK_PATHS__": str(len(attack_paths)),
         "__POSTURE__": safe_section(
             posture_section,
-            html.escape(str(repo_root)),
             {**counts, "attack_paths": len(attack_paths)},
             graph_data.get("top_risks", []),
             sev_counts,
@@ -157,7 +152,7 @@ def _render_html(
         "__LEGEND__": legend(),
         "__TRUNCATION_BANNER__": truncation_banner(graph_data),
         "__ABOUT__": safe_section(
-            about_section, html.escape(str(repo_root)), _cybergraph_version(),
+            about_section, str(repo_root), _cybergraph_version(),
             bool(graph_data.get("truncated")),
         ),
         "__GRAPH_JSON__": _embed_json(graph_data),

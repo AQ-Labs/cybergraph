@@ -31,5 +31,9 @@ def test_report_is_self_contained_single_file(tmp_path):
     assert "<link" not in text.lower()
     assert 'src="http' not in text.lower()
     assert "url(http" not in text.lower()
+    assert "src='http" not in text.lower()
+    assert 'href="http' not in text.lower()
+    assert "href='http" not in text.lower()
+    assert "@import" not in text.lower()
     # Skeleton tokens all resolved.
     assert "__CSS__" not in text and "__REPORT_JS__" not in text and "__GRAPH_JSON__" not in text

@@ -43,7 +43,7 @@
     .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; background: var(--panel); color: var(--fg); font-size: 13px; }
     .toolbar input { min-width: min(360px, 100%); flex: 1; }
     .toolbar button { cursor: pointer; }
-    .toolbar button:hover { background: #eef2f7; }
+    .toolbar button:hover { background: var(--th); }
     code { color: var(--sev-high); }
     .explorer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; }
     .graph-card, .details {
@@ -51,7 +51,7 @@
       box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
     }
     .graph-card { overflow: hidden; }
-    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: var(--th); }
+    .graph-head { display: flex; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--th); }
     .graph-title { font-weight: 700; }
     .graph-subtitle { color: #64748b; font-size: 12px; margin-top: 3px; }
     .graph-badge { align-self: center; padding: 5px 9px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; white-space: nowrap; }
@@ -91,7 +91,9 @@
     #findings-table th[data-sort]:hover { background: var(--sev-info-tint); }
     @media print {
       #cg-nav, #cg-theme-toggle, .toolbar, .graph-head, #cy { display: none !important; }
-      :root { --bg: #ffffff; --fg: #111827; --panel: #ffffff; --border: #d8e0ea; --muted: #444; }
+      :root, :root[data-theme="dark"], :root[data-theme="light"] {
+        --bg: #ffffff; --fg: #111827; --panel: #ffffff; --border: #d8e0ea; --muted: #444;
+      }
       body { background: #fff; }
       .card, .section { break-inside: avoid; box-shadow: none; }
       [data-finding-row] { display: table-row !important; }

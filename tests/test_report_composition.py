@@ -33,3 +33,7 @@ def test_all_sections_present_and_self_contained(tmp_path):
     # false-positive.
     assert not re.search(r"__[A-Z][A-Z0-9_]*__", text)
     assert "<link" not in text.lower() and 'src="http' not in text.lower()
+    assert "src='http" not in text.lower()
+    assert 'href="http' not in text.lower()
+    assert "href='http" not in text.lower()
+    assert "@import" not in text.lower()
