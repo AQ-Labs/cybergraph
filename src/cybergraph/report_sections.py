@@ -9,6 +9,7 @@ report.
 from __future__ import annotations
 
 import html
+import json
 
 
 def safe_section(fn, *args, **kwargs) -> str:
@@ -144,11 +145,18 @@ def finding_search_text(row) -> str:
 def vulnerable_dependencies_table(rows) -> str:
     if not rows:
         return "<p class='muted'>No vulnerable dependency links imported yet.</p>"
+
+    def fmt(props: str) -> str:
+        try:
+            return json.dumps(json.loads(props), indent=2, sort_keys=True)
+        except Exception:
+            return props
+
     rendered = "".join(
         "<tr>"
         f"<td>{html.escape(row['vulnerability'])}</td>"
         f"<td>{html.escape(row['dependency'])}</td>"
-        f"<td><code>{html.escape(row['properties'])}</code></td>"
+        f"<td><pre><code>{html.escape(fmt(row['properties']), quote=False)}</code></pre></td>"
         "</tr>"
         for row in rows
     )
