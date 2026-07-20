@@ -76,3 +76,24 @@ def test_findings_footer_capped():
 
 def test_findings_footer_all_shown():
     assert "all 4" in _findings_footer(4, 4).lower()
+
+
+def test_report_composition_self_contained(tmp_path):
+    import re
+    from cybergraph.cli import main as _main
+    from cybergraph.visualize import generate_html_report as _gen
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "@app.route('/users')\n"
+        "def list_users(request):\n"
+        "    return db.execute('select ' + request.query['q'])\n",
+        encoding="utf-8",
+    )
+    assert _main(["build", str(repo)]) == 0
+    text = _gen(repo, with_source=True).read_text(encoding="utf-8")
+    assert 'id="posture"' in text
+    assert "@media print" in text
+    assert not re.search(r"__[A-Z][A-Z0-9_]*__", text)   # no unresolved tokens
+    assert "<link" not in text.lower()
+    assert 'src="http' not in text.lower() and "src='http" not in text.lower()
