@@ -68,10 +68,11 @@ def generate_html_report(
         from cybergraph.report_source import attach_source_snippets
 
         attach_source_snippets(repo_root, graph_data)
+    delta_html = _gather_delta_html(repo_root)
     output.write_text(
         _render_html(
             repo_root, counts, layers, findings, vulnerable_dependencies,
-            attack_paths, graph_data, sev_counts,
+            attack_paths, graph_data, sev_counts, delta_html,
         ),
         encoding="utf-8",
     )
@@ -89,7 +90,7 @@ def _embed_json(data) -> str:
 
 def _render_html(
     repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
-    sev_counts,
+    sev_counts, delta_html,
 ) -> str:
     template = _HTML_TEMPLATE
     replacements = {
@@ -111,7 +112,7 @@ def _render_html(
             {**counts, "attack_paths": len(attack_paths)},
             graph_data.get("top_risks", []),
             sev_counts,
-            "",  # delta filled in Task 2
+            delta_html,
         ),
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
@@ -399,6 +400,32 @@ def _posture_section(counts, top_risks, counts_by_sev, delta_html: str) -> str:
     )
 
 
+def _delta_strip(delta, prev_ts: str | None) -> str:
+    if delta is None or getattr(delta, "is_first", True):
+        return ""
+    when = (prev_ts or "")[:19]
+    since = f"Since scan on {html.escape(when)}" if when else "Since last scan"
+    return (
+        "<div class='delta-strip'>"
+        f"{since}: <strong>{len(delta.new)} new</strong> · "
+        f"<strong>{len(delta.regressed)} regressed</strong> · "
+        f"<strong>{len(delta.fixed)} fixed</strong> · "
+        f"<strong>{len(delta.persisting)} persisting</strong>"
+        "</div>"
+    )
+
+
+def _gather_delta_html(repo_root) -> str:
+    try:
+        from cybergraph import history
+        delta = history.scan_delta(repo_root)
+        scans = history.list_scans(repo_root, limit=2)
+        prev_ts = scans[1]["ts"] if len(scans) > 1 else None
+        return _delta_strip(delta, prev_ts)
+    except Exception:
+        return ""
+
+
 def _attack_paths(paths) -> str:
     if not paths:
         return "<p class='muted'>No entrypoint-to-sink paths found yet.</p>"
@@ -556,6 +583,8 @@ _HTML_TEMPLATE = """<!doctype html>
       border: 1px solid var(--border); }
     .sevbar-seg { display: flex; align-items: center; justify-content: center; color: #fff;
       font-size: 11px; font-weight: 600; }
+    .delta-strip { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px;
+      background: var(--accent-bg); color: var(--accent); font-size: 13px; }
     .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px;
       overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px; }

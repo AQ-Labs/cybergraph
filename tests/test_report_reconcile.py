@@ -1,4 +1,5 @@
-from cybergraph.visualize import _grade, _severity_bar, _posture_section
+from cybergraph.history import Delta
+from cybergraph.visualize import _grade, _severity_bar, _posture_section, _delta_strip
 
 
 def test_grade_boundaries():
@@ -42,3 +43,20 @@ def test_posture_section_present():
     assert 'id="posture"' in out
     assert "SQL injection" not in out  # posture links to the risk strip, doesn't duplicate cards
     assert ">B<" in out or "badge-grade" in out  # grade badge present
+
+
+def test_delta_hidden_first_scan():
+    assert _delta_strip(Delta(is_first=True), None) == ""
+
+
+def test_delta_hidden_when_none():
+    assert _delta_strip(None, None) == ""
+
+
+def test_delta_renders_counts_and_date():
+    d = Delta(is_first=False, new=["a", "b"], fixed=["c"], regressed=["d"],
+              persisting=["e", "f", "g"])
+    out = _delta_strip(d, "2026-07-19T10:00:00+00:00")
+    assert "2 new" in out and "1 fixed" in out and "1 regressed" in out and "3 persisting" in out
+    assert "2026-07-19" in out
+    assert "Since since" not in out
