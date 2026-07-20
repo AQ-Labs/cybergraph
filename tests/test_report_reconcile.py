@@ -1,5 +1,11 @@
 from cybergraph.history import Delta
-from cybergraph.visualize import _grade, _severity_bar, _posture_section, _delta_strip
+from cybergraph.visualize import (
+    _grade,
+    _severity_bar,
+    _posture_section,
+    _delta_strip,
+    _findings_footer,
+)
 
 
 def test_grade_boundaries():
@@ -60,3 +66,13 @@ def test_delta_renders_counts_and_date():
     assert "2 new" in out and "1 fixed" in out and "1 regressed" in out and "3 persisting" in out
     assert "2026-07-19" in out
     assert "Since since" not in out
+
+
+def test_findings_footer_capped():
+    out = _findings_footer(100, 250)
+    assert "top 100" in out.lower() and "250" in out
+    assert "cybergraph sarif" in out
+
+
+def test_findings_footer_all_shown():
+    assert "all 4" in _findings_footer(4, 4).lower()

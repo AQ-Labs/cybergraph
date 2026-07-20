@@ -117,6 +117,7 @@ def _render_html(
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
         "__FINDINGS_TABLE__": _findings_table(findings),
+        "__FINDINGS_FOOTER__": _findings_footer(len(findings), counts.get("findings", len(findings))),
         "__ATTACK_PATHS_LIST__": _attack_paths(attack_paths),
         "__LEGEND__": _legend(),
         "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
@@ -303,6 +304,15 @@ def _findings_table(findings) -> str:
         "</div>"
         + "".join(cards)
     )
+
+
+def _findings_footer(shown: int, total: int) -> str:
+    if total > shown:
+        return ("<p class='muted'>Showing the top "
+                f"{shown} findings by severity ({total} total) — run "
+                "<code>cybergraph sarif</code> or <code>cybergraph export-json</code> "
+                "for the complete set.</p>")
+    return f"<p class='muted'>Showing all {total} findings.</p>"
 
 
 def _finding_search_text(row) -> str:
@@ -708,6 +718,7 @@ _HTML_TEMPLATE = """<!doctype html>
     __VULN_DEPS_TABLE__
     <h2>Findings</h2>
     __FINDINGS_TABLE__
+    __FINDINGS_FOOTER__
     <h2>Potential Attack Paths</h2>
     __ATTACK_PATHS_LIST__
   </main>
