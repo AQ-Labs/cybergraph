@@ -41,7 +41,7 @@ cybergraph-mcp = "cybergraph.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cybergraph"]
-artifacts = ["src/cybergraph/assets/*.js"]
+artifacts = ["src/cybergraph/assets/*.js", "src/cybergraph/assets/report/*"]
 
 [tool.ruff]
 line-length = 100

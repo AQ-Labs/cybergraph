@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CyberGraph Report</title>
+  <style>
+__CSS__
+  </style>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('cybergraph-theme');
+        if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <header>
+    <h1>CyberGraph Security Report</h1>
+    <div>__REPO__</div>
+    <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;border-radius:6px;padding:6px 10px;">Theme</button>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="stat"><span class="muted">Nodes</span><strong>__NODES__</strong></div>
+      <div class="stat"><span class="muted">Edges</span><strong>__EDGES__</strong></div>
+      <div class="stat"><span class="muted">Findings</span><strong>__FINDINGS__</strong></div>
+      <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong></div>
+    </section>
+
+    <h2>Top Risks</h2>
+    __TOP_RISKS_TABLE__
+
+    <h2>Interactive Graph Explorer</h2>
+    <p class="mode-help">Start with focused attack paths, then expand to module or raw graph views when you need detail.</p>
+    __TRUNCATION_BANNER__
+    <div class="risk-strip" id="cg-risk-strip"></div>
+    <div class="toolbar">
+      <select id="cg-mode" aria-label="Graph view mode">
+        <option value="paths">View: attack paths</option>
+        <option value="risks">View: top-risk neighborhoods</option>
+        <option value="modules">View: module map</option>
+        <option value="raw">View: raw graph</option>
+      </select>
+      <input id="cg-search" type="search" placeholder="Search nodes by name, file, or group">
+      <select id="cg-layer" aria-label="Filter by security layer">
+        <option value="">All layers</option>
+      </select>
+      <select id="cg-severity" aria-label="Filter by minimum severity">
+        <option value="">Any severity</option>
+        <option value="critical">Critical</option>
+        <option value="high">High+</option>
+        <option value="medium">Medium+</option>
+        <option value="low">Low+</option>
+      </select>
+      <select id="cg-path" aria-label="Highlight an attack path">
+        <option value="">Highlight attack path…</option>
+      </select>
+      <select id="cg-layout" aria-label="Graph layout">
+        <option value="breadthfirst">Layout: hierarchy</option>
+        <option value="cose">Layout: force</option>
+        <option value="circle">Layout: circle</option>
+        <option value="grid">Layout: grid</option>
+      </select>
+      <button id="cg-zoom-in" type="button">+</button>
+      <button id="cg-zoom-out" type="button">−</button>
+      <button id="cg-reset" type="button">Reset</button>
+    </div>
+    __LEGEND__
+    <div class="explorer">
+      <div class="graph-card">
+        <div class="graph-head">
+          <div>
+            <div class="graph-title" id="cg-view-title">Attack Path Explorer</div>
+            <div class="graph-subtitle" id="cg-view-subtitle">Focused view of the highest-risk entrypoint-to-sink paths.</div>
+          </div>
+          <div class="graph-badge" id="cg-view-counts">0 nodes</div>
+        </div>
+        <div id="cy"></div>
+      </div>
+      <div class="details" id="cg-details"><p class="muted">Click a node to inspect its security evidence.</p></div>
+    </div>
+
+    <h2>Security Layers</h2>
+    __LAYERS_TABLE__
+    <h2>Vulnerable Dependencies</h2>
+    __VULN_DEPS_TABLE__
+    <h2>Findings</h2>
+    __FINDINGS_TABLE__
+    <h2>Potential Attack Paths</h2>
+    __ATTACK_PATHS_LIST__
+  </main>
+
+  <script>__CYTOSCAPE_SRC__</script>
+  <script>window.CYBERGRAPH = __GRAPH_JSON__;</script>
+  <script>__REPORT_JS__</script>
+</body>
+</html>
