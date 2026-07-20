@@ -52,6 +52,12 @@ def generate_html_report(
             LIMIT 100
             """
         ).fetchall()
+        sev_counts = {
+            row["severity"]: row["n"]
+            for row in store.conn.execute(
+                "SELECT severity, COUNT(*) AS n FROM findings GROUP BY severity"
+            )
+        }
     finally:
         store.close()
 
@@ -64,7 +70,8 @@ def generate_html_report(
         attach_source_snippets(repo_root, graph_data)
     output.write_text(
         _render_html(
-            repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+            repo_root, counts, layers, findings, vulnerable_dependencies,
+            attack_paths, graph_data, sev_counts,
         ),
         encoding="utf-8",
     )
@@ -81,7 +88,8 @@ def _embed_json(data) -> str:
 
 
 def _render_html(
-    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
+    sev_counts,
 ) -> str:
     template = _HTML_TEMPLATE
     replacements = {
@@ -99,6 +107,12 @@ def _render_html(
             sum(1 for p in attack_paths if p.risk and p.risk.label == "high"),
         ),
         "__TOP_RISKS_TABLE__": _top_risks_table(graph_data.get("top_risks", [])),
+        "__POSTURE__": _posture_section(
+            {**counts, "attack_paths": len(attack_paths)},
+            graph_data.get("top_risks", []),
+            sev_counts,
+            "",  # delta filled in Task 2
+        ),
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
         "__FINDINGS_TABLE__": _findings_table(findings),
@@ -330,6 +344,61 @@ def _top_risks_table(risks) -> str:
     return f"<div class='risk-strip'>{cards}</div>"
 
 
+_GRADE_BANDS = [(90, "F"), (85, "E"), (70, "D"), (55, "C"), (40, "B")]
+_GRADE_COLOR = {"A": "#16a34a", "B": "#65a30d", "C": "#d97706",
+                "D": "#ea580c", "E": "#dc2626", "F": "#991b1b"}
+_SEV_BAR_ORDER = ["critical", "high", "medium", "low", "info"]
+_SEV_BAR_COLOR = {"critical": "#dc2626", "high": "#ea580c", "medium": "#d97706",
+                  "low": "#2563eb", "info": "#64748b"}
+
+
+def _grade(top_risks: list[dict]) -> tuple[str, str]:
+    scores = [int(r.get("risk_score") or 0) for r in top_risks]
+    top = max(scores) if scores else 0
+    letter = "A"
+    for threshold, band in _GRADE_BANDS:
+        if top >= threshold:
+            letter = band
+            break
+    if not scores or top < 40:
+        return "A", "No significant risks detected."
+    return letter, f"Highest risk scored {top}/100 — see the top risks below."
+
+
+def _severity_bar(counts_by_sev: dict) -> str:
+    total = sum(int(counts_by_sev.get(s, 0)) for s in _SEV_BAR_ORDER)
+    if total == 0:
+        return ("<div class='sevbar'><div class='sevbar-seg' "
+                "style='width:100%;background:#64748b'>No findings</div></div>")
+    segs = []
+    for sev in _SEV_BAR_ORDER:
+        n = int(counts_by_sev.get(sev, 0))
+        if n == 0:
+            continue
+        pct = round(100 * n / total, 2)
+        segs.append(
+            f"<div class='sevbar-seg' title='{html.escape(sev)}: {n}' "
+            f"style='width:{pct}%;background:{_SEV_BAR_COLOR[sev]}'>{n}</div>"
+        )
+    return f"<div class='sevbar'>{''.join(segs)}</div>"
+
+
+def _posture_section(counts, top_risks, counts_by_sev, delta_html: str) -> str:
+    letter, verdict = _grade(top_risks)
+    color = _GRADE_COLOR[letter]
+    return (
+        "<section id=\"posture\" class='posture'>"
+        "<h2>Security Posture</h2>"
+        "<div class='posture-row'>"
+        f"<div class='badge-grade' style='background:{color}'>{letter}</div>"
+        f"<div class='posture-main'><p><strong>{html.escape(verdict)}</strong></p>"
+        f"{_severity_bar(counts_by_sev)}</div>"
+        "</div>"
+        f"{delta_html}"
+        "</section>"
+    )
+
+
 def _attack_paths(paths) -> str:
     if not paths:
         return "<p class='muted'>No entrypoint-to-sink paths found yet.</p>"
@@ -476,6 +545,17 @@ _HTML_TEMPLATE = """<!doctype html>
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: var(--muted); font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
+    .posture { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px; margin: 18px 0; }
+    .posture-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .posture-main { flex: 1; min-width: 240px; }
+    .badge-grade { display: inline-flex; align-items: center; justify-content: center;
+      width: 72px; height: 72px; border-radius: 16px; font-size: 42px; font-weight: 700;
+      color: #fff; }
+    .sevbar { display: flex; width: 100%; height: 24px; border-radius: 999px; overflow: hidden;
+      border: 1px solid var(--border); }
+    .sevbar-seg { display: flex; align-items: center; justify-content: center; color: #fff;
+      font-size: 11px; font-weight: 600; }
     .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px;
       overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px; }
@@ -521,6 +601,7 @@ _HTML_TEMPLATE = """<!doctype html>
       <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong>
         __PATHS_ACCENT__</div>
     </section>
+    __POSTURE__
 
     <h2>Top Risks</h2>
     __TOP_RISKS_TABLE__
