@@ -18,6 +18,7 @@ from cybergraph.graph import GraphStore
 from cybergraph.graph_export import build_graph_data
 from cybergraph.report_sections import (
     attack_paths_list,
+    delta_strip,
     findings_table,
     layers_table,
     legend,
@@ -76,6 +77,8 @@ def generate_html_report(repo_root: Path, output: Path | None = None, *, with_so
     finally:
         store.close()
 
+    delta_html = gather_delta_html(repo_root)
+
     layers = summarize_layers(repo_root)
     attack_paths = find_attack_paths(repo_root, limit=25)
     graph_data = build_graph_data(repo_root)
@@ -86,11 +89,23 @@ def generate_html_report(repo_root: Path, output: Path | None = None, *, with_so
     output.write_text(
         _render_html(
             repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
-            sev_counts,
+            sev_counts, delta_html,
         ),
         encoding="utf-8",
     )
     return output
+
+
+def gather_delta_html(repo_root: Path) -> str:
+    try:
+        from cybergraph import history
+
+        delta = history.scan_delta(repo_root)
+        scans = history.list_scans(repo_root, limit=2)
+        prev_ts = scans[1]["ts"] if len(scans) > 1 else None
+        return delta_strip(delta, prev_ts)
+    except Exception:
+        return ""
 
 
 def _read_asset(rel: str) -> str:
@@ -108,7 +123,7 @@ def _embed_json(data) -> str:
 
 def _render_html(
     repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
-    sev_counts,
+    sev_counts, delta_html,
 ) -> str:
     template = _read_asset("report/template.html")
     replacements = {
@@ -123,7 +138,7 @@ def _render_html(
             {**counts, "attack_paths": len(attack_paths)},
             graph_data.get("top_risks", []),
             sev_counts,
-            "",  # delta filled in Task 5
+            delta_html,
         ),
         "__LAYERS_TABLE__": layers_table(layers),
         "__VULN_DEPS_TABLE__": vulnerable_dependencies_table(vulnerable_dependencies),

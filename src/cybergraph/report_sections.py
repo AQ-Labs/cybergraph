@@ -195,6 +195,21 @@ def severity_bar(counts_by_sev: dict[str, int]) -> str:
     return f"<div class='sevbar'>{''.join(segs)}</div>"
 
 
+def delta_strip(delta, prev_ts: str | None) -> str:
+    if delta is None or getattr(delta, "is_first", True):
+        return ""
+    when = (prev_ts or "")[:19]  # trim to seconds for display
+    since = f" since scan on {html.escape(when)}" if when else ""
+    return (
+        "<div class='delta-strip'>"
+        f"Since{since}: <strong>{len(delta.new)} new</strong> · "
+        f"<strong>{len(delta.regressed)} regressed</strong> · "
+        f"<strong>{len(delta.fixed)} fixed</strong> · "
+        f"<strong>{len(delta.persisting)} persisting</strong>"
+        "</div>"
+    )
+
+
 def posture_section(repo, counts, top_risks, counts_by_sev, delta_html: str) -> str:
     letter, verdict = grade(top_risks)
     color = _GRADE_COLOR[letter]
