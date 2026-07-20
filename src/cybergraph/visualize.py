@@ -620,7 +620,6 @@ _HTML_TEMPLATE = """<!doctype html>
       body { background: var(--bg); }
       .posture, .risk-strip, .finding-group { break-inside: avoid; box-shadow: none; }
       [data-finding-row], [data-finding-group] { display: revert !important; }
-      details[data-finding-group] { }
     }
   </style>
   <script>
@@ -1447,6 +1446,21 @@ _HTML_TEMPLATE = """<!doctype html>
       document.documentElement.setAttribute('data-theme', cur);
       try { localStorage.setItem('cybergraph-theme', cur); } catch (e) {}
     });
+  </script>
+  <script>
+    (function () {
+      var groups = function () { return document.querySelectorAll('[data-finding-group]'); };
+      var saved = null;
+      window.addEventListener('beforeprint', function () {
+        saved = [];
+        groups().forEach(function (d) { saved.push(d.open); d.open = true; });
+      });
+      window.addEventListener('afterprint', function () {
+        if (!saved) return;
+        groups().forEach(function (d, i) { d.open = saved[i]; });
+        saved = null;
+      });
+    })();
   </script>
 </body>
 </html>

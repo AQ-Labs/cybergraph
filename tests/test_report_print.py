@@ -27,3 +27,13 @@ def test_print_media_block_present_and_overrides_dark(tmp_path):
     assert "display: none" in block
     # Must override the persisted dark theme, not just bare :root:
     assert ':root[data-theme="dark"]' in block
+
+
+def test_print_expands_collapsed_finding_groups(tmp_path):
+    repo = _repo(tmp_path)
+    assert main(["build", str(repo)]) == 0
+    text = generate_html_report(repo).read_text(encoding="utf-8")
+    assert "beforeprint" in text and "afterprint" in text
+    assert "data-finding-group" in text
+    # the dead empty no-op rule must be gone
+    assert "details[data-finding-group] { }" not in text
