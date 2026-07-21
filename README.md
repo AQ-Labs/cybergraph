@@ -21,7 +21,8 @@ CyberGraph is designed to connect those dots.
 - Analyzes **five languages**: Python (FastAPI/Flask/Django), JavaScript/TypeScript (Express/Next.js), Go (net/http, Gin, Echo), Java (Spring), and C# (ASP.NET Core) — through a shared analyzer contract with graceful fallback for the rest.
 - Extracts functions, calls, route entrypoints, auth/authz guards, validators, user-input/data-flow edges, secret access/exposure, cloud resources, and sensitive sink calls.
 - **Cross-file, interprocedural attack paths** (route → service → repository → sink) with confidence, sanitizer-barrier flags, taint/data-reachability, risk scores, and fix guidance; a `--shallow` mode reproduces intra-function traversal for comparison.
-- **Interactive, offline graph explorer** in the HTML report: top risks, security-typed styling, search, layer/severity filters, a details panel, and entrypoint→sink path highlighting (Cytoscape.js, fully inlined).
+- **Interactive, offline HTML report** built for first-time readers: a dark-mode-first neon graph explorer (glowing, security-typed nodes with a light/dark toggle), NODE/EDGE/ZONE explainer cards, a guided first view that opens on the top attack path with a plain-language narrative, a security-zones view (Attack Surface → Guards → Logic → Sensitive Sinks), search, layer/severity filters, a details panel with source drill-down, and entrypoint→sink path highlighting (Cytoscape.js, fully inlined).
+- **Exec-first report posture**: an A–F security grade with a one-line verdict and severity-distribution bar, a since-last-scan delta strip (new/regressed/fixed), findings grouped into expandable rule cards, an honest findings-cap footer, and a print stylesheet for clean PDF export.
 - **Evidence-grounded answers** (`cybergraph explain`) with file/line/rule/path citations, attack-path narratives, remediation guidance, and a high/medium/low/insufficient confidence level — never claims a vulnerability without supporting evidence, and works with no LLM.
 - Optional, **local-only by default** LLM phrasing via configurable providers (Anthropic Claude, OpenAI, Kimi 2.6) constrained to retrieved evidence.
 - Maps dependency manifests and lockfiles across npm, Python, Go, Maven/Gradle, and .NET ecosystems.
@@ -64,10 +65,16 @@ cybergraph layers --repo path/to/repo
 cybergraph secrets path/to/repo
 cybergraph cloud-code path/to/repo
 cybergraph top-risks path/to/repo
+cybergraph scan path/to/repo               # lightweight built-in analyzers, no graph needed
+cybergraph triage path/to/repo             # rank findings; --llm suppresses false positives
+cybergraph sca path/to/repo                # prioritize dependency CVEs by reachability
+cybergraph infer-specs path/to/repo        # propose custom taint sinks/sources
+cybergraph iac-paths path/to/repo          # public exposure -> privileged IaC resource
 cybergraph investigate path/to/repo --output investigation.md
 cybergraph strix-plan path/to/repo --output strix-plan.md
 cybergraph import-strix strix_runs/<run> --repo path/to/repo
 cybergraph export-json path/to/repo --output graph.json
+cybergraph opengraph path/to/repo --output opengraph.json   # BloodHound OpenGraph interop
 cybergraph review --base main --repo path/to/repo
 cybergraph pr-comment --base main --repo path/to/repo --output cybergraph-pr-comment.md
 cybergraph visualize path/to/repo
@@ -77,10 +84,8 @@ cybergraph sarif --repo path/to/repo --output cybergraph.sarif
 Typical build output:
 
 ```text
-Built graph for examples/vulnerable-fastapi
-nodes: 18
-edges: 24
-findings: 3
+Built security graph for examples/vulnerable-fastapi
+Nodes: 15 | Edges: 28 | Findings: 1
 ```
 
 Typical PR comment sections:
@@ -167,12 +172,19 @@ python -m pip install -e ".[mcp]"
 cybergraph-mcp
 ```
 
-Initial tools:
+Available tools:
 
 - `build_security_graph_tool`
 - `query_security_graph_tool`
 - `explain_attack_path_tool`
 - `grounded_security_answer_tool` (cited, confidence-scored, local-only)
+- `analyze_repo_tool` (build + full analysis in one call)
+- `top_risks_tool`
+- `secret_exposures_tool`
+- `prioritize_dependencies_tool` (reachability-ranked SCA)
+- `iac_attack_paths_tool`
+- `import_scanner_report_tool`
+- `import_vulnerabilities_tool`
 
 ## Project direction
 
@@ -189,4 +201,4 @@ See:
 
 ## Status
 
-Private bootstrap. The first version is small on purpose: it establishes the package, graph store, Python analyzer, scanner import path, evidence retrieval, and MCP surface.
+Beta. CyberGraph analyzes five languages, builds interprocedural attack paths, imports and enriches scanner findings, correlates IaC to code, ships an interactive HTML report, and exposes an MCP surface for AI assistants. The graph store, analyzers, evidence retrieval, and report are stable; the public API and finding rules may still change before 1.0.
