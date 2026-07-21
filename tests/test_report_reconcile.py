@@ -1,10 +1,10 @@
 from cybergraph.history import Delta
 from cybergraph.visualize import (
-    _grade,
-    _severity_bar,
-    _posture_section,
     _delta_strip,
     _findings_footer,
+    _grade,
+    _posture_section,
+    _severity_bar,
 )
 
 
@@ -80,6 +80,7 @@ def test_findings_footer_all_shown():
 
 def test_report_composition_self_contained(tmp_path):
     import re
+
     from cybergraph.cli import main as _main
     from cybergraph.visualize import generate_html_report as _gen
     repo = tmp_path / "app"
