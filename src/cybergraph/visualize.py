@@ -52,6 +52,12 @@ def generate_html_report(
             LIMIT 100
             """
         ).fetchall()
+        sev_counts = {
+            row["severity"]: row["n"]
+            for row in store.conn.execute(
+                "SELECT severity, COUNT(*) AS n FROM findings GROUP BY severity"
+            )
+        }
     finally:
         store.close()
 
@@ -62,9 +68,11 @@ def generate_html_report(
         from cybergraph.report_source import attach_source_snippets
 
         attach_source_snippets(repo_root, graph_data)
+    delta_html = _gather_delta_html(repo_root)
     output.write_text(
         _render_html(
-            repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+            repo_root, counts, layers, findings, vulnerable_dependencies,
+            attack_paths, graph_data, sev_counts, delta_html,
         ),
         encoding="utf-8",
     )
@@ -81,7 +89,8 @@ def _embed_json(data) -> str:
 
 
 def _render_html(
-    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data
+    repo_root, counts, layers, findings, vulnerable_dependencies, attack_paths, graph_data,
+    sev_counts, delta_html,
 ) -> str:
     template = _HTML_TEMPLATE
     replacements = {
@@ -99,9 +108,16 @@ def _render_html(
             sum(1 for p in attack_paths if p.risk and p.risk.label == "high"),
         ),
         "__TOP_RISKS_TABLE__": _top_risks_table(graph_data.get("top_risks", [])),
+        "__POSTURE__": _posture_section(
+            {**counts, "attack_paths": len(attack_paths)},
+            graph_data.get("top_risks", []),
+            sev_counts,
+            delta_html,
+        ),
         "__LAYERS_TABLE__": _layers_table(layers),
         "__VULN_DEPS_TABLE__": _vulnerable_dependencies_table(vulnerable_dependencies),
         "__FINDINGS_TABLE__": _findings_table(findings),
+        "__FINDINGS_FOOTER__": _findings_footer(len(findings), counts.get("findings", len(findings))),
         "__ATTACK_PATHS_LIST__": _attack_paths(attack_paths),
         "__LEGEND__": _legend(),
         "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
@@ -290,6 +306,15 @@ def _findings_table(findings) -> str:
     )
 
 
+def _findings_footer(shown: int, total: int) -> str:
+    if total > shown:
+        return ("<p class='muted'>Showing the top "
+                f"{shown} findings by severity ({total} total) — run "
+                "<code>cybergraph sarif</code> or <code>cybergraph export-json</code> "
+                "for the complete set.</p>")
+    return f"<p class='muted'>Showing all {total} findings.</p>"
+
+
 def _finding_search_text(row) -> str:
     parts = [row["severity"], row["rule_id"], row["message"], row["file_path"] or "", row["tool"]]
     return " ".join(str(part).lower() for part in parts)
@@ -328,6 +353,87 @@ def _top_risks_table(risks) -> str:
         for risk in risks
     )
     return f"<div class='risk-strip'>{cards}</div>"
+
+
+_GRADE_BANDS = [(90, "F"), (85, "E"), (70, "D"), (55, "C"), (40, "B")]
+_GRADE_COLOR = {"A": "#16a34a", "B": "#65a30d", "C": "#d97706",
+                "D": "#ea580c", "E": "#dc2626", "F": "#991b1b"}
+_SEV_BAR_ORDER = ["critical", "high", "medium", "low", "info"]
+_SEV_BAR_COLOR = {"critical": "#dc2626", "high": "#ea580c", "medium": "#d97706",
+                  "low": "#2563eb", "info": "#64748b"}
+
+
+def _grade(top_risks: list[dict]) -> tuple[str, str]:
+    scores = [int(r.get("risk_score") or 0) for r in top_risks]
+    top = max(scores) if scores else 0
+    letter = "A"
+    for threshold, band in _GRADE_BANDS:
+        if top >= threshold:
+            letter = band
+            break
+    if not scores or top < 40:
+        return "A", "No significant risks detected."
+    return letter, f"Highest risk scored {top}/100 — see the top risks below."
+
+
+def _severity_bar(counts_by_sev: dict) -> str:
+    total = sum(int(counts_by_sev.get(s, 0)) for s in _SEV_BAR_ORDER)
+    if total == 0:
+        return ("<div class='sevbar'><div class='sevbar-seg' "
+                "style='width:100%;background:#64748b'>No findings</div></div>")
+    segs = []
+    for sev in _SEV_BAR_ORDER:
+        n = int(counts_by_sev.get(sev, 0))
+        if n == 0:
+            continue
+        pct = round(100 * n / total, 2)
+        segs.append(
+            f"<div class='sevbar-seg' title='{html.escape(sev)}: {n}' "
+            f"style='width:{pct}%;background:{_SEV_BAR_COLOR[sev]}'>{n}</div>"
+        )
+    return f"<div class='sevbar'>{''.join(segs)}</div>"
+
+
+def _posture_section(counts, top_risks, counts_by_sev, delta_html: str) -> str:
+    letter, verdict = _grade(top_risks)
+    color = _GRADE_COLOR[letter]
+    return (
+        "<section id=\"posture\" class='posture'>"
+        "<h2>Security Posture</h2>"
+        "<div class='posture-row'>"
+        f"<div class='badge-grade' style='background:{color}'>{letter}</div>"
+        f"<div class='posture-main'><p><strong>{html.escape(verdict)}</strong></p>"
+        f"{_severity_bar(counts_by_sev)}</div>"
+        "</div>"
+        f"{delta_html}"
+        "</section>"
+    )
+
+
+def _delta_strip(delta, prev_ts: str | None) -> str:
+    if delta is None or getattr(delta, "is_first", True):
+        return ""
+    when = (prev_ts or "")[:19]
+    since = f"Since scan on {html.escape(when)}" if when else "Since last scan"
+    return (
+        "<div class='delta-strip'>"
+        f"{since}: <strong>{len(delta.new)} new</strong> · "
+        f"<strong>{len(delta.regressed)} regressed</strong> · "
+        f"<strong>{len(delta.fixed)} fixed</strong> · "
+        f"<strong>{len(delta.persisting)} persisting</strong>"
+        "</div>"
+    )
+
+
+def _gather_delta_html(repo_root) -> str:
+    try:
+        from cybergraph import history
+        delta = history.scan_delta(repo_root)
+        scans = history.list_scans(repo_root, limit=2)
+        prev_ts = scans[1]["ts"] if len(scans) > 1 else None
+        return _delta_strip(delta, prev_ts)
+    except Exception:
+        return ""
 
 
 def _attack_paths(paths) -> str:
@@ -476,6 +582,19 @@ _HTML_TEMPLATE = """<!doctype html>
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
     .risk-card span { color: var(--muted); font-size: 12px; }
     .risk-score { float: right; color: #dc2626; font-weight: 700; }
+    .posture { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px; margin: 18px 0; }
+    .posture-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .posture-main { flex: 1; min-width: 240px; }
+    .badge-grade { display: inline-flex; align-items: center; justify-content: center;
+      width: 72px; height: 72px; border-radius: 16px; font-size: 42px; font-weight: 700;
+      color: #fff; }
+    .sevbar { display: flex; width: 100%; height: 24px; border-radius: 999px; overflow: hidden;
+      border: 1px solid var(--border); }
+    .sevbar-seg { display: flex; align-items: center; justify-content: center; color: #fff;
+      font-size: 11px; font-weight: 600; }
+    .delta-strip { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px;
+      background: var(--accent-bg); color: var(--accent); font-size: 13px; }
     .cg-snippet { margin-top: 8px; border: 1px solid var(--border, #d0d7de); border-radius: 8px;
       overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px; }
@@ -492,6 +611,15 @@ _HTML_TEMPLATE = """<!doctype html>
     }
     @media (max-width: 820px) {
       .explorer { grid-template-columns: 1fr; } .details { height: auto; }
+    }
+    @media print {
+      #cg-nav, #cg-theme-toggle, .toolbar, .graph-head, #cy { display: none !important; }
+      :root, :root[data-theme="dark"], :root[data-theme="light"] {
+        --bg: #ffffff; --fg: #111827; --panel: #ffffff; --border: #d8e0ea; --muted: #444;
+      }
+      body { background: var(--bg); }
+      .posture, .risk-strip, .finding-group { break-inside: avoid; box-shadow: none; }
+      [data-finding-row], [data-finding-group] { display: revert !important; }
     }
   </style>
   <script>
@@ -521,6 +649,7 @@ _HTML_TEMPLATE = """<!doctype html>
       <div class="stat"><span class="muted">Attack Paths</span><strong>__ATTACK_PATHS__</strong>
         __PATHS_ACCENT__</div>
     </section>
+    __POSTURE__
 
     <h2>Top Risks</h2>
     __TOP_RISKS_TABLE__
@@ -598,6 +727,7 @@ _HTML_TEMPLATE = """<!doctype html>
     __VULN_DEPS_TABLE__
     <h2>Findings</h2>
     __FINDINGS_TABLE__
+    __FINDINGS_FOOTER__
     <h2>Potential Attack Paths</h2>
     __ATTACK_PATHS_LIST__
   </main>
@@ -1316,6 +1446,21 @@ _HTML_TEMPLATE = """<!doctype html>
       document.documentElement.setAttribute('data-theme', cur);
       try { localStorage.setItem('cybergraph-theme', cur); } catch (e) {}
     });
+  </script>
+  <script>
+    (function () {
+      var groups = function () { return document.querySelectorAll('[data-finding-group]'); };
+      var saved = null;
+      window.addEventListener('beforeprint', function () {
+        saved = [];
+        groups().forEach(function (d) { saved.push(d.open); d.open = true; });
+      });
+      window.addEventListener('afterprint', function () {
+        if (!saved) return;
+        groups().forEach(function (d, i) { d.open = saved[i]; });
+        saved = null;
+      });
+    })();
   </script>
 </body>
 </html>
