@@ -46,7 +46,7 @@ python -m pip install "cybergraph[all]" # everything optional
 python -m pip install -e ".[dev]"
 ```
 
-Supported Python: 3.10, 3.11, 3.12.
+Supported Python: 3.10, 3.11, 3.12, 3.13.
 
 ## Quick start
 
