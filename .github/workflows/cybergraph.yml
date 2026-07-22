@@ -61,6 +61,15 @@ jobs:
       - name: Export SARIF
         run: cybergraph sarif --repo . --output cybergraph.sarif
 
+      - name: Drop informational sink-inventory findings from the self-scan SARIF
+        # CG-*-SINK-CALL marks "a sensitive sink is used here" — useful inventory
+        # for downstream analysis, but not actionable on CyberGraph's own
+        # parameterized sqlite calls. Keep the code scanning tab signal-only.
+        run: |
+          jq '.runs[].results |= map(select(.ruleId | test("SINK-CALL$") | not))' \
+            cybergraph.sarif > cybergraph.filtered.sarif
+          mv cybergraph.filtered.sarif cybergraph.sarif
+
       - name: Generate HTML report
         run: cybergraph visualize . --output cybergraph-report.html
 
