@@ -57,3 +57,18 @@ def test_supply_chain_configs_exist_and_are_gated():
     dep = (root / "dependabot.yml").read_text(encoding="utf-8")
     assert "package-ecosystem: pip" in dep
     assert "package-ecosystem: github-actions" in dep
+
+
+def test_community_health_files_exist():
+    repo = WORKFLOW_DIR.parents[1]
+    for rel in (
+        "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md",
+        ".github/CODEOWNERS", ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/ISSUE_TEMPLATE/bug_report.md",
+        ".github/ISSUE_TEMPLATE/feature_request.md",
+        ".github/ISSUE_TEMPLATE/config.yml",
+    ):
+        assert (repo / rel).is_file(), f"missing {rel}"
+    sec = (repo / "SECURITY.md").read_text(encoding="utf-8")
+    assert "lxh417bham@gmail.com" in sec
+    assert "14 days" in sec
