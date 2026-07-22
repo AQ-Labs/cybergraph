@@ -1,12 +1,19 @@
 name: release
 
 # Builds and validates distributions on every version tag, then publishes to
-# PyPI. Publishing only runs if a PYPI_API_TOKEN secret is configured by the
-# maintainer; without it the build/validation still runs so tags are safe.
+# PyPI via Trusted Publishing (OIDC) with PEP 740 attestations (default-on in
+# pypa/gh-action-pypi-publish v1.11+). Publishing is opt-in: it only runs when
+# the repository variable ENABLE_PYPI_PUBLISH is 'true', which should be set
+# only AFTER registering this repo+workflow as a Trusted Publisher on PyPI
+# (see docs/OSS_LAUNCH_READINESS.md, "PyPI Trusted Publisher" runbook step).
+# No API token is used anywhere in this workflow.
 on:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -42,20 +49,14 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only publish when a PyPI token is configured.
+    # Opt-in gate: requires the PyPI Trusted Publisher registration first.
     if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    permissions:
+      id-token: write
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: dist
           path: dist
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.11"
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          python -m pip install --upgrade twine
-          python -m twine upload dist/*
+      - name: Publish to PyPI (Trusted Publishing + PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
