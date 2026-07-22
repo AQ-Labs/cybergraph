@@ -44,3 +44,16 @@ def test_release_uses_trusted_publishing_not_api_token():
     assert "TWINE_PASSWORD" not in text, "twine credential env must be removed"
     assert "pypa/gh-action-pypi-publish" in text
     assert "ENABLE_PYPI_PUBLISH" in text, "publish gate must be preserved"
+
+
+def test_supply_chain_configs_exist_and_are_gated():
+    root = WORKFLOW_DIR.parents[0]  # .github/
+    assert (root / "dependabot.yml").is_file()
+    for name in ("codeql.yml", "scorecard.yml"):
+        text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
+        assert "github.event.repository.private == false" in text, (
+            f"{name}: must be gated off while the repo is private"
+        )
+    dep = (root / "dependabot.yml").read_text(encoding="utf-8")
+    assert "package-ecosystem: pip" in dep
+    assert "package-ecosystem: github-actions" in dep
