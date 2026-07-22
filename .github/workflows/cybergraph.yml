@@ -7,9 +7,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
-  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -18,13 +15,18 @@ jobs:
   security-graph:
     name: Build security graph
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+      actions: read
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
 
@@ -57,12 +59,12 @@ jobs:
       - name: Upload SARIF to code scanning
         if: github.event.repository.private == false || vars.CYBERGRAPH_UPLOAD_SARIF == 'true'
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4
         with:
           sarif_file: cybergraph.sarif
 
       - name: Upload CyberGraph artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cybergraph-report
           path: |
