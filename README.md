@@ -4,6 +4,9 @@ Security review for codebases, powered by knowledge graphs.
 
 CyberGraph maps a repository into a cybersecurity knowledge graph so developers can inspect security layers, risky code paths, scanner findings, and evidence-backed answers without reading the whole codebase by hand.
 
+> **🔒 No API keys. Fully offline. Your code never leaves your machine.**
+> `pip install cybergraph` and you get the complete toolkit — the interactive HTML report, attack-path graphs, cited findings, and SARIF export — with **zero API keys, zero signup, and zero network calls**. There are no runtime dependencies. An LLM is entirely optional and only rephrases answers the graph has already grounded in evidence; nothing about the analysis requires one.
+
 ## Why this exists
 
 Security scanners are useful, but their output is usually flat: a file, a line, a rule, and a warning. Developers still have to answer the hard questions:
