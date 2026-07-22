@@ -14,7 +14,7 @@
 1. **Preferred:** use GitHub's private vulnerability reporting — go to the
    repository's **Security** tab → **Report a vulnerability**. Your report is
    visible only to the maintainers.
-2. **Fallback:** email `lxh417bham@gmail.com` with a description, reproduction
+2. **Fallback:** email `er.azizurrahman@gmail.com` with a description, reproduction
    steps, and the affected version/commit.
 
 ## What to expect
