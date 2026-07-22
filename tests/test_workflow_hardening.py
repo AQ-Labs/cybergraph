@@ -35,3 +35,12 @@ def test_every_action_is_sha_pinned_with_tag_comment():
                     f"{wf.name}:{lineno}: action not SHA-pinned with '# <tag>' "
                     f"comment: {line.strip()}"
                 )
+
+
+def test_release_uses_trusted_publishing_not_api_token():
+    text = (WORKFLOW_DIR / "release.yml").read_text(encoding="utf-8")
+    assert "id-token: write" in text, "publish job must request OIDC id-token"
+    assert "PYPI_API_TOKEN" not in text, "API-token path must be removed"
+    assert "TWINE_PASSWORD" not in text, "twine credential env must be removed"
+    assert "pypa/gh-action-pypi-publish" in text
+    assert "ENABLE_PYPI_PUBLISH" in text, "publish gate must be preserved"
