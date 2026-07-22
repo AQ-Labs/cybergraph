@@ -1,0 +1,98 @@
+name: CyberGraph Report
+
+# Runs after the "CyberGraph" workflow completes. A workflow_run always executes
+# the definition from the default branch, so it receives a read/write
+# GITHUB_TOKEN even when the triggering PR came from a fork. That makes it the
+# safe place to post the PR comment: the workflow that ran untrusted PR code
+# (cybergraph.yml) stays read-only, and this trusted workflow only reads the
+# artifact it produced.
+on:
+  workflow_run:
+    workflows: ["CyberGraph"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read # list/download the triggering run's artifacts
+  pull-requests: write # post the sticky review comment
+
+concurrency:
+  group: cybergraph-report-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Post security review comment
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download the cybergraph-report artifact
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = context.payload.workflow_run.id;
+            const arts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const match = arts.data.artifacts.find((a) => a.name === 'cybergraph-report');
+            if (!match) {
+              core.info('No cybergraph-report artifact found; nothing to post.');
+              return;
+            }
+            const zip = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: match.id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('artifact.zip', Buffer.from(zip.data));
+
+      - name: Unzip artifact
+        run: unzip -o artifact.zip -d artifact || true
+
+      - name: Post or update the sticky comment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cybergraph-security-review -->';
+
+            let prNumber, body;
+            try {
+              prNumber = Number(fs.readFileSync('artifact/pr-number.txt', 'utf8').trim());
+            } catch {
+              core.info('No pr-number.txt in artifact; skipping.');
+              return;
+            }
+            try {
+              body = fs.readFileSync('artifact/cybergraph-pr-comment.md', 'utf8');
+            } catch {
+              core.info('No cybergraph-pr-comment.md in artifact; skipping.');
+              return;
+            }
+            if (!prNumber || !body.trim()) {
+              core.info('Missing PR number or empty comment body; skipping.');
+              return;
+            }
+
+            body = `${marker}\n${body}`;
+            const { owner, repo } = context.repo;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              core.info(`Updated sticky comment ${existing.id} on PR #${prNumber}.`);
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+              core.info(`Created sticky comment on PR #${prNumber}.`);
+            }
