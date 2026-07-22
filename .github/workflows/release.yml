@@ -3,10 +3,10 @@ name: release
 # Builds and validates distributions on every version tag, then publishes to
 # PyPI via Trusted Publishing (OIDC) with PEP 740 attestations (default-on in
 # pypa/gh-action-pypi-publish v1.11+). Publishing is opt-in: it only runs when
-# the repository variable ENABLE_PYPI_PUBLISH is 'true', which the maintainer
-# should set only AFTER registering this repo+workflow as a Trusted Publisher
-# on PyPI (see docs/OSS_LAUNCH_READINESS.md, "PyPI Trusted Publisher" runbook
-# step). No API token is used anywhere in this workflow.
+# the repository variable ENABLE_PYPI_PUBLISH is 'true', which should be set
+# only AFTER registering this repo+workflow as a Trusted Publisher on PyPI
+# (see docs/OSS_LAUNCH_READINESS.md, "PyPI Trusted Publisher" runbook step).
+# No API token is used anywhere in this workflow.
 on:
   push:
     tags:
@@ -18,9 +18,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
       - name: Build sdist and wheel
@@ -37,7 +40,7 @@ jobs:
           assert any("assets/cytoscape.min.js" in n for n in names), "cytoscape asset missing from wheel"
           print("wheel OK:", wheel)
           PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/*
@@ -45,12 +48,13 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Opt-in gate: requires the PyPI Trusted Publisher registration first.
     if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: dist
           path: dist
