@@ -70,5 +70,5 @@ def test_community_health_files_exist():
     ):
         assert (repo / rel).is_file(), f"missing {rel}"
     sec = (repo / "SECURITY.md").read_text(encoding="utf-8")
-    assert "lxh417bham@gmail.com" in sec
+    assert "er.azizurrahman@gmail.com" in sec
     assert "14 days" in sec
