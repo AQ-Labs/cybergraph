@@ -26,4 +26,11 @@ jobs:
       - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: python
+          # Fixture/example code is deliberately vulnerable — scanning it only
+          # produces noise in the code scanning tab. Product code stays covered.
+          config: |
+            paths-ignore:
+              - tests/fixtures
+              - benchmark
+              - examples
       - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3

@@ -1,0 +1,13 @@
+# CyberGraph self-scan configuration (used by .github/workflows/cybergraph.yml,
+# which runs `cybergraph build .` on this repository).
+#
+# The paths below contain DELIBERATELY vulnerable fixture code (test fixtures,
+# benchmark cases, and example apps). Findings there are the tool working as
+# intended, not repository vulnerabilities — suppress them so the GitHub code
+# scanning tab reflects the real posture of src/.
+#
+# Note: keep the array on ONE line — the Python 3.10 fallback TOML parser in
+# cybergraph.config is line-based and does not support multi-line arrays.
+
+[suppressions]
+paths = ["tests/*", "benchmark/*", "examples/*"]
