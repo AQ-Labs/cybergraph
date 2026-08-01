@@ -21,7 +21,11 @@ from cybergraph.security.layers import summarize_layers
 
 
 def generate_html_report(
-    repo_root: Path, output: Path | None = None, *, with_source: bool = False
+    repo_root: Path,
+    output: Path | None = None,
+    *,
+    with_source: bool = False,
+    max_nodes: int = 600,
 ) -> Path:
     repo_root = repo_root.resolve()
     output = output or repo_root / ".cybergraph" / "report.html"
@@ -63,7 +67,7 @@ def generate_html_report(
 
     layers = summarize_layers(repo_root)
     attack_paths = find_attack_paths(repo_root, limit=25)
-    graph_data = build_graph_data(repo_root)
+    graph_data = build_graph_data(repo_root, max_nodes=max_nodes)
     if with_source:
         from cybergraph.report_source import attach_source_snippets
 
@@ -175,7 +179,12 @@ def _truncation_banner(graph_data: dict) -> str:
     if not graph_data.get("truncated"):
         return ""
     shown = len(graph_data.get("nodes", []))
-    total = int(graph_data.get("counts", {}).get("nodes", shown))
+    # Compare like with like: both sides must count *exported* nodes. Falling
+    # back to counts["nodes"] (database rows) understates the total and could
+    # render "Showing 900 of 826".
+    total = int(
+        graph_data.get("graph_nodes_total") or graph_data.get("counts", {}).get("nodes", shown)
+    )
     return (
         "<div style='margin:0 0 12px;padding:10px 12px;border-radius:8px;"
         "background:var(--warn-bg);color:var(--warn-fg);"
