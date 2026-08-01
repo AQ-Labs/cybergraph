@@ -203,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument(
         "--with-source", action="store_true", help="Embed (secret-redacted) source snippets"
     )
+    visualize.add_argument(
+        "--max-nodes",
+        type=int,
+        default=600,
+        help="Maximum nodes to include in the graph explorer (default: 600)",
+    )
 
     top_risks = sub.add_parser(
         "top-risks", help="Show the highest-priority risks across graph layers"
@@ -516,7 +522,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote SARIF report: {output}")
     elif args.command == "visualize":
         output = generate_html_report(
-            repo, Path(args.output).resolve() if args.output else None, with_source=args.with_source
+            repo,
+            Path(args.output).resolve() if args.output else None,
+            with_source=args.with_source,
+            max_nodes=args.max_nodes,
         )
         print(f"Wrote CyberGraph HTML report: {output}")
     elif args.command == "top-risks":
