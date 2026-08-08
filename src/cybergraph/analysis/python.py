@@ -425,8 +425,24 @@ def _finding_for(
 
 
 def _custom_sink(call_name: str, custom_sinks: tuple[str, ...]) -> Sink | None:
-    """Wrap a user-configured sink so it flows through the same predicate path."""
-    if call_name not in custom_sinks:
+    """Wrap a user-configured sink so it flows through the same predicate path.
+
+    Matched on the full dotted name, then on the bare final segment — the same
+    two-step ``lookup_sink`` applies to a registry entry marked ``bare``. A
+    configured ``audit_write`` has to match ``auditor.audit_write`` as well as
+    the unqualified call, because a receiver cannot be resolved without type
+    inference and the user naming a method has no other spelling available.
+    Without the fallback the call loses its ``REACHES_SINK`` edge too, so the
+    inventory a reviewer inspects goes quiet along with the finding.
+
+    This is not the narrowing ``sinks.py`` applied to ``open``. There, ``bare``
+    was wrong because the builtin's spellings are enumerable and matching any
+    receiver made ``webbrowser.open`` a path-traversal finding. Here the name
+    came from the project's own configuration, so a tail match is what was
+    asked for.
+    """
+    tail = call_name.rsplit(".", 1)[-1]
+    if call_name not in custom_sinks and tail not in custom_sinks:
         return None
     return Sink(
         name=call_name,

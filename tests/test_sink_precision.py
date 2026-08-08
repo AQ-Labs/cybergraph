@@ -360,6 +360,22 @@ def test_confinement_is_scoped_to_the_class_it_confines_and_to_a_known_receiver(
     assert [f.rule_id for f in path_findings] == ["CG-PATH-TRAVERSAL"]
 
 
+def test_a_bare_configured_sink_name_matches_a_receiver_call(tmp_path: Path) -> None:
+    """A configured method name has no other spelling available to the user.
+
+    Registry sinks marked `bare` already match a receiver call; a custom sink
+    lost both the finding and the `REACHES_SINK` edge, so the inventory a
+    reviewer inspects went quiet along with the report.
+    """
+    source = ROUTE.format(body="auditor.audit_write(uid)")
+    path = tmp_path / "app.py"
+    path.write_text(source, encoding="utf-8")
+    _nodes, edges, findings = analyze_python_file(path, tmp_path, custom_sinks=("audit_write",))
+
+    assert [e.target for e in edges if e.kind == "REACHES_SINK"] == ["auditor.audit_write"]
+    assert [f.rule_id for f in findings] == ["CG-CUSTOM-SINK"]
+
+
 def test_a_local_named_like_a_source_is_not_a_source(tmp_path: Path) -> None:
     """`query` is in `SOURCE_KEYWORDS`, and locals get called `query`.
 
