@@ -70,27 +70,28 @@ numbers this work exists to correct.
 
 ## Current measurement
 
-38 cases, 36 gated, 2 known gaps. Regenerate with `python benchmark/run_precision.py`.
+41 cases, 39 gated, 2 known gaps. Regenerate with `python benchmark/run_precision.py`.
 
 ```text
-cases=38 gated=36 precision=1.0 (n=15) recall=1.0 (n=15) safe_fp_rate=0.0 safe_abstention_rate=0.0 (safe n=18)
+cases=41 gated=39 precision=1.0 (n=16) recall=1.0 (n=16) safe_fp_rate=0.0 safe_abstention_rate=0.0 (safe n=20)
 known gaps: 2 (alias_import, from_import)
 
 class              prec    n  recall    n  safeFP    n    abst    n
 -------------------------------------------------------------------
 code               1.00    2    1.00    2    0.00    2    0.00    2
-command            1.00    4    1.00    4    0.00    3    0.00    3 *
+command            1.00    4    1.00    4    0.00    4    0.00    4 *
 deserialize        1.00    1    1.00    1    0.00    1    0.00    1
 interprocedural    1.00    1    1.00    1    0.00    1    0.00    1
-path               1.00    1    1.00    1    0.00    3    0.00    3
-sql                1.00    5    1.00    5    0.00    6    0.00    6
+path               1.00    1    1.00    1    0.00    4    0.00    4
+sql                1.00    6    1.00    6    0.00    6    0.00    6
 template           1.00    1    1.00    1    0.00    2    0.00    2
 * abstention measured but not gated for this class.
 ```
 
 `n` for precision is `tp + fp`; for recall `tp + fn`; for both safe-case rates
-it is the number of safe cases in that class. None of them reaches the
-resolution floor of 20, so **every one of these gates is zero-tolerance**.
+it is the number of safe cases in that class. Only the two **overall** safe-case
+rates reach the resolution floor of 20; every per-class gate is still
+zero-tolerance, and so are overall precision and recall.
 
 ## Known gaps
 
@@ -142,13 +143,13 @@ abstention-by-design case as a false negative against its own expectation:
 
 | Group | Cases |
 |---|---|
-| SQL unsafe | `sql_concat`, `sql_fstring`, `sql_percent`, `sql_format`, `sql_augassign` |
+| SQL unsafe | `sql_concat`, `sql_fstring`, `sql_percent`, `sql_format`, `sql_augassign`, `sql_request_attribute` |
 | SQL safe | `sql_param_qmark`, `sql_param_named`, `sql_constant`, `sql_hoisted_constant`, `sql_composed_clean`, `sql_reassigned_after_call` |
 | SQL unknown | `sql_via_builder` |
 | Command unsafe | `cmd_shell_true`, `cmd_fstring_shell_true`, `cmd_sh_dash_c`, `cmd_tainted_argv0` |
-| Command safe | `cmd_list_args`, `cmd_list_shell_false`, `cmd_constant` |
+| Command safe | `cmd_list_args`, `cmd_list_shell_false`, `cmd_constant`, `cmd_config_member` |
 | Command unknown | `cmd_string_no_shell` |
-| Path | `path_direct` (unsafe), `path_basename`, `path_safe_join`, `path_constant` (safe), `path_normpath` (unknown) |
+| Path | `path_direct` (unsafe), `path_basename`, `path_safe_join`, `path_constant`, `path_config_member` (safe), `path_normpath` (unknown) |
 | Deserialize | `pickle_tainted` (unsafe), `yaml_safe_load` (safe) |
 | Template | `template_string_tainted` (unsafe), `template_render_context`, `template_constant` (safe) |
 | Code | `eval_tainted`, `exec_tainted` (unsafe), `literal_eval`, `eval_constant` (safe) |
@@ -202,17 +203,18 @@ argument that classifies OPAQUE, so `eval("6 * 7")` scores `safe` while
 abstention, gated at zero tolerance. Writing those cases the other way would
 fail the gate on case authoring rather than on detector behaviour.
 
-## Open defect N-1: the false-positive figures do not cover it
+## Defect N-1, and the three cases that now cover it
 
-*Recorded 2026-08-08, confirmed by execution, fix owned elsewhere.*
+*Recorded 2026-08-08 as an open defect the corpus was blind to; fixed and
+covered the same day.*
 
-`provenance.py::user_input_nodes` introduces taint by **substring**-matching a
-dotted chain against `SOURCE_KEYWORDS`. It excludes a bare `ast.Name`, but
-accepts any Attribute/Call/Subscript whose chain text merely *contains*
+`provenance.py::user_input_nodes` introduced taint by **substring**-matching a
+dotted chain against `SOURCE_KEYWORDS`. It excluded a bare `ast.Name`, but
+accepted any Attribute/Call/Subscript whose chain text merely *contained*
 `input`, `body`, `params`, `query`, `form`, `cookie`, `request`, `headers`,
-`argv` or `webhook`. Any member with such a name becomes a taint source. It is
-the same defect class this work exists to remove from sink matching,
-reintroduced on the source side. Measured:
+`argv` or `webhook`, so any member with such a name became a taint source — the
+same defect class this work exists to remove from sink matching, reintroduced on
+the source side. Measured then:
 
 ```text
 subprocess.run("ls " + cfg.input_dir, shell=True)   -> CG-CMD-EXEC       critical  (false positive)
@@ -223,21 +225,34 @@ pickle.loads(session.cookie_jar)                    -> CG-DESERIALIZE    critica
 open(p.path)                                        -> no finding                  (control)
 ```
 
-**Say the quiet part: this corpus does not exercise that path at all.** Every
-taint fact in all 38 cases arrives through a *route parameter*, seeded
-structurally by `analysis.python._route_inputs`. Running `user_input_nodes`
-over every call in every `app.py` returns **zero** matches, so the safe-case
-false-positive rates of `0.00` above are measured entirely on the structural
-taint path and say nothing whatever about N-1. The `0.00` is real for what it
-covers and the coverage is narrower than the number looks.
+**The quiet part, which was the point: the corpus could not see any of it.**
+Every taint fact in the original 38 cases arrived through a *route parameter*,
+seeded structurally by `analysis.python._route_inputs`. Running
+`user_input_nodes` over every call in every `app.py` returned **zero** matches,
+so the safe-case false-positive rates of `0.00` were measured entirely on the
+structural route path and said nothing whatever about N-1. No case was renamed
+or reworded to avoid it — the names in the corpus (`name`, `revision`, `term`,
+`host`, `DATA_DIR`) were chosen before N-1 was known — but the effect was the
+same as if they had been, and a gate that passes by corpus composition is worth
+nothing.
 
-No case was renamed or reworded to avoid this — the names in the corpus
-(`name`, `revision`, `term`, `host`, `DATA_DIR`) were chosen before N-1 was
-known — but the effect is the same as if they had been, and a gate that passes
-by corpus composition is worth nothing. Once N-1 is fixed, a case of the shape
-`open(args.input)` where `args` is a local config object should be added as a
-**safe** `path` case; it fails today, and it is the case that would have caught
-this.
+Three cases now exercise the attribute-chain source path, in **both**
+directions, because a source rule can fail either way and the two failures look
+nothing alike:
+
+| Case | Label | What it would catch |
+|---|---|---|
+| `path_config_member` | safe / path | `cfg.input_dir` reaching `open` — over-breadth, the N-1 shape at high |
+| `cmd_config_member` | safe / command | the same member reaching `shell=True` — over-breadth at **critical** |
+| `sql_request_attribute` | unsafe / sql | `request.args.get(...)` written out at the sink with no local to bind it — over-**narrowing** |
+
+Verified by execution against the pre-fix detector: the two safe cases fail it
+(`path:safe_false_positive_rate 0.25`, `path:precision 0.50`, plus the command
+mismatch), and dropping request objects from the source rule fails
+`sql:recall 0.83`. The polarity is deliberately opposite to the sink registry's
+— a source keyword set is consulted to prove **danger**, so an incomplete one
+fails silent while an over-broad one fails loud, and only the third case can see
+the silent half.
 
 ## Governing invariant
 

@@ -15,20 +15,20 @@
   "safe_false_positive_rate": 0.0,
   "safe_abstention_rate": 0.0,
   "overall": {
-    "cases": 38,
-    "gated_cases": 36,
+    "cases": 41,
+    "gated_cases": 39,
     "known_gap_cases": [
       "alias_import",
       "from_import"
     ],
-    "tp": 15,
+    "tp": 16,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "precision_n": 15,
-    "recall_n": 15,
-    "safe_cases": 18,
+    "precision_n": 16,
+    "recall_n": 16,
+    "safe_cases": 20,
     "safe_false_positives": 0,
     "safe_false_positive_cases": [],
     "safe_false_positive_rate": 0.0,
@@ -57,8 +57,8 @@
       "safe_abstention_rate": 0.0
     },
     "command": {
-      "cases": 10,
-      "gated_cases": 8,
+      "cases": 11,
+      "gated_cases": 9,
       "known_gap_cases": [
         "alias_import",
         "from_import"
@@ -70,7 +70,7 @@
       "recall": 1.0,
       "precision_n": 4,
       "recall_n": 4,
-      "safe_cases": 3,
+      "safe_cases": 4,
       "safe_false_positives": 0,
       "safe_false_positive_cases": [],
       "safe_false_positive_rate": 0.0,
@@ -117,8 +117,8 @@
       "safe_abstention_rate": 0.0
     },
     "path": {
-      "cases": 5,
-      "gated_cases": 5,
+      "cases": 6,
+      "gated_cases": 6,
       "known_gap_cases": [],
       "tp": 1,
       "fp": 0,
@@ -127,7 +127,7 @@
       "recall": 1.0,
       "precision_n": 1,
       "recall_n": 1,
-      "safe_cases": 3,
+      "safe_cases": 4,
       "safe_false_positives": 0,
       "safe_false_positive_cases": [],
       "safe_false_positive_rate": 0.0,
@@ -136,16 +136,16 @@
       "safe_abstention_rate": 0.0
     },
     "sql": {
-      "cases": 12,
-      "gated_cases": 12,
+      "cases": 13,
+      "gated_cases": 13,
       "known_gap_cases": [],
-      "tp": 5,
+      "tp": 6,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
-      "precision_n": 5,
-      "recall_n": 5,
+      "precision_n": 6,
+      "recall_n": 6,
       "safe_cases": 6,
       "safe_false_positives": 0,
       "safe_false_positive_cases": [],
@@ -178,7 +178,7 @@
     {
       "name": "overall:precision",
       "value": 1.0,
-      "n": 15,
+      "n": 16,
       "threshold": 0.9,
       "direction": "min",
       "enforced": true,
@@ -188,7 +188,7 @@
     {
       "name": "overall:recall",
       "value": 1.0,
-      "n": 15,
+      "n": 16,
       "threshold": 0.95,
       "direction": "min",
       "enforced": true,
@@ -198,21 +198,21 @@
     {
       "name": "overall:safe_false_positive_rate",
       "value": 0.0,
-      "n": 18,
+      "n": 20,
       "threshold": 0.05,
       "direction": "max",
       "enforced": true,
-      "zero_tolerance": true,
+      "zero_tolerance": false,
       "passed": true
     },
     {
       "name": "overall:safe_abstention_rate",
       "value": 0.0,
-      "n": 18,
+      "n": 20,
       "threshold": 0.15,
       "direction": "max",
       "enforced": true,
-      "zero_tolerance": true,
+      "zero_tolerance": false,
       "passed": true
     },
     {
@@ -278,7 +278,7 @@
     {
       "name": "command:safe_false_positive_rate",
       "value": 0.0,
-      "n": 3,
+      "n": 4,
       "threshold": 0.05,
       "direction": "max",
       "enforced": true,
@@ -288,7 +288,7 @@
     {
       "name": "command:safe_abstention_rate",
       "value": 0.0,
-      "n": 3,
+      "n": 4,
       "threshold": 0.15,
       "direction": "max",
       "enforced": false,
@@ -398,7 +398,7 @@
     {
       "name": "path:safe_false_positive_rate",
       "value": 0.0,
-      "n": 3,
+      "n": 4,
       "threshold": 0.05,
       "direction": "max",
       "enforced": true,
@@ -408,7 +408,7 @@
     {
       "name": "path:safe_abstention_rate",
       "value": 0.0,
-      "n": 3,
+      "n": 4,
       "threshold": 0.15,
       "direction": "max",
       "enforced": true,
@@ -418,7 +418,7 @@
     {
       "name": "sql:precision",
       "value": 1.0,
-      "n": 5,
+      "n": 6,
       "threshold": 0.9,
       "direction": "min",
       "enforced": true,
@@ -428,7 +428,7 @@
     {
       "name": "sql:recall",
       "value": 1.0,
-      "n": 5,
+      "n": 6,
       "threshold": 0.95,
       "direction": "min",
       "enforced": true,
@@ -513,6 +513,21 @@
       "detected": [],
       "sanitized_paths": [],
       "clean": false
+    },
+    {
+      "name": "cmd_config_member",
+      "label": "safe",
+      "vuln_class": "command",
+      "known_gap": false,
+      "scoring": "findings",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "abstentions": 0,
+      "expected": [],
+      "detected": [],
+      "sanitized_paths": [],
+      "clean": true
     },
     {
       "name": "cmd_constant",
@@ -756,6 +771,21 @@
     },
     {
       "name": "path_basename",
+      "label": "safe",
+      "vuln_class": "path",
+      "known_gap": false,
+      "scoring": "findings",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "abstentions": 0,
+      "expected": [],
+      "detected": [],
+      "sanitized_paths": [],
+      "clean": true
+    },
+    {
+      "name": "path_config_member",
       "label": "safe",
       "vuln_class": "path",
       "known_gap": false,
@@ -1051,6 +1081,25 @@
       "abstentions": 0,
       "expected": [],
       "detected": [],
+      "sanitized_paths": [],
+      "clean": true
+    },
+    {
+      "name": "sql_request_attribute",
+      "label": "unsafe",
+      "vuln_class": "sql",
+      "known_gap": false,
+      "scoring": "findings",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "abstentions": 0,
+      "expected": [
+        "('app.py', 20, 'CG-SQL-EXEC')"
+      ],
+      "detected": [
+        "('app.py', 20, 'CG-SQL-EXEC')"
+      ],
       "sanitized_paths": [],
       "clean": true
     },
