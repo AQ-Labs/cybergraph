@@ -8,3 +8,13 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # Dependabot treats each path inside a composite-action repo as its own
+    # dependency, so github/codeql-action/init and github/codeql-action/analyze
+    # get separate PRs. init and analyze must run the SAME version in one job,
+    # so a split bump fails both PRs with "Loaded a configuration file for
+    # version X, but running version Y" and neither can merge green alone.
+    # Grouping every action into one PR removes that deadlock class.
+    groups:
+      actions:
+        patterns:
+          - "*"
