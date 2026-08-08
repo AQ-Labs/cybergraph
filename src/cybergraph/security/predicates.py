@@ -354,10 +354,8 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
             return VERDICT_UNSAFE  # (4) handed to the runner as code
         if starred or not _flags_all_known(elements, runner):
             return VERDICT_UNKNOWN  # (6) a flag, or a width, we cannot account for
-        if any(_constant_str(elements[index - 1]) is None for index in tainted if index > 1):
-            # An element we cannot read, immediately left of the tainted one,
-            # might be the very code flag that would make it code.
-            return VERDICT_UNKNOWN
+        if _unreadable_could_be_a_code_flag(elements, tainted, runner):
+            return VERDICT_UNKNOWN  # (6b) see the helper
         return VERDICT_SAFE  # (5)
 
     if _names_a_runner(elements[1:]):
@@ -392,6 +390,33 @@ def _code_indices(elements: list[ast.expr], runner: _Runner) -> set[int]:
         elif _bundled_code(token, runner) is not None:
             code.add(index)  # `-c<code>` in a single token
     return {index for index in code if index < len(elements)}
+
+
+def _unreadable_could_be_a_code_flag(
+    elements: list[ast.expr], tainted: list[int], runner: _Runner
+) -> bool:
+    """Might an element we cannot read be the flag that made a tainted one code?
+
+    ``_flags_all_known`` skips what it cannot read, so an unreadable element is
+    accounted for by nothing but this.
+
+    For a runner whose code flag takes exactly one operand, only the element
+    immediately left of the tainted one is a candidate: in
+    ``["bash", flag, x, cmd]`` no value of ``flag`` reaches past ``x``.
+
+    A ``takes_rest`` runner has no such bound, and assuming it did was a silent
+    miss. ``cmd /c`` and ``powershell -Command`` claim *every* element after the
+    flag, so an unreadable element anywhere left of the tainted one may be the
+    flag that swallowed it: ``["cmd", flag, "dir", <tainted>]`` runs
+    ``cmd /c dir <tainted>`` when ``flag`` holds ``"/c"``, and a tainted value of
+    ``x & calc`` executes ``calc``. The tainted element itself is excluded — it
+    is the operand in question, not a candidate flag.
+    """
+    if runner.takes_rest:
+        return any(
+            _constant_str(elements[index]) is None for index in range(1, max(tainted))
+        )
+    return any(_constant_str(elements[index - 1]) is None for index in tainted if index > 1)
 
 
 def _flags_all_known(elements: list[ast.expr], runner: _Runner) -> bool:

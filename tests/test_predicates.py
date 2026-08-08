@@ -872,3 +872,48 @@ def test_an_unresolvable_shell_keyword_is_unknown_not_absent(body, params):
 )
 def test_a_falsey_shell_keyword_still_clears(body, expected):
     assert _assess(body, "run", params="cmd, **opts") == expected
+
+
+# R7-3 (Critical): the unread-neighbour guard was scoped to the *immediate* left
+# neighbour, on the reasoning that "a code flag consumes exactly one element".
+# That is false for the four `takes_rest=True` runners, where the flag claims
+# everything after it — `["cmd", flag, "dir", <tainted>]` is `cmd /c dir
+# <tainted>` when `flag` holds `"/c"`, and `x & calc` executes.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ('["cmd", flag, "dir", cmd]', "cmd"),
+        ('["cmd", flag, "/q", cmd]', "cmd"),
+        ('["cmd", *opts, "/q", cmd]', "cmd"),
+        ('["cmd.exe", opt, "/q", cmd]', "cmd"),
+        ('["powershell", opt, "-NoProfile", cmd]', "cmd"),
+        ('["pwsh", opt, "-NoLogo", cmd]', "cmd"),
+        ('["command.com", opt, "/q", cmd]', "cmd"),
+        # Three readable elements deep, still inside a possible consumed region.
+        ('["cmd", flag, "/q", "dir", cmd]', "cmd"),
+        # The control that already worked: the unreadable element adjacent.
+        ('["cmd", flag, cmd]', "cmd"),
+    ],
+)
+def test_an_unreadable_element_before_a_takes_rest_taint_abstains(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        # Every element left of the tainted one is readable, so nothing could
+        # have turned it into code — the guard must not fire on these.
+        ('["powershell", "-File", script]', "script"),
+        ('["pwsh", "-File", "build.ps1", target]', "target"),
+        ('["cmd", "/q", "/d", name]', "name"),
+        # A single-operand runner keeps the narrower immediate-left scoping:
+        # `flag` cannot reach past `x`.
+        ('["bash", flag, "x.sh", arg]', "arg"),
+        ('["python", opt, "x.py", arg]', "arg"),
+    ],
+)
+def test_the_takes_rest_widening_does_not_reach_readable_argv(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_SAFE
