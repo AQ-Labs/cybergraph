@@ -460,6 +460,134 @@ def test_try_body_opaque_assignment_reaches_finally_call():
     assert "q" in state.tainted
 
 
+# --- Fix round 3 regressions -------------------------------------------------
+
+
+def test_handler_sees_body_prefix_before_a_strengthening_that_never_ran():
+    """N1: a handler is reachable from ANY prefix of the body, not just its end."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT * FROM t WHERE id=" + uid\n'
+        "    try:\n"
+        "        validate(q)\n"
+        '        q = "SELECT 1"\n'
+        "    except Exception:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_handler_sees_intermediate_composition_the_body_later_overwrites():
+    """N1: weakest(entry, post) is not enough — the danger only exists in between."""
+    src = (
+        "def f(uid):\n"
+        "    try:\n"
+        '        q = f"SELECT {uid}"\n'
+        '        q = "SELECT 1"\n'
+        "    except Exception:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_finally_sees_body_prefix_before_a_strengthening_that_never_ran():
+    """N1: a bare try/finally still needs body_any — finally runs on an uncaught raise too."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT * FROM t WHERE id=" + uid\n'
+        "    try:\n"
+        "        validate(q)\n"
+        '        q = "SELECT 1"\n'
+        "    finally:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_finally_sees_intermediate_composition_the_body_later_overwrites():
+    """N1: same as above, with finally instead of except."""
+    src = (
+        "def f(uid):\n"
+        "    try:\n"
+        '        q = f"SELECT {uid}"\n'
+        '        q = "SELECT 1"\n'
+        "    finally:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_handler_sees_a_raw_parameter_the_body_overwrites():
+    """N1: taint reachable at any body prefix must still be visible at the handler."""
+    src = (
+        "def f(uid):\n"
+        "    q = uid\n"
+        "    try:\n"
+        '        q = "SELECT 1"\n'
+        "    except Exception:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert "q" in state.tainted
+
+
+def test_else_after_literal_ending_body_stays_literal():
+    """N1 must not regress: else only runs on normal completion, from the body's real end."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        "        pass\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    else:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+def test_finally_overwrite_with_literal_before_call_stays_literal():
+    """N1 must not regress: finally's own deterministic reassignment still wins locally."""
+    src = (
+        "def f(uid):\n"
+        "    try:\n"
+        "        q = build(uid)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    finally:\n"
+        '        q = "SELECT 1"\n'
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+def test_match_capture_does_not_strip_taint_from_a_sibling_case():
+    """N2: a capture bound into the shared state must not pop an unrelated name's taint."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT * FROM t WHERE id=" + uid\n'
+        '    payload = "const"\n'
+        "    match payload:\n"
+        "        case 1:\n"
+        "            cursor.execute(q)\n"
+        "        case [q]:\n"
+        "            pass\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
 def test_match_case_does_not_leak_into_sibling_case():
     """C1 must still hold for match: sibling cases are alternatives, not successors."""
     src = (

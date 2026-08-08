@@ -235,36 +235,12 @@ def _apply_effect(
                 _bind_target_opaque(item.optional_vars, item.context_expr, bindings, tainted)
         _walk_body(statement.body, bindings, tainted, states)
     elif isinstance(statement, _TRY_TYPES):
-        # The body always runs; its effects flow to everything after it.
-        _walk_body(statement.body, bindings, tainted, states)
-        for handler in statement.handlers:
-            if handler.name:
-                bindings[handler.name] = OPAQUE
-                tainted.pop(handler.name, None)
-        # Handlers and else are alternatives to each other, but both run
-        # AFTER the body, so they start from the body's post state. Treating
-        # a handler as seeing the body's *complete* post state is a
-        # deliberate over-approximation: an exception can fire partway
-        # through the body, and assuming it completed is the conservative
-        # direction.
-        _merge_branches(
-            [*(handler.body for handler in statement.handlers), statement.orelse],
-            bindings,
-            tainted,
-            states,
-        )
-        # finally always runs, after everything above.
+        _apply_try_body_and_handlers(statement, bindings, tainted, states)
+        # finally always runs last, on whichever path (body-only or a
+        # handler) was actually taken.
         _walk_body(statement.finalbody, bindings, tainted, states)
     elif isinstance(statement, ast.Match):
-        for case in statement.cases:
-            for name in _match_capture_names(case.pattern):
-                bindings[name] = OPAQUE
-                source = _tainted_source(statement.subject, tainted)
-                if source:
-                    tainted[name] = source
-                else:
-                    tainted.pop(name, None)
-        _merge_branches([case.body for case in statement.cases], bindings, tainted, states)
+        _apply_match_cases(statement, bindings, tainted, states)
     elif isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         pass  # nested definitions have their own scope
     else:
@@ -332,6 +308,43 @@ def _match_capture_names(pattern: ast.pattern) -> list[str]:
         elif isinstance(node, ast.MatchMapping) and node.rest:
             names.append(node.rest)
     return names
+
+
+def _apply_match_cases(
+    statement: ast.Match,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+    states: dict[int, CallState],
+) -> None:
+    """Walk each case from the shared entry state, binding that case's own captures.
+
+    Capture names must be scoped to the case that binds them. Binding a
+    capture into the *shared* pre-merge state (as an earlier revision did)
+    means a sibling case that never mentions that name would still have it
+    rebound in its branch — worse, `tainted.pop(name, None)` on a clean
+    subject would strip taint from a name the sibling case never touches at
+    all. Each case here starts from its own copy of the entry state, applies
+    only its own captures, walks its own body, and only then is merged back
+    weakest-wins.
+    """
+    entry_bindings = dict(bindings)
+    entry_tainted = dict(tainted)
+    subject_source = _tainted_source(statement.subject, tainted)
+    for case in statement.cases:
+        if not case.body:
+            continue
+        branch_bindings = dict(entry_bindings)
+        branch_tainted = dict(entry_tainted)
+        for name in _match_capture_names(case.pattern):
+            branch_bindings[name] = OPAQUE
+            if subject_source:
+                branch_tainted[name] = subject_source
+            else:
+                branch_tainted.pop(name, None)
+        _walk_body(case.body, branch_bindings, branch_tainted, states)
+        for name, value_class in branch_bindings.items():
+            bindings[name] = weakest(bindings.get(name, value_class), value_class)
+        tainted.update(branch_tainted)
 
 
 def _run_loop_to_fixpoint(
@@ -433,6 +446,85 @@ def _collect_all_assigned_names(node: ast.AST, names: set[str]) -> None:
         elif isinstance(child, ast.MatchMapping) and child.rest:
             names.add(child.rest)
         _collect_all_assigned_names(child, names)
+
+
+def _apply_try_body_and_handlers(
+    statement: ast.Try | ast.TryStar,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+    states: dict[int, CallState],
+) -> None:
+    """Walk a try body, then its handlers and ``else``, in real try control flow.
+
+    Unlike ``if``/``match`` arms, a ``try`` body always runs, and its handlers
+    and ``else`` are *successors* of it, not alternatives to it — that part of
+    a previous revision was correct. What that revision got wrong: a handler
+    is reachable not just from the body's complete post-state, but from
+    *any point partway through the body*, wherever it happened to raise. A
+    binding the body only strengthens right before the point that actually
+    raises must still look strengthened at the handler; a value the body
+    later overwrites with something safer-looking must still look dangerous
+    at the handler if it was ever dangerous along the way.
+
+    ``body_any`` accumulates exactly that: starting from the pre-try state,
+    it is merged weakest-wins (bindings) and unioned (taint) against the live
+    state after *every* statement of the body, so it ends up representing
+    "reachable at some prefix of the body" rather than "true only at the
+    end". Handlers start from a copy of ``body_any``. ``else`` runs only on
+    normal completion, so it starts from the body's actual post-state
+    (``bindings``/``tainted`` after the walk) exactly as before.
+
+    A bare ``try``/``finally`` with no handler still needs ``body_any``: an
+    uncaught exception doesn't stop ``finally`` from running, it only stops
+    execution from continuing to whatever follows the whole statement. So
+    ``body_any`` (refined by handler bodies when there are any) always feeds
+    into the merge below, and the caller always hands the merged result to
+    ``finalbody`` — the only difference with no handler is that there's no
+    handler body to additionally walk.
+    """
+    body_any_bindings = dict(bindings)
+    body_any_tainted = dict(tainted)
+
+    for body_statement in statement.body:
+        _snapshot_calls_in(body_statement, bindings, tainted, states)
+        _apply_effect(body_statement, bindings, tainted, states)
+        for name, value_class in bindings.items():
+            body_any_bindings[name] = weakest(body_any_bindings.get(name, value_class), value_class)
+        body_any_tainted.update(tainted)
+
+    # Path A: the body completed normally, optionally followed by `else`.
+    path_a_bindings = dict(bindings)
+    path_a_tainted = dict(tainted)
+    _merge_branches([statement.orelse], path_a_bindings, path_a_tainted, states)
+
+    # Path B: an exception was raised somewhere in the body — reachable from
+    # any prefix, hence `body_any` rather than the body's post-state. If a
+    # handler catches it, each handler is an alternative to the others, but
+    # all start from `body_any`. If there is no handler, `body_any` itself is
+    # path B: the exception isn't caught here, but `finally` still runs on it
+    # before the exception keeps propagating.
+    path_b_bindings = dict(body_any_bindings)
+    path_b_tainted = dict(body_any_tainted)
+    if statement.handlers:
+        for handler in statement.handlers:
+            if handler.name:
+                path_b_bindings[handler.name] = OPAQUE
+                path_b_tainted.pop(handler.name, None)
+        _merge_branches(
+            [handler.body for handler in statement.handlers],
+            path_b_bindings,
+            path_b_tainted,
+            states,
+        )
+
+    # Either path may be the one `finally` sees.
+    for name, value_class in path_b_bindings.items():
+        path_a_bindings[name] = weakest(path_a_bindings.get(name, value_class), value_class)
+    path_a_tainted.update(path_b_tainted)
+    bindings.clear()
+    bindings.update(path_a_bindings)
+    tainted.clear()
+    tainted.update(path_a_tainted)
 
 
 def _merge_branches(
