@@ -214,7 +214,9 @@ def collect_records(repo_root: Path) -> list[EvidenceRecord]:
     finally:
         store.close()
 
-    for path in find_attack_paths(repo_root, limit=50):
+    # Evidence surface: grounded answers must be able to cite a suppressed path
+    # when a reviewer asks about it, so suppressions are not applied here.
+    for path in find_attack_paths(repo_root, limit=50, apply_suppressions=False):
         records.append(
             EvidenceRecord(
                 "attack_path", CATEGORY_SINK,

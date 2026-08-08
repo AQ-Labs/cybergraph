@@ -138,7 +138,9 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
                 "rationale": path.risk.rationale,
             } if path.risk else None,
         }
-        for path in find_attack_paths(repo_root, limit=50)
+        # Exploration surface: the exported document is a graph artifact, so it
+        # keeps suppressed paths for reviewers who need the real code path.
+        for path in find_attack_paths(repo_root, limit=50, apply_suppressions=False)
     ]
     layers = [asdict(layer) for layer in summarize_layers(repo_root)]
     top_risks = [asdict(risk) for risk in collect_top_risks(repo_root, limit=10)]

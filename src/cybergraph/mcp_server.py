@@ -38,7 +38,11 @@ if FastMCP is not None:
     @mcp.tool()
     def explain_attack_path_tool(repo_root: str = ".", max_depth: int = 5) -> dict[str, str]:
         """Explain possible entrypoint-to-sensitive-sink paths."""
-        paths = find_attack_paths(Path(repo_root).resolve(), max_depth=max_depth)
+        # Explanation surface: this tool exists so a reviewer can trace the real
+        # code path, so it reports suppressed paths too.
+        paths = find_attack_paths(
+            Path(repo_root).resolve(), max_depth=max_depth, apply_suppressions=False
+        )
         return {"answer": format_attack_paths(paths)}
 
     @mcp.tool()

@@ -66,7 +66,9 @@ def generate_html_report(
         store.close()
 
     layers = summarize_layers(repo_root)
-    attack_paths = find_attack_paths(repo_root, limit=25)
+    # Exploration surface: the HTML report embeds paths as a graph artifact, so
+    # suppressed paths stay visible for reviewers inspecting the real code path.
+    attack_paths = find_attack_paths(repo_root, limit=25, apply_suppressions=False)
     graph_data = build_graph_data(repo_root, max_nodes=max_nodes)
     if with_source:
         from cybergraph.report_source import attach_source_snippets
