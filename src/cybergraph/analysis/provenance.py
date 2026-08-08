@@ -107,21 +107,127 @@ def classify_expr(node: ast.AST | None, bindings: dict[str, str]) -> str:
     return OPAQUE
 
 
+# Objects that *hold* the user's data. Anything read out of one is a source,
+# whatever the member is called — ``request.args``, ``request.GET``,
+# ``req.query_params``, ``self.request.body``. A trailing segment is required:
+# the object itself, *called*, is an outbound HTTP request
+# (``session.request("GET", url)``), not an inbound one.
+_INPUT_OBJECTS = frozenset({"request", "req", "webhook"})
+
+# Input that *is* the value rather than a container of it, recognised wherever
+# it appears in a chain: ``sys.argv``, and ``argv[1]`` after ``from sys import
+# argv``.
+_INPUT_VALUES = frozenset({"argv"})
+
+# Qualifiers a source *factory* may carry, so that ``fastapi.Query(...)`` reads
+# as a declaration of user input while ``session.query(...)`` — an ORM query
+# builder that happens to share the word — does not.
+_SOURCE_MODULES = frozenset(
+    {
+        "flask", "fastapi", "django", "starlette", "quart", "sanic", "bottle",
+        "tornado", "falcon", "pyramid", "webob", "werkzeug",
+    }
+)
+
+
+def _name_segments(node: ast.AST) -> tuple[str, ...] | None:
+    """The dotted path an expression is rooted in, lowercased, or ``None``.
+
+    ``("request", "args", "get")`` for a call to ``request.args.get``,
+    ``("request", "files")`` for a subscript of ``request.files``. Anything
+    that is not a name, attribute, call or subscript — a constant, an operator
+    — is rooted in no name and answers ``None``, which is what keeps the
+    literal text of ``"select * from t where body = 1"`` from reading as a
+    request.
+
+    Segments, not one joined string: the join is what let a *substring* of a
+    member name pass for the member itself.
+    """
+    if isinstance(node, ast.Name):
+        return (node.id.lower(),)
+    if isinstance(node, ast.Attribute):
+        base = _name_segments(node.value)
+        return (*base, node.attr.lower()) if base is not None else None
+    if isinstance(node, ast.Call):
+        return _name_segments(node.func)
+    if isinstance(node, ast.Subscript):
+        return _name_segments(node.value)
+    return None
+
+
+def _is_source_chain(node: ast.AST) -> bool:
+    """Does this expression *name* a read of user input, structurally?
+
+    Anchored on the shape of the expression and the identity of each accessed
+    member, never on whether a keyword occurs somewhere in the rendered text.
+    Substring matching is why ``cfg.input_dir``, ``self.query`` and
+    ``session.cookie_jar`` were user input: ordinary members whose names happen
+    to *contain* a source word. Three anchors replace it:
+
+    * a member read out of a request-like object (``request.args.get(f)``,
+      ``flask.request.json``, ``self.request.body``, ``req.query_params``);
+    * an input value named exactly (``sys.argv``, ``argv[1]``);
+    * a call to a source factory — the builtin ``input()``, or a framework
+      declaration such as ``Query(...)`` / ``fastapi.Body(...)`` — where the
+      *callee's own last segment* is a source keyword and its qualifier is
+      absent or a web framework.
+
+    The polarity is the inverse of the sink registry's. This set is consulted
+    to prove **danger**, so a source missing from it costs detection: a shape
+    nobody thought of fails silent, not loud. That argues for keeping the
+    anchors as wide as they can be without matching arbitrary member names —
+    hence "any member of a request object" rather than an allowlist of member
+    names, and hence ``req`` alongside ``request``. What is deliberately given
+    up is the member-name-only source: ``self.request_body``, ``cfg.query`` and
+    ``o.params`` no longer introduce taint on a receiver this module cannot
+    recognise, because there is nothing structural to tell them apart from the
+    false positives above.
+    """
+    segments = _name_segments(node)
+    if segments is None:
+        return False
+    last = len(segments) - 1
+    for index, segment in enumerate(segments):
+        if segment in _INPUT_VALUES:
+            return True
+        if segment in _INPUT_OBJECTS and index < last:
+            return True
+    if isinstance(node, ast.Call) and segments[last] in SOURCE_KEYWORDS:
+        return last == 0 or segments[last - 1] in _SOURCE_MODULES
+    return False
+
+
 def reads_user_input(node: ast.AST | None) -> bool:
     """Does this expression read anything the user controls?
 
-    The test is a substring scan of the unparsed text against
-    ``SOURCE_KEYWORDS``, deliberately unchanged from the one
-    ``analysis.python`` applied to assignment right-hand sides before
-    introduction moved here. It is consulted to **introduce** taint, so a
-    keyword missing from the set costs detection and never correctness — and
-    reusing the identical rule means widening *where* taint is introduced
-    cannot quietly narrow *what* introduces it.
+    Consulted to **introduce** taint at a binding, in every binding form this
+    module understands — assignment, ``for`` target, walrus, ``+=``,
+    comprehension generator, ``with ... as``. It asks the same structural
+    question as :func:`user_input_nodes` of every sub-expression, so widening
+    *where* taint is introduced still cannot quietly narrow *what* introduces
+    it.
+
+    It was a substring scan of the unparsed text, which read
+    ``for v in ["body.txt"]`` as a request because the string literal contains
+    ``body``. Text carries no structure, so the scan could not tell a member
+    named ``input_path`` from a read of user input, nor a constant from either.
+
+    One deliberate difference from :func:`user_input_nodes`: a bare ``ast.Name``
+    counts here when it is *exactly* a request object. ``r = request`` binds
+    user data, and the flow-sensitive map cannot say so because ``request`` is
+    a module global it never bound. At a sink argument that case is already
+    answered by the map, which is why the exclusion holds there.
     """
     if node is None:
         return False
-    text = ast.unparse(node).lower()
-    return any(keyword in text for keyword in SOURCE_KEYWORDS)
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            if child.id.lower() in _INPUT_OBJECTS | _INPUT_VALUES:
+                return True
+            continue
+        if _is_source_chain(child):
+            return True
+    return False
 
 
 def user_input_nodes(node: ast.AST | None) -> list[ast.AST]:
@@ -129,57 +235,34 @@ def user_input_nodes(node: ast.AST | None) -> list[ast.AST]:
 
     ``reads_user_input`` answers "somewhere in here", which is all a binding
     needs. Deciding whether a *particular* read sits inside a confining call
-    needs the read itself, and a whole-subtree text scan cannot supply it:
-    every ancestor of ``request.args.get(f)`` also contains that text, so
+    needs the read itself, and a whole-subtree scan cannot supply it: every
+    ancestor of ``request.args.get(f)`` also encloses it, so
     ``os.path.basename(request.args.get(f))`` would report an unconfined read
     at the ``basename`` call and at the enclosing ``+`` as well.
 
-    So a node counts here only when the *name chain it is rooted in* names a
-    source: ``request.args.get(f)`` and ``request.files["f"]`` do,
-    ``os.path.basename(...)`` and ``"/data/" + ...`` do not, whatever text they
-    enclose. Used only at sink arguments, where nothing was recognised at all
-    before, so it can only widen what is reported.
+    So a node counts here only when the name chain it is rooted in is itself a
+    source by :func:`_is_source_chain`: ``request.args.get(f)`` and
+    ``request.files["f"]`` are, ``os.path.basename(...)`` and ``"/data/" + ...``
+    are not, whatever they enclose.
 
-    A bare ``ast.Name`` is excluded, and that exclusion is load-bearing rather
-    than cosmetic. Whether a *local* holds user data is precisely what the
-    flow-sensitive taint map answers, and answering it a second time from the
-    variable's spelling contradicts it: ``query`` is in ``SOURCE_KEYWORDS``, so
-    counting the name alone made ``query = "select " + allowlisted; execute(query)``
-    a **high** finding — measured, not hypothesised. What is left is the case
-    the map genuinely cannot see, a read of an external object written out
-    where it is used and bound to nothing.
+    A bare ``ast.Name`` is excluded. Whether a *local* holds user data is
+    precisely what the flow-sensitive taint map answers, and answering it a
+    second time from the variable's spelling contradicts it: ``query`` is in
+    ``SOURCE_KEYWORDS``, so counting the name alone made
+    ``query = "select " + allowlisted; execute(query)`` a **high** finding —
+    measured, not hypothesised. Anchoring now excludes that case on its own, so
+    the exclusion's remaining job is narrower and worth naming: it stops a plain
+    parameter spelled ``argv`` from being a source by its name alone. What is
+    left is the case the map genuinely cannot see, a read of an external object
+    written out where it is used and bound to nothing.
     """
     if node is None:
         return []
-    found: list[ast.AST] = []
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name):
-            continue
-        chain = _name_chain(child)
-        if chain is not None and any(keyword in chain for keyword in SOURCE_KEYWORDS):
-            found.append(child)
-    return found
-
-
-def _name_chain(node: ast.AST) -> str | None:
-    """The dotted text an expression is rooted in, lowercased, or ``None``.
-
-    ``request.args.get`` for a call to it, ``request.files`` for a subscript of
-    it. Anything that is not a name, attribute, call or subscript — a constant,
-    an operator — is rooted in no name and answers ``None``, which is what
-    keeps the literal text of ``"select * from t where body = 1"`` from reading
-    as a request.
-    """
-    if isinstance(node, ast.Name):
-        return node.id.lower()
-    if isinstance(node, ast.Attribute):
-        base = _name_chain(node.value)
-        return f"{base}.{node.attr.lower()}" if base is not None else None
-    if isinstance(node, ast.Call):
-        return _name_chain(node.func)
-    if isinstance(node, ast.Subscript):
-        return _name_chain(node.value)
-    return None
+    return [
+        child
+        for child in ast.walk(node)
+        if not isinstance(child, ast.Name) and _is_source_chain(child)
+    ]
 
 
 @dataclass(frozen=True)
