@@ -1,0 +1,196 @@
+{
+  "summary": {
+    "cases": 11,
+    "tp": 9,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "cases": [
+    {
+      "name": "go_http_cmdi",
+      "language": "go",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 7,
+      "edges": 8,
+      "build_seconds": 0.0419,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "main.go::route:/ping:14 -> main.go::runPing -> exec.Command"
+      ]
+    },
+    {
+      "name": "go_http_pathtrav",
+      "language": "go",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 7,
+      "edges": 8,
+      "build_seconds": 0.0428,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "main.go::route:/file:14 -> main.go::readFile -> os.Open"
+      ]
+    },
+    {
+      "name": "go_http_safe",
+      "language": "go",
+      "vulnerable": false,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 0,
+      "nodes": 5,
+      "edges": 4,
+      "build_seconds": 0.049,
+      "db_bytes": 69632,
+      "detected_paths": []
+    },
+    {
+      "name": "go_http_sqli",
+      "language": "go",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 9,
+      "edges": 10,
+      "build_seconds": 0.044,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "main.go::route:/users:16 -> main.go::listUsers -> db.Query"
+      ]
+    },
+    {
+      "name": "java_spring_sqli",
+      "language": "java",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 6,
+      "edges": 9,
+      "build_seconds": 0.0437,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "UserController.java::route:/users:8 -> UserController.java::listUsers -> statement.executeQuery"
+      ]
+    },
+    {
+      "name": "py_django_sqli",
+      "language": "python",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 6,
+      "edges": 9,
+      "build_seconds": 0.0499,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "urls.py::route:users/:6 -> views.py::list_users -> User.objects.raw"
+      ]
+    },
+    {
+      "name": "py_fastapi_cmdi",
+      "language": "python",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 0,
+      "nodes": 4,
+      "edges": 11,
+      "build_seconds": 0.041,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "app.py::ping -> app.py::run_ping -> subprocess.run"
+      ]
+    },
+    {
+      "name": "py_fastapi_pathtrav",
+      "language": "python",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 0,
+      "nodes": 4,
+      "edges": 11,
+      "build_seconds": 0.0438,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "app.py::get_file -> app.py::read_file -> open"
+      ]
+    },
+    {
+      "name": "py_fastapi_safe",
+      "language": "python",
+      "vulnerable": false,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 0,
+      "nodes": 6,
+      "edges": 12,
+      "build_seconds": 0.0536,
+      "db_bytes": 69632,
+      "detected_paths": []
+    },
+    {
+      "name": "py_fastapi_sqli",
+      "language": "python",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 0,
+      "nodes": 5,
+      "edges": 11,
+      "build_seconds": 0.0453,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "app.py::list_users -> app.py::raw_sql -> db.execute"
+      ]
+    },
+    {
+      "name": "py_fastapi_tainted_sqli",
+      "language": "python",
+      "vulnerable": true,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "matched": true,
+      "findings": 1,
+      "nodes": 4,
+      "edges": 8,
+      "build_seconds": 0.0461,
+      "db_bytes": 69632,
+      "detected_paths": [
+        "app.py::search -> db.execute"
+      ]
+    }
+  ]
+}

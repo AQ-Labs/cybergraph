@@ -3,6 +3,12 @@
 A small, reproducible benchmark that measures how well CyberGraph detects
 **entrypoint → sink reachability** across languages, plus build performance.
 
+Reachability is only half the question. Given that CyberGraph got from an
+entrypoint to a sink, *does it say the right thing about the call site?* That is
+measured separately by the labelled precision corpus in
+[`precision/`](precision/README.md), which gates precision, recall and
+abstention **per vulnerability class**.
+
 ## Run it
 
 ```bash
@@ -41,13 +47,15 @@ Each case is a self-contained app with ground truth in `expected.json`:
 ## Reference results
 
 Run `python benchmark/run_eval.py` after analyzer changes to refresh
-`benchmark/results.json`. This corpus is intentionally small and regression
-oriented: it is meant to guard reachability behavior, not to claim broad
-real-world coverage.
+`benchmark/results.json`, **which is committed**. A published number that cannot
+be checked against a committed artifact is the failure this project exists to
+avoid, and the figure below had already drifted from the artifact once. This
+corpus is intentionally small and regression oriented: it is meant to guard
+reachability behavior, not to claim broad real-world coverage.
 
 ```text
-Aggregate over 11 cases: precision=0.9 recall=1.0 f1=0.947 (tp=9 fp=1 fn=0)
-Performance: ~0.44s total build, ~440 KiB total graph db
+Aggregate over 11 cases: precision=1.0 recall=1.0 f1=1.0 (tp=9 fp=0 fn=0)
+Performance: ~0.50s total build, ~748 KiB total graph db
 ```
 
 - **Recall target 1.0**: every seeded vulnerability path should be found,
