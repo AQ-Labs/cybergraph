@@ -2,7 +2,14 @@ import ast
 
 import pytest
 
-from cybergraph.analysis.provenance import COMPOSED, LITERAL, OPAQUE, classify_expr, weakest
+from cybergraph.analysis.provenance import (
+    COMPOSED,
+    LITERAL,
+    OPAQUE,
+    classify_expr,
+    snapshot_call_sites,
+    weakest,
+)
 
 
 def _expr(src: str) -> ast.AST:
@@ -112,3 +119,100 @@ def test_weakest_composed_and_opaque():
 def test_weakest_all_three():
     """weakest() with all three classes returns OPAQUE."""
     assert weakest(LITERAL, COMPOSED, OPAQUE) == OPAQUE
+
+
+def _state_at(src: str, callee: str = "execute"):
+    fn = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)][0]
+    tainted = {a.arg: f"input:{a.arg}" for a in fn.args.args}
+    states = snapshot_call_sites(fn, tainted)
+    call = next(
+        n for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(callee)
+    )
+    return states[id(call)], call
+
+
+def test_later_assignment_does_not_taint_an_earlier_call():
+    """The rev.2 bug: state from the future reached back to an earlier call site."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    cursor.execute(q)\n"
+        '    q = f"SELECT {uid}"\n'
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+def test_earlier_assignment_does_reach_a_later_call():
+    src = (
+        "def f(uid):\n"
+        '    q = f"SELECT {uid}"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_augmented_assignment_composes():
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        '    q += " WHERE id = " + uid\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_branch_merge_takes_the_weakest():
+    src = (
+        "def f(uid, flag):\n"
+        '    q = "SELECT 1"\n'
+        "    if flag:\n"
+        '        q = f"SELECT {uid}"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_call_inside_a_branch_sees_branch_local_state():
+    src = (
+        "def f(uid, flag):\n"
+        '    q = "SELECT 1"\n'
+        "    if flag:\n"
+        '        q = f"SELECT {uid}"\n'
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_parameter_is_opaque_and_tainted():
+    state, call = _state_at("def f(q):\n    cursor.execute(q)\n")
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_loop_carried_composition_is_visible():
+    """A value composed on one iteration reaches the call on the next."""
+    src = (
+        "def f(uid, rows):\n"
+        '    q = "SELECT 1"\n'
+        "    for row in rows:\n"
+        "        cursor.execute(q)\n"
+        '        q = f"SELECT {uid}"\n'
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_taint_is_also_call_site_sensitive():
+    src = (
+        "def f(uid):\n"
+        "    cursor.execute(safe_value)\n"
+        "    safe_value = uid\n"
+    )
+    state, call = _state_at(src)
+    assert "safe_value" not in state.tainted
