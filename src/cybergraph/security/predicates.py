@@ -143,6 +143,22 @@ _PYTHON = _Runner(
     }),
 )
 
+# The flag tokens that make a shell or interpreter *visibly* present even when
+# its name cannot be read — a canonical inline-code flag. Deliberately an exact,
+# short list rather than a reuse of the per-runner matchers above: those are
+# permissive in ways that only make sense once the runner is known (`perl`'s
+# "any single-dash flag whose letters include e" classifies `-resize`, `-type`,
+# `-name` and `-delete`; the shells' `c` rule classifies `-cf` and
+# `-recursive`), and reusing them here would pull ordinary commands into
+# abstention. Used only by `_hides_a_runner_before_a_code_flag`.
+_VISIBLE_CODE_FLAGS = frozenset({
+    "-c", "-lc", "-xc", "-ic", "-eic", "-lxc", "-cx", "-ci",
+    "-e", "-E", "-m", "-M", "-r", "-p", "-B", "-R", "-F",
+    "--eval", "--command", "--print", "--require", "--rcfile", "--init-file",
+})
+# The Windows spellings, compared case-insensitively.
+_VISIBLE_CODE_FLAGS_FOLDED = frozenset({"/c", "/k", "-command", "-encodedcommand"})
+
 _CODE_RUNNERS: dict[str, _Runner] = {
     **{name: _POSIX_SHELL for name in (
         "sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "csh", "tcsh",
@@ -337,6 +353,8 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
 
     if _names_a_runner(elements[1:]):
         return VERDICT_UNKNOWN  # (7) a runner downstream: the wrapper rule
+    if _hides_a_runner_before_a_code_flag(elements):
+        return VERDICT_UNKNOWN  # (7b) a runner downstream we could not name
     if argv0 is None or starred:
         return VERDICT_UNKNOWN  # (9)
     return VERDICT_SAFE  # (8) names no runner anywhere — see the docstring
@@ -401,6 +419,39 @@ def _names_a_runner(elements: list[ast.expr]) -> bool:
         text = _constant_str(element)
         if text is not None and _program_name(text) in _CODE_RUNNERS:
             return True
+    return False
+
+
+def _hides_a_runner_before_a_code_flag(elements: list[ast.expr]) -> bool:
+    """Is an unreadable program slot followed by a visible inline-code flag?
+
+    Rule 7 finds the shell by *name*, so on its own it misses
+    ``["sudo", "-u", "www", shell_var, "-c", cmd]``, where the program is a
+    variable — yet the ``-c`` with a tainted operand just after it says a shell
+    is there as plainly as the name would have. The element being unreadable is
+    the only reason rule 7 came up empty, so this closes that gap rather than
+    widening the rule.
+
+    *Later index* is what keeps it narrow, and is the whole difference between
+    this and reversing the scope decision. The out-of-scope family — ``sed -e
+    <x>``, ``mysql -e <x>``, ``git -c <x> fetch``, ``ssh myhost <x>``, ``awk -f
+    <x>`` — puts the unreadable element last, or leaves only non-flags after it,
+    so the flag that would incriminate it is always *earlier*. None of those
+    move. Firing on a code flag anywhere in argv instead would drag all of them
+    from safe to abstaining.
+
+    A ``Starred`` element is unreadable by the same token: ``["sudo", *opts,
+    "-c", cmd]`` abstains, since the expansion could be the shell's name.
+    """
+    for index in range(1, len(elements)):
+        if _constant_str(elements[index]) is not None:
+            continue  # readable, so rule 7 already had its chance at this one
+        for later in elements[index + 1:]:
+            text = _constant_str(later)
+            if text is not None and (
+                text in _VISIBLE_CODE_FLAGS or text.casefold() in _VISIBLE_CODE_FLAGS_FOLDED
+            ):
+                return True
     return False
 
 

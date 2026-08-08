@@ -623,9 +623,11 @@ def test_a_runner_named_downstream_abstains(body):
         # `ssh`'s own operands: a tainted host is `-o` injection and a tainted
         # trailing operand is a remote command. Same family, same gap.
         '["ssh", cmd]', '["ssh", "myhost", cmd]',
-        # The sharpest edge of the rule: the downstream program is a *variable*,
-        # so rule 7 cannot see the shell that is plainly there.
-        '["sudo", "-u", "www", sh, "-c", cmd]',
+        # Round 6 removed `["sudo", "-u", "www", sh, "-c", cmd]` from this list.
+        # It was never this family: the shell is *visibly* present there, as a
+        # `-c` with a tainted operand, and only its *name* was unreadable. Rule
+        # 7b now abstains on it — see
+        # `test_an_unreadable_program_before_a_code_flag_abstains`.
     ],
 )
 def test_argument_and_config_injection_is_out_of_scope(body):
@@ -677,4 +679,74 @@ def test_a_position_that_cannot_be_pinned_down_abstains(body, params):
     ],
 )
 def test_a_command_naming_no_runner_is_safe(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
+
+
+# --- Fix round 6 ---
+
+# Rule 7b. Rule 7 finds a downstream runner by *name*, so it missed the case
+# where the program element is a variable while the shell is visibly present
+# anyway â€” a `-c` with a tainted operand right after it. The element being
+# unreadable was the only reason rule 7 came up empty, so this closes that gap
+# rather than widening the rule.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ('["sudo", "-u", "www", shell_var, "-c", cmd]', "shell_var, cmd"),
+        ('["sudo", shell_var, "-c", cmd]', "shell_var, cmd"),
+        ('["env", "FOO=1", interp, "-c", cmd]', "interp, cmd"),
+        ('["timeout", "5", shell_var, "-lc", cmd]', "shell_var, cmd"),
+        ('["nohup", shell_var, "-e", cmd]', "shell_var, cmd"),
+        ('["wrapper", prog, "/c", cmd]', "prog, cmd"),
+        ('["wrapper", prog, "-Command", cmd]', "prog, cmd"),
+        # A `Starred` element is unreadable by the same token: the expansion
+        # could be the shell's name.
+        ('["sudo", *opts, "-c", cmd]', "opts, cmd"),
+    ],
+)
+def test_an_unreadable_program_before_a_code_flag_abstains(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_UNKNOWN
+
+
+# The "later index" condition is the whole reason rule 7b is narrow rather than
+# a reversal of the round-5 scope decision. Every shape below has its unreadable
+# element LAST, or with only non-flags after it, so the flag that would
+# incriminate it is always *earlier* and rule 7b must not fire. These pin the
+# ruled scope boundary: if rule 7 is ever widened to fire on a code flag
+# anywhere in argv, this test fails loudly instead of the boundary moving in
+# silence.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # `-c` at index 1, unreadable element at index 2: the flag is earlier.
+        '["git", "-c", "core.sshCommand=" + cmd, "fetch"]',
+        '["git", "-c", cmd, "fetch"]',
+        '["sed", "-e", cmd]',
+        '["awk", "-f", cmd]',
+        '["mysql", "-e", cmd]',
+        '["psql", "-c", cmd]',
+        '["nc", "-e", cmd]',
+        '["socat", "-e", cmd]',
+        '["vim", "-c", cmd]',
+        # No flag anywhere after the unreadable element.
+        '["ssh", "myhost", cmd]',
+        '["git", "show", cmd]',
+        # Ordinary commands whose own flags happen to sit before a variable, or
+        # after one without being an inline-code flag.
+        '["ping", "-c", "3", cmd]',
+        '["git", "commit", "-m", cmd]',
+        '["mkdir", "-p", cmd]',
+        '["ffmpeg", "-i", cmd, "-y", "out.mp4"]',
+        '["convert", cmd, "-resize", "50%", "out.png"]',
+        '["find", ".", "-name", cmd, "-type", "f"]',
+        '["make", "-C", cmd, "-f", "Makefile"]',
+        '["tar", "-C", cmd, "-xf", "a.tar"]',
+    ],
+)
+def test_rule_7b_does_not_widen_into_the_ruled_scope_boundary(body):
+    """Firing on a code flag *anywhere* would drag all of these to abstaining."""
     assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
