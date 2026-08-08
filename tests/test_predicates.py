@@ -404,6 +404,11 @@ def test_missing_call_state_is_unknown_not_safe(body, callee, params):
         if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(callee)
     )
     sink = lookup_sink(ast.unparse(call.func), "python")
+    # Without this the three cases are indistinguishable — `state is None`
+    # returns before dispatch, so the test would pass with every predicate
+    # deleted, or with `lookup_sink` returning None for all three.
+    assert sink is not None, ast.unparse(call.func)
+    assert sink.vuln_class in {"sql", "command"}
     assert assess_call(sink, call, None) == VERDICT_UNKNOWN
 
 
@@ -632,7 +637,7 @@ def test_a_runner_named_downstream_abstains(body):
 )
 def test_argument_and_config_injection_is_out_of_scope(body):
     """Rule 8. Documented gap, not an oversight — see `_assess_list_argv`."""
-    assert _assess(f"subprocess.run({body})", "run", params="cmd, sh") == VERDICT_SAFE
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
 
 
 @pytest.mark.parametrize(
@@ -1004,3 +1009,72 @@ def test_an_unrecognised_receiver_does_not_grant_confinement(body):
 )
 def test_a_recognised_receiver_still_grants_confinement(body):
     assert _assess(body, "open", params="name") == VERDICT_SAFE
+
+
+# The `deserialize` class had no test of any kind — no `pickle` and no `yaml`
+# case anywhere in this file — so nothing pinned the behaviour of two of the six
+# registered CG-DESERIALIZE sinks. `exec`, `executescript` and `raw` were
+# likewise never exercised.
+
+
+@pytest.mark.parametrize(
+    "body,callee",
+    [
+        ("pickle.loads(blob)", "pickle.loads"),
+        ("pickle.load(blob)", "pickle.load"),
+        ("yaml.load(blob)", "yaml.load"),
+        ("yaml.load(blob, Loader=yaml.SafeLoader)", "yaml.load"),
+        ("pickle.loads(base64.b64decode(blob))", "pickle.loads"),
+        ("pickle.loads(data=blob)", "pickle.loads"),
+    ],
+)
+def test_deserializing_user_data_is_unsafe(body, callee):
+    """Rebuilding objects from user data can run code; there is no safe
+    mechanism to look for, so any tainted argument is unsafe."""
+    assert _assess(body, callee, params="blob") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body,callee",
+    [
+        ('pickle.loads(b"\\x80\\x04.")', "pickle.loads"),
+        ('yaml.load("a: 1")', "yaml.load"),
+    ],
+)
+def test_deserializing_a_constant_is_safe(body, callee):
+    assert _assess(body, callee, params="blob") == VERDICT_SAFE
+
+
+@pytest.mark.parametrize(
+    "body,callee,expected",
+    [
+        ("exec(src)", "exec", VERDICT_UNSAFE),
+        ('exec("pass")', "exec", VERDICT_SAFE),
+        ("exec(compile(src, '<s>', 'exec'))", "exec", VERDICT_UNSAFE),
+        ("cursor.executescript('SELECT 1')", "executescript", VERDICT_SAFE),
+        ("cursor.executescript('SELECT ' + src)", "executescript", VERDICT_UNSAFE),
+        ("cursor.executescript(build(src))", "executescript", VERDICT_UNKNOWN),
+        ("User.objects.raw('SELECT 1')", "raw", VERDICT_SAFE),
+        ("User.objects.raw('SELECT * FROM u WHERE n = %s', [src])", "raw", VERDICT_SAFE),
+        ("User.objects.raw('SELECT * FROM u WHERE n = ' + src)", "raw", VERDICT_UNSAFE),
+    ],
+)
+def test_exec_executescript_and_raw(body, callee, expected):
+    assert _assess(body, callee, params="src") == expected
+
+
+@pytest.mark.parametrize(
+    "body,callee",
+    [
+        # An untainted argument whose construction cannot be seen is unknown,
+        # never safe — the OPAQUE branch of `_assess_any_tainted_argument`, which
+        # produces two of the abstentions the report tabulates.
+        ('eval(compile(SRC, "<s>", "eval"))', "eval"),
+        ("eval(EXPRESSIONS[key])", "eval"),
+        ("exec(load_source())", "exec"),
+        ("yaml.load(TEXT, Loader=yaml.SafeLoader)", "yaml.load"),
+        ("pickle.loads(PAYLOAD)", "pickle.loads"),
+    ],
+)
+def test_an_opaque_untainted_argument_abstains_rather_than_clearing(body, callee):
+    assert _assess(body, callee, params="unused") == VERDICT_UNKNOWN
