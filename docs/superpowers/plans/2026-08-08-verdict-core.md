@@ -1408,6 +1408,16 @@ false-positive rate stays gated.
 resolution it does not have, and never report the figure without the case count
 beside it.
 
+**The same arithmetic applies to the per-class gates, harder.** A class with
+three safe cases can only score a false-positive rate of 0, 0.33, 0.67 or 1.00 —
+so `≤ 0.05` is a **zero-false-positive** gate, not a five-percent one. With one
+safe case (`deserialize`) it is 0 or 1.00. Abstention `≤ 0.15` is a
+zero-abstention gate on the same counts. Print `n` beside every per-class rate
+and say in the README that these thresholds are zero-tolerance at present corpus
+size. Reporting `FP 0.00 ≤ 0.05 ✓` without `n = 3` beside it claims a tolerance
+the corpus cannot express, which is the same species of overclaim as the headline
+benchmark numbers this plan exists to correct.
+
 The third metric is C2. Rev. 2 excluded `-UNVERIFIED` findings from tp/fp — correct, because
 penalising an honest abstention as a false positive pushes the detector toward guessing.
 But a *safe* case that abstains was then counted as a true negative, while operationally it
@@ -1456,8 +1466,19 @@ Required cases — every one must exist:
 | Command unknown | `cmd_string_no_shell` |
 | Path | `path_direct` (unsafe), `path_basename` (safe), `path_safe_join` (safe), `path_constant` (safe), `path_normpath` (unknown) |
 | Deserialize | `pickle_tainted` (unsafe), `yaml_safe_load` (safe) |
+| Template | `template_string_tainted` (unsafe), `template_render_context` (safe), `template_constant` (safe) |
+| Code | `eval_tainted` (unsafe), `exec_tainted` (unsafe), `literal_eval` (safe), `eval_constant` (safe) |
 | Imports | `alias_import` (unsafe), `from_import` (unsafe) |
 | Interprocedural | `cross_function` (unsafe), `sanitized_helper` (safe) |
+
+The `Template` and `Code` rows exist because the gate is **per class** and
+`_assess_template` and `_assess_code` are two of the six predicates. Without them
+those two classes carry no cases, so their false-positive gate silently never
+applies — the same "a corpus containing only cases you already pass measures
+nothing" failure this section warns about, arrived at by omission instead of by
+choosing easy cases. `template_render_context` must pass the tainted value as a
+**context variable** (`render_template("p.html", name=user)`), not as the
+template, since that is the shape the predicate has to distinguish.
 
 `sql_reassigned_after_call` is the flow-sensitivity regression from Task 3.
 `alias_import` and `from_import` are **expected to fail initially** — bare-name resolution
