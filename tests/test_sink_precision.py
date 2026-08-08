@@ -393,3 +393,155 @@ def test_a_local_named_like_a_source_is_not_a_source(tmp_path: Path) -> None:
     _nodes, edges, findings = _analyze(tmp_path, source)
     assert findings == [], [f.rule_id for f in findings]
     assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+# One dot deeper than the bare name above, which is where the same defect
+# survived: the chain *text* contains a source keyword, so the member was read
+# as user input. Every receiver here is an ordinary object — a config, an
+# argparse namespace, `self`, a session — and every member name merely contains
+# a keyword rather than being one. Each is paired below with the framework read
+# it must not be allowed to take down with it.
+LOOKALIKE_MEMBERS = [
+    ("import subprocess\n"
+     "def go(cfg):\n"
+     "    return subprocess.run('ls ' + cfg.input_dir, shell=True)\n"),
+    ("def go(args):\n"
+     "    return open(args.input)\n"),
+    ("class C:\n"
+     "    def go(self):\n"
+     "        return open(self.input_path)\n"),
+    ("class C:\n"
+     "    def go(self):\n"
+     "        return cursor.execute(f'select {self.query}')\n"),
+    ("import os\n"
+     "def go(settings):\n"
+     "    return open(settings.form_dir + '/x')\n"),
+    ("import os\n"
+     "def go(repo):\n"
+     "    return os.system('echo ' + repo.body_text)\n"),
+    ("def go(query_builder):\n"
+     "    return cursor.execute('select ' + query_builder.build())\n"),
+    # An outbound HTTP call, not an inbound request: `request` is the member
+    # being *called*, with nothing read out of it.
+    ("import os\n"
+     "def go(session, url):\n"
+     "    return os.system('echo ' + session.request('GET', url))\n"),
+]
+
+FRAMEWORK_READS = [
+    ("from flask import request\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + request.args.get('u'))\n"),
+    ("from flask import request\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + request.form['u'])\n"),
+    ("from flask import request\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + request.cookies.get('c'))\n"),
+    ("import flask\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + flask.request.args.get('u'))\n"),
+    # Django's spelling, and the receiver reached through `self`.
+    ("def go(request):\n"
+     "    return cursor.execute('select ' + request.GET.get('u'))\n"),
+    ("class H:\n"
+     "    def go(self):\n"
+     "        return cursor.execute('select ' + self.request.body)\n"),
+    ("def go(req):\n"
+     "    return cursor.execute('select ' + req.query_params.get('u'))\n"),
+    # Not a web request at all, and both must survive the anchoring.
+    ("import os, sys\n"
+     "def go():\n"
+     "    return os.system('echo ' + sys.argv[1])\n"),
+    ("import os\n"
+     "def go():\n"
+     "    return os.system('echo ' + input('cmd: '))\n"),
+]
+
+
+@pytest.mark.parametrize("source", LOOKALIKE_MEMBERS)
+def test_a_member_named_like_a_source_is_not_a_source(tmp_path: Path, source: str) -> None:
+    """A dotted chain must *name* a source, not merely contain one.
+
+    The bare-name exclusion above stopped at one segment, so anything one dot
+    deeper — `cfg.input_dir`, `self.query`, `session.cookie_jar` — was still
+    matched by substring and became a high or critical finding on ordinary
+    configuration objects. This is the same substring defect the sink registry
+    was rewritten to remove, on the source side.
+    """
+    _nodes, edges, findings = _analyze(tmp_path, source)
+    assert [f.rule_id for f in findings] == [], [f.rule_id for f in findings]
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+@pytest.mark.parametrize("source", FRAMEWORK_READS)
+def test_a_framework_read_is_still_a_source(tmp_path: Path, source: str) -> None:
+    """The other half of the anchoring, asserted in the same breath.
+
+    Narrowing a source rule fails *open* — a source dropped is a vulnerability
+    missed, and nothing in the corpus or the gate would say so. These are the
+    reads the anchoring exists to keep, so they are pinned beside the lookalikes
+    rather than in a separate file where the two can drift apart.
+    """
+    _nodes, _edges, findings = _analyze(tmp_path, source)
+    assert findings != [], "framework read stopped being a source"
+    assert all(not f.rule_id.endswith("-UNVERIFIED") for f in findings), (
+        [f.rule_id for f in findings]
+    )
+
+
+def test_a_string_literal_is_not_a_source_in_any_binding_form(tmp_path: Path) -> None:
+    """The introduction side scanned unparsed *text*, so a literal was a source.
+
+    `["body.txt"]` contains `body`, so binding `v` from it introduced taint and
+    the path sink below reported high. The same scan is what makes `for`,
+    walrus, `+=` and `with ... as` see a real request read, so it could not
+    simply be deleted — it had to become structural.
+    """
+    source = (
+        "def report():\n"
+        "    for v in ['body.txt']:\n"
+        "        open('/data/' + v)\n"
+    )
+    _nodes, edges, findings = _analyze(tmp_path, source)
+    assert findings == [], [f.rule_id for f in findings]
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+def test_a_bare_name_at_a_sink_argument_is_left_to_the_taint_map(tmp_path: Path) -> None:
+    """The bare-name exclusion, pinned at the one name anchoring cannot subsume.
+
+    Once a chain has to *name* a source, `query` and `params` are excluded by
+    the anchoring itself, so the case the original exclusion defended no longer
+    reaches it. What is left is a name that **is** an input value — `argv` —
+    where the exclusion is the only thing keeping a plain parameter from being
+    a critical finding by its spelling. Whether a local or a parameter carries
+    user data is the flow-sensitive map's answer, and a second answer read off
+    the variable's name can only contradict it.
+    """
+    source = (
+        "import os\n"
+        "def report(argv):\n"
+        "    return os.system(argv)\n"
+    )
+    _nodes, edges, findings = _analyze(tmp_path, source)
+    assert findings == [], [f.rule_id for f in findings]
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+def test_a_request_bound_to_a_local_still_introduces_taint(tmp_path: Path) -> None:
+    """`r = request` is the one place a bare name must count as a source.
+
+    The taint map cannot answer it — `request` is a module global it never
+    bound — so excluding bare names outright at the *introduction* site would
+    lose the flow. At a sink argument the map does answer it, which is why the
+    exclusion holds there and not here.
+    """
+    source = (
+        "from flask import request\n"
+        "def report():\n"
+        "    r = request\n"
+        "    return cursor.execute('select ' + r.args.get('u'))\n"
+    )
+    _nodes, _edges, findings = _analyze(tmp_path, source)
+    assert [f.rule_id for f in findings] == ["CG-SQL-EXEC"]
