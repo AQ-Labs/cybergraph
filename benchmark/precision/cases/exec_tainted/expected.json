@@ -1,0 +1,15 @@
+{
+  "label": "unsafe",
+  "vuln_class": "code",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 10,
+      "rule": "CG-CODE-EXEC"
+    }
+  ],
+  "abstentions": 0,
+  "note": "Same hazard as eval, different builtin."
+}

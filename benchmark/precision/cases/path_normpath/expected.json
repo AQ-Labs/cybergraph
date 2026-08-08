@@ -1,0 +1,9 @@
+{
+  "label": "unknown",
+  "vuln_class": "path",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 1,
+  "note": "normpath('../../etc/passwd') is still traversal, but the author plainly did something: confinement is not normalisation, and neither is a verdict."
+}

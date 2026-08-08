@@ -1,0 +1,14 @@
+{
+  "label": "unsafe",
+  "vuln_class": "interprocedural",
+  "known_gap": false,
+  "scoring": "attack_paths",
+  "findings": [],
+  "abstentions": 0,
+  "note": "Scored on attack paths, not findings. Findings are intra-procedural and `run_ping`'s parameter carries no taint of its own, so this case yields zero findings while the entrypoint-to-sink path is correct.",
+  "paths": [
+    {
+      "sink": "os.system"
+    }
+  ]
+}

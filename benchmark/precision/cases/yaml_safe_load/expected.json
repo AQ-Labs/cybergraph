@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "deserialize",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "yaml.safe_load is not in the sink registry at all, so no predicate runs here: this case guards the registry, not `_assess_any_tainted_argument`."
+}

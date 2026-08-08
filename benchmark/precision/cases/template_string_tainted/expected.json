@@ -1,0 +1,15 @@
+{
+  "label": "unsafe",
+  "vuln_class": "template",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 10,
+      "rule": "CG-TEMPLATE-INJECT"
+    }
+  ],
+  "abstentions": 0,
+  "note": "A tainted template has no equivalent of a bound parameter."
+}

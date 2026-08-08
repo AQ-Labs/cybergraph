@@ -1,0 +1,10 @@
+{
+  "label": "safe",
+  "vuln_class": "interprocedural",
+  "known_gap": false,
+  "scoring": "attack_paths",
+  "findings": [],
+  "abstentions": 0,
+  "note": "The entrypoint-to-sink path exists as inventory but crosses a sanitiser, so no *unsanitized* path is reported. Scored on attack paths, per the same reasoning as `cross_function`.",
+  "paths": []
+}

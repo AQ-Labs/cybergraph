@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "template",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "Literal template, no context at all."
+}

@@ -1,0 +1,9 @@
+{
+  "label": "unknown",
+  "vuln_class": "command",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 1,
+  "note": "A bare string with shell=False is the executable *name* on POSIX and is parsed differently on Windows: platform-dependent, so not a verdict."
+}

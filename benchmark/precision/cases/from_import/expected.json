@@ -1,0 +1,15 @@
+{
+  "label": "unsafe",
+  "vuln_class": "command",
+  "known_gap": true,
+  "scoring": "findings",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 12,
+      "rule": "CG-CMD-EXEC"
+    }
+  ],
+  "abstentions": 0,
+  "note": "Expected to fail today: `run` is not a bare sink, and nothing links the unqualified name back to `subprocess.run`."
+}

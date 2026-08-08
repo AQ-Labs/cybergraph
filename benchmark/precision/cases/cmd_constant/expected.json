@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "command",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "No user data reaches the command at all."
+}
