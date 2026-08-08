@@ -10,10 +10,13 @@ def test_vulnerable_fastapi_example_builds() -> None:
 
     counts = build_graph(repo)
     answer = answer_question(repo, "routes sql")
+    paths = find_attack_paths(repo)
 
     assert counts["nodes"] >= 5
     assert counts["edges"] >= 4
-    assert "raw_sql" in answer or "CG-SINK-CALL" in answer
+    assert "raw_sql" in answer or "CG-SQL-EXEC" in answer
+    # Interprocedural: the /users route reaches the query through raw_sql.
+    assert any("app.py::raw_sql" in p.nodes for p in paths)
 
 
 def test_vulnerable_go_example_has_connected_path() -> None:

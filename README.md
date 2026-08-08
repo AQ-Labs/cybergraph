@@ -133,16 +133,16 @@ unchanged.
 Suppress accepted findings:
 
 ```python
-def test_fixture():
-    # cybergraph: ignore CG-SINK-CALL accepted test-only query
-    return db.execute("select 1")
+def test_fixture(name):
+    # cybergraph: ignore CG-SQL-EXEC accepted test-only query
+    return db.execute("select * from users where name = '" + name + "'")
 ```
 
 Or configure repository-level suppressions:
 
 ```toml
 [suppressions]
-rules = ["CG-SINK-CALL"]
+rules = ["CG-SQL-EXEC"]
 paths = ["legacy/**"]
 ```
 
