@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from cybergraph.analysis.provenance import snapshot_call_sites
-from cybergraph.graph import Edge, Finding, Node
+from cybergraph.graph import UNVERIFIED_SUFFIX, Edge, Finding, Node
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
     AUTHZ_KEYWORDS,
@@ -409,7 +409,7 @@ def _finding_for(
         return None
     unsafe = assessment == VERDICT_UNSAFE
     return Finding(
-        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}-UNVERIFIED",
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}{UNVERIFIED_SUFFIX}",
         severity=sink.severity if unsafe else SEVERITY_MEDIUM,
         message=(
             f"`{call_name}` {sink.plain}"

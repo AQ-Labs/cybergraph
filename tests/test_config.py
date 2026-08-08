@@ -102,3 +102,36 @@ def test_build_graph_suppresses_configured_finding_rules(tmp_path: Path) -> None
         store.close()
     assert finding_count == 0
     assert sink_edges == 1
+
+
+def test_configured_rule_suppression_covers_the_unverified_variant(tmp_path: Path) -> None:
+    """`rules = ["CG-SQL-EXEC"]` has to cover the abstention on the same rule.
+
+    The `-UNVERIFIED` id is derived from the sink's rule, not a rule of its own,
+    so a repository that accepted the rule and then saw the shape drift into
+    abstention would otherwise get a fresh medium for the same code.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".cybergraph.toml").write_text(
+        "[suppressions]\nrules = ['CG-SQL-EXEC']\n",
+        encoding="utf-8",
+    )
+    # A query built by a helper: reported, but as the derived id at medium.
+    (repo / "app.py").write_text(
+        "@app.get('/u')\ndef handler(uid):\n    return db.execute(build(uid))\n",
+        encoding="utf-8",
+    )
+
+    build_graph(repo)
+
+    store = GraphStore.open_for_repo(repo)
+    try:
+        finding_count = store.conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+        sink_edges = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE kind = 'REACHES_SINK'"
+        ).fetchone()[0]
+    finally:
+        store.close()
+    assert finding_count == 0
+    assert sink_edges == 1

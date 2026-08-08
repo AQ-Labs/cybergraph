@@ -94,3 +94,51 @@ def test_python_analyzer_maps_fastapi_depends_guards(tmp_path: Path) -> None:
     _nodes, edges, _findings = analyze_python_file(app, repo)
 
     assert any(edge.kind == "GUARDS" and edge.target == "require_admin" for edge in edges)
+
+
+# A route whose query the analyser can neither clear nor confirm, so it reports
+# the derived `-UNVERIFIED` id rather than the registry one. Accepting the rule
+# has to cover both, or a repository that suppressed `CG-SQL-EXEC` on a line
+# gets a fresh medium on that same line the moment the shape drifts into
+# abstention.
+UNVERIFIED_ROUTE = (
+    "@app.get('/u')\n"
+    "def handler(uid):\n"
+    "{comment}"
+    "    return db.execute(build(uid))\n"
+)
+
+
+def test_python_analyzer_reports_the_unverified_rule_when_it_cannot_confirm(
+    tmp_path: Path,
+) -> None:
+    _nodes, _edges, findings = _analyze(tmp_path, UNVERIFIED_ROUTE.format(comment=""))
+
+    assert [finding.rule_id for finding in findings] == ["CG-SQL-EXEC-UNVERIFIED"]
+
+
+def test_inline_suppression_of_a_rule_covers_its_unverified_variant(tmp_path: Path) -> None:
+    _nodes, edges, findings = _analyze(
+        tmp_path,
+        UNVERIFIED_ROUTE.format(comment="    # cybergraph: ignore CG-SQL-EXEC accepted\n"),
+    )
+
+    assert findings == [], [finding.rule_id for finding in findings]
+    assert any(edge.kind == "REACHES_SINK" for edge in edges)
+
+
+def test_inline_suppression_of_the_unverified_variant_does_not_hide_the_confirmed_rule(
+    tmp_path: Path,
+) -> None:
+    """The relation is one-way on purpose.
+
+    Accepting an abstention is a statement about a value the analyser could not
+    read. It must not carry over to the day it *can* read it and finds the
+    injection.
+    """
+    _nodes, _edges, findings = _analyze(
+        tmp_path,
+        UNSAFE_ROUTE.format(comment="    # cybergraph: ignore CG-SQL-EXEC-UNVERIFIED\n"),
+    )
+
+    assert [finding.rule_id for finding in findings] == ["CG-SQL-EXEC"]

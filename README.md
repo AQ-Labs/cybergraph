@@ -146,6 +146,8 @@ rules = ["CG-SQL-EXEC"]
 paths = ["legacy/**"]
 ```
 
+Naming a rule also covers the `-UNVERIFIED` variant CyberGraph reports when it can see a value reach a sink but cannot confirm how the value was built — accepting `CG-SQL-EXEC` accepts `CG-SQL-EXEC-UNVERIFIED` on the same line or in the same repository. The reverse is deliberately not true: naming `CG-SQL-EXEC-UNVERIFIED` accepts only the unconfirmed case, and a confirmed `CG-SQL-EXEC` is still reported.
+
 Suppressions hide findings, but the graph still keeps edges such as `REACHES_SINK` so reviewers can inspect the real code path.
 
 ## Example questions
