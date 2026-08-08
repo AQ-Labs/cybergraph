@@ -41,6 +41,16 @@ _NORMALISING = {"abspath", "normpath", "realpath", "expanduser", "resolve"}
 _SHELL_EXECUTABLES = {"sh", "bash", "zsh", "dash", "ksh", "cmd", "cmd.exe", "powershell"}
 _SHELL_FLAGS = {"-c", "/c", "-Command"}
 
+# Membership here PROVES a flag does NOT take a shell command — this is the set
+# that carries the burden of proof for safety. Do not invert this into a
+# "known dangerous flags" set: an incomplete danger-set silently clears every
+# flag it forgot (`-lc`, `/C`, `-command`, `-xc`, ...), which is a silent miss,
+# not a mere recall gap. Case-folded on comparison.
+_NON_SHELL_FLAGS = {
+    "-m", "-i", "-o", "-y", "-n", "-v", "-l", "-f",
+    "--version", "--input", "--output", "--file",
+}
+
 # Keyword names accepted for the argument of interest, per vulnerability class,
 # when it did not arrive positionally.
 _KEYWORD_NAMES = {
@@ -203,16 +213,23 @@ def _assess_path(call: ast.Call, state: CallState) -> str:
 def _assess_template(call: ast.Call, state: CallState) -> str:
     """Only the template *text* is the injection vector; context values are
     the safe mechanism — mirrors ``_assess_sql``, where bind parameters play
-    the same role.
+    the same role, including the short-circuit order: an untainted template
+    is safe whether its construction is a known literal or an unresolved
+    opaque reference (a module-level constant, ``self.template``, a loader
+    call). Checking taint before construction is what makes that so — the
+    reverse order abstains on the most common Flask shape,
+    ``render_template_string(TEMPLATE, name=user_input)``, for no reason:
+    ``TEMPLATE`` carries no taint regardless of how it was built.
     """
     template = _find_argument(call, "template")
     if template is None:
         return VERDICT_UNKNOWN
-    if _has_tainted_name(template, state):
-        return VERDICT_UNSAFE
-    if not isinstance(template, ast.Constant) and classify_expr(template, state.bindings) == OPAQUE:
-        return VERDICT_UNKNOWN
-    return VERDICT_SAFE
+    construction = classify_expr(template, state.bindings)
+    if construction == LITERAL:
+        return VERDICT_SAFE
+    if not _has_tainted_name(template, state):
+        return VERDICT_SAFE
+    return VERDICT_UNSAFE if construction == COMPOSED else VERDICT_UNKNOWN
 
 
 def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
@@ -227,22 +244,32 @@ def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
 
 
 def _argv0_shape_could_be_shell(elements: list[ast.expr]) -> bool:
-    """True unless ``argv[1]`` rules out a ``<shell> -c <arg>`` invocation.
+    """True unless ``argv[1]`` proves this cannot be a ``<shell> -c <arg>`` shape.
 
-    The shape this abstains for is ``[<non-constant>, "-c", tainted]`` — a
-    variable, attribute, or call standing in for a shell executable. When
-    ``argv[1]`` is a constant string that is *not* a shell flag (``"-m"``,
-    ``"show"``, ``"-i"``, ...), the call cannot be that shape whatever
-    ``argv[0]`` resolves to, so there is nothing to abstain over. An absent or
-    non-constant ``argv[1]`` cannot be ruled out either way, so it still
-    counts as "could be".
+    Safety must be proven by membership in a known-safe set, not disproven by
+    absence from a known-dangerous one: an earlier revision returned "safe"
+    whenever ``argv[1]`` was merely *not* one of a few known shell flags,
+    which silently cleared every shell flag that set forgot (``-lc``, ``/C``,
+    ``-command``, ``-xc``, ...). So:
+
+    * ``argv[1]`` is a constant string that does not start with ``-`` or
+      ``/`` — a subcommand like ``"show"`` or ``"rev-parse"``, not a flag —
+      cannot be this shape.
+    * ``argv[1]`` is a constant flag, case-folded, in ``_NON_SHELL_FLAGS`` —
+      known not to take a shell command — cannot be this shape either.
+    * Anything else — an unrecognised dash/slash flag, a non-constant
+      ``argv[1]``, or no ``argv[1]`` at all — cannot be ruled out, so it still
+      "could be" this shape.
     """
     if len(elements) < 2:
         return True
     second = elements[1]
-    if isinstance(second, ast.Constant) and isinstance(second.value, str):
-        return second.value in _SHELL_FLAGS
-    return True
+    if not (isinstance(second, ast.Constant) and isinstance(second.value, str)):
+        return True
+    value = second.value
+    if not value.startswith(("-", "/")):
+        return False  # a subcommand, not a flag
+    return value.casefold() not in _NON_SHELL_FLAGS
 
 
 def _invokes_a_shell(elements: list[ast.expr]) -> bool:

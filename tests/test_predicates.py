@@ -244,7 +244,7 @@ def test_template_context_values_are_not_the_injection_vector():
             "render_template_string",
             params="user_input",
         )
-        == VERDICT_UNKNOWN
+        == VERDICT_SAFE
     )
     assert (
         _assess(
@@ -254,6 +254,61 @@ def test_template_context_values_are_not_the_injection_vector():
         )
         == VERDICT_SAFE
     )
+
+
+# --- Fix round 2 ---
+
+# N2 (Important): an untainted template is safe regardless of how opaque its
+# construction is, mirroring `_assess_sql`'s short-circuit order — checking
+# taint before construction, not after.
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        ("render_template_string(TEMPLATE, name=user_input)", VERDICT_SAFE),
+        ("render_template_string(load_tpl(), name=uid)", VERDICT_SAFE),
+        ("render_template_string(self.template, name=uid)", VERDICT_SAFE),
+        ('render_template_string("<p>" + user_input + "</p>")', VERDICT_UNSAFE),
+    ],
+)
+def test_template_untainted_opaque_construction_is_safe(body, expected):
+    assert _assess(body, "render_template_string", params="user_input, uid") == expected
+
+
+# N1 (Critical): the argv[0]-shape fallback must prove safety by membership in
+# a known-safe flag set, not by absence from a known-shell set — an
+# incomplete danger set silently clears every flag it forgot.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ("shell = get_shell()\n    subprocess.run([shell, '-lc', cmd])", "cmd"),
+        ("subprocess.run([self.shell, '-lc', cmd])", "cmd"),
+        ("subprocess.run([BASH, '-xc', cmd])", "cmd"),
+        ("subprocess.run([cmd_exe, '/C', user_cmd])", "user_cmd"),
+        ("subprocess.run([COMSPEC, '/K', user_cmd])", "user_cmd"),
+        ("subprocess.run([ps, '-command', user_cmd])", "user_cmd"),
+        ("subprocess.run([ps, '-NoProfile', user_cmd])", "user_cmd"),
+        ("subprocess.run([sh, '-ic', cmd])", "cmd"),
+        ("subprocess.run([sh, '--command', cmd])", "cmd"),
+        ("subprocess.run([interp, '-e', cmd])", "cmd"),
+    ],
+)
+def test_unlisted_shell_flags_are_not_proven_safe(body, params):
+    assert _assess(body, "run", params=params) == VERDICT_UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ('subprocess.run([GIT, "show", rev])', "rev"),
+        ('subprocess.run([sys.executable, "-m", "pytest", test_id])', "test_id"),
+    ],
+)
+def test_non_shell_flags_and_subcommands_stay_safe(body, params):
+    assert _assess(body, "run", params=params) == VERDICT_SAFE
 
 
 # F5 (Minor): a call missing from the snapshot mapping must read as unknown,
