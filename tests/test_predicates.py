@@ -963,3 +963,44 @@ def test_a_starred_element_in_a_proven_code_position_is_still_unsafe():
         _assess('subprocess.run(["python", "-c", *args])', "run", params="args")
         == VERDICT_UNSAFE
     )
+
+
+# R7-5 (Important): `_CONFINING` was matched by bare tail name, and it is the one
+# check here that grants safety outright — so any project-local helper called
+# `basename`, `safe_join` or `secure_filename` cleared the finding, confining or
+# not. `shutil.secure_filename` does not even exist.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "open(my_utils.basename(name))",
+        "open(shutil.secure_filename(name))",
+        "open(self.basename(name))",
+        "open(helpers.safe_join(ROOT, name))",
+        "open(evil.basename(name))",
+    ],
+)
+def test_an_unrecognised_receiver_does_not_grant_confinement(body):
+    assert _assess(body, "open", params="name") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # An unqualified call: a module importing `basename` by name is importing
+        # this one.
+        "open(basename(name))",
+        "open(safe_join(ROOT, name))",
+        "open(secure_filename(name))",
+        # Qualified by a module that really does provide it.
+        "open(os.path.basename(name))",
+        "open(posixpath.basename(name))",
+        "open(ntpath.basename(name))",
+        "open(werkzeug.utils.secure_filename(name))",
+        "open(flask.safe_join(ROOT, name))",
+        "open(flask.helpers.safe_join(ROOT, name))",
+    ],
+)
+def test_a_recognised_receiver_still_grants_confinement(body):
+    assert _assess(body, "open", params="name") == VERDICT_SAFE

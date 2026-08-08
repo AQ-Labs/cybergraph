@@ -52,6 +52,17 @@ VERDICT_UNKNOWN = "unknown"
 
 # These reduce an arbitrary path to something inside a known directory.
 _CONFINING = {"basename", "safe_join", "secure_filename"}
+# Who has to be calling one of the above for it to be *that* function.
+# `_CONFINING` is consulted to GRANT safety, so a bare tail-name match is a route
+# to safe through any project-local helper that happens to share a name:
+# `my_utils.basename(user_input)` proves nothing about `my_utils`, and
+# `shutil.secure_filename` does not exist. An unqualified call is accepted
+# because a module that imports `basename` by name is importing this one; an
+# unrecognised qualifier is not.
+_CONFINING_QUALIFIERS = frozenset({
+    "os.path", "path", "posixpath", "ntpath", "pathlib",
+    "werkzeug.utils", "werkzeug", "flask.helpers", "flask",
+})
 # These canonicalise without restricting where the result points.
 _NORMALISING = {"abspath", "normpath", "realpath", "expanduser", "resolve"}
 
@@ -602,6 +613,11 @@ def _assess_path(call: ast.Call, state: CallState) -> str:
     tainted ``base``. So confinement is scoped per tainted name, not applied
     to the expression as a whole the moment any confining call is seen
     anywhere in it.
+
+    It is scoped by *receiver* too. Confinement is the one thing here that
+    grants safety outright, so the call has to be the confining function and not
+    merely share its name: an unqualified ``basename`` or one qualified by a
+    recognised module counts, and ``my_utils.basename`` does not.
     """
     target = _find_argument(call, "path")
     if target is None:
@@ -614,8 +630,8 @@ def _assess_path(call: ast.Call, state: CallState) -> str:
     for node in ast.walk(target):
         if not isinstance(node, ast.Call):
             continue
-        name = ast.unparse(node.func).rsplit(".", 1)[-1]
-        if name in _CONFINING:
+        qualifier, _, name = ast.unparse(node.func).rpartition(".")
+        if name in _CONFINING and (not qualifier or qualifier in _CONFINING_QUALIFIERS):
             for confined_arg in [*node.args, *(kw.value for kw in node.keywords)]:
                 confined_ids.update(
                     id(descendant)
