@@ -43,7 +43,14 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-from cybergraph.analysis.provenance import COMPOSED, LITERAL, OPAQUE, CallState, classify_expr
+from cybergraph.analysis.provenance import (
+    COMPOSED,
+    LITERAL,
+    OPAQUE,
+    CallState,
+    classify_expr,
+    user_input_nodes,
+)
 from cybergraph.security.sinks import SHELL_CONDITIONAL, SHELL_INHERENT, Sink
 
 VERDICT_SAFE = "safe"
@@ -618,6 +625,16 @@ def _assess_path(call: ast.Call, state: CallState) -> str:
     grants safety outright, so the call has to be the confining function and not
     merely share its name: an unqualified ``basename`` or one qualified by a
     recognised module counts, and ``my_utils.basename`` does not.
+
+    Confinement is finally scoped *in time* as well as in the expression. A
+    tainted name whose value came out of a confining call one line earlier is
+    confined by exactly the same argument as one confined inside the sink's own
+    argument — ``name = os.path.basename(name)`` then ``open(D + name)`` is the
+    ordinary idiom, and reporting it high while clearing the inline spelling of
+    the same thing is a distinction the code does not make. ``TaintFact.origin``
+    carries the expression that built the name; it is judged here, by the rules
+    above, and by nothing in the provenance walk — ``basename`` confines a path
+    and does nothing at all for SQL.
     """
     target = _find_argument(call, "path")
     if target is None:
@@ -625,29 +642,60 @@ def _assess_path(call: ast.Call, state: CallState) -> str:
     if not _has_tainted_name(target, state):
         return VERDICT_SAFE
 
+    confined_ids, normalised = _confinement_in(target)
+    carriers = _taint_carriers(target, state)
+    unconfined = [node for node in carriers if id(node) not in confined_ids]
+
+    for node in list(unconfined):
+        fact = state.tainted.get(node.id) if isinstance(node, ast.Name) else None
+        if fact is None or fact.origin is None:
+            continue
+        origin_confined, origin_normalised = _confinement_in(fact.origin)
+        origin_carriers = _taint_carriers(fact.origin, state)
+        # A producer confines only if it had something to confine and confined
+        # all of it. Vacuous truth here would be the whole bug inverted:
+        # `name = request.args.get("f")` has no *named* taint inside it, and
+        # reading that as "everything was confined" clears the read outright.
+        if origin_carriers and all(id(inner) in origin_confined for inner in origin_carriers):
+            unconfined.remove(node)
+        elif origin_normalised:
+            normalised = True
+
+    if not unconfined:
+        return VERDICT_SAFE
+    return VERDICT_UNKNOWN if normalised else VERDICT_UNSAFE
+
+
+def _confinement_in(expression: ast.AST) -> tuple[set[int], bool]:
+    """Which nodes this expression confines, and whether it merely normalises."""
     confined_ids: set[int] = set()
     normalised = False
-    for node in ast.walk(target):
+    for node in ast.walk(expression):
         if not isinstance(node, ast.Call):
             continue
         qualifier, _, name = ast.unparse(node.func).rpartition(".")
         if name in _CONFINING and (not qualifier or qualifier in _CONFINING_QUALIFIERS):
             for confined_arg in [*node.args, *(kw.value for kw in node.keywords)]:
-                confined_ids.update(
-                    id(descendant)
-                    for descendant in ast.walk(confined_arg)
-                    if isinstance(descendant, ast.Name)
-                )
+                confined_ids.update(id(descendant) for descendant in ast.walk(confined_arg))
         elif name in _NORMALISING:
             normalised = True
+    return confined_ids, normalised
 
-    tainted_outside_confinement = any(
-        isinstance(child, ast.Name) and child.id in state.tainted and id(child) not in confined_ids
-        for child in ast.walk(target)
-    )
-    if not tainted_outside_confinement:
-        return VERDICT_SAFE
-    return VERDICT_UNKNOWN if normalised else VERDICT_UNSAFE
+
+def _taint_carriers(expression: ast.AST, state: CallState) -> list[ast.AST]:
+    """Every sub-expression of ``expression`` through which user data arrives.
+
+    A tainted name, or a read of user input written out in place. Both are
+    needed and neither subsumes the other: confinement has to be decided per
+    carrier, so ``user_dir + os.path.basename(request.args.get("f"))`` reports
+    the unconfined ``user_dir`` while the confined read stays confined.
+    """
+    named = [
+        child
+        for child in ast.walk(expression)
+        if isinstance(child, ast.Name) and child.id in state.tainted
+    ]
+    return named + user_input_nodes(expression)
 
 
 def _assess_template(call: ast.Call, state: CallState) -> str:
@@ -684,10 +732,20 @@ def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
 
 
 def _has_tainted_name(node: ast.AST, state: CallState) -> bool:
+    """Does the user's data reach this expression — through a name, or directly?
+
+    The second half is not a refinement of the first. ``conn.execute("... " +
+    request.args.get("n"))`` binds no local at all, so a test that looks only
+    for tainted *names* finds nothing in the commonest injection shape there
+    is, and an unrecognised-but-untainted argument is exonerated by every
+    predicate below. Reading the source expression itself is what closes that,
+    and it can only add: a read bound to a name is still found by the first
+    clause.
+    """
     return any(
         isinstance(child, ast.Name) and child.id in state.tainted
         for child in ast.walk(node)
-    )
+    ) or bool(user_input_nodes(node))
 
 
 def _shell_status(sink: Sink, call: ast.Call) -> bool | None:

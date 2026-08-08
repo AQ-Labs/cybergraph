@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 
-from cybergraph.analysis.provenance import CallState, snapshot_call_sites
+from cybergraph.analysis.provenance import snapshot_call_sites
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
@@ -28,12 +28,7 @@ from cybergraph.security.ontology import (
     SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
-from cybergraph.security.predicates import (
-    VERDICT_SAFE,
-    VERDICT_UNKNOWN,
-    VERDICT_UNSAFE,
-    assess_call,
-)
+from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE, assess_call
 from cybergraph.security.sinks import SEVERITY_MEDIUM, Sink, lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
@@ -119,11 +114,12 @@ def analyze_python_file(
                     Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"})
                 )
 
-            tainted = _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
-            call_states = snapshot_call_sites(item, tainted)
-            introduced = {
-                name: source for name, source in tainted.items() if name not in tainted_values
-            }
+            _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
+            # Seeded with route parameters only. Taint the *body* introduces is
+            # discovered by the snapshot walk itself, in source order — seeding
+            # a whole-function accumulation here instead would assert every
+            # name's final taint at call sites that run before the read.
+            call_states = snapshot_call_sites(item, tainted_values)
 
             for call in [n for n in _scoped_walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
@@ -138,22 +134,14 @@ def analyze_python_file(
                     # Inventory is always recorded, whether or not this call site
                     # is an unsafe use of the sink.
                     edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, line_no))
-                    state = _state_for(call, call_states, introduced)
-                    assessment = (
-                        assess_call(sink, call, state) if state is not None else VERDICT_UNKNOWN
-                    )
+                    assessment = assess_call(sink, call, call_states.get(id(call)))
                     finding = _finding_for(sink, assessment, call_name, rel, line_no)
                     if finding is not None and not is_inline_suppressed(
                         lines, line_no, finding.rule_id
                     ):
                         findings.append(finding)
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
-                    edges.append(
-                        Edge(
-                            EDGE_USES_SECRET, key, call_name, rel,
-                            getattr(call, "lineno", item.lineno),
-                        )
-                    )
+                    edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, line_no))
                 call_text = ast.unparse(call).lower() if hasattr(ast, "unparse") else lowered
                 if _is_secret_exposure(call_name, call_text, secret_markers):
                     edges.append(
@@ -162,17 +150,12 @@ def analyze_python_file(
                             key,
                             call_name,
                             rel,
-                            getattr(call, "lineno", item.lineno),
+                            line_no,
                             {"reason": "secret passed to exposure sink"},
                         )
                     )
                 if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
-                    edges.append(
-                        Edge(
-                            EDGE_SANITIZES, key, call_name, rel,
-                            getattr(call, "lineno", item.lineno),
-                        )
-                    )
+                    edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, line_no))
 
     _add_django_url_routes(tree, rel, nodes, edges)
     _add_imports(tree, rel, edges)
@@ -280,10 +263,14 @@ def _add_python_dataflows(
     tainted_values: dict[str, str],
     nodes: list[Node],
     edges: list[Edge],
-) -> dict[str, str]:
-    """Track simple local propagation from request inputs into sink arguments.
+) -> None:
+    """Emit the graph's dataflow nodes and edges for this function.
 
-    Returns the accumulated taint map, used to seed per-call-site snapshots."""
+    Taint here is name-keyed and accumulated over the whole body, which is the
+    right shape for ``FLOWS_TO``/``TAINTS`` edges and the wrong shape for a
+    verdict: it says a name was tainted *somewhere in this function*, not that
+    it was tainted at a given call. ``snapshot_call_sites`` answers the second
+    question and is not seeded from this map — see ``analyze_python_file``."""
     tainted = dict(tainted_values)
     for node in _scoped_walk(item):
         if isinstance(node, ast.Assign):
@@ -358,7 +345,6 @@ def _add_python_dataflows(
                         {"function": function_key, "reason": "tainted argument"},
                     )
                 )
-    return tainted
 
 
 def _ensure_input_node(
@@ -408,36 +394,6 @@ def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
 def _is_user_input_expr(node: ast.AST) -> bool:
     text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
     return any(keyword in text for keyword in SOURCE_KEYWORDS)
-
-
-def _state_for(
-    call: ast.Call, call_states: dict[int, CallState], introduced: dict[str, str]
-) -> CallState | None:
-    """The snapshot for one call site, with body-introduced taint kept alive.
-
-    ``snapshot_call_sites`` propagates taint *between* names but has no notion of
-    which expressions *introduce* it — ``SOURCE_KEYWORDS`` matching lives in
-    ``_add_python_dataflows``. So ``name = request.args.get("name")`` reads to it
-    as an assignment from a clean expression and **clears** whatever the seeded
-    taint map said about ``name``, which silently exonerated the single most
-    common injection shape there is (measured: the demo Flask handler reported
-    nothing). Names the dataflow pass discovered inside the body are therefore
-    re-asserted on every snapshot for this function.
-
-    Route parameters are deliberately left out of ``introduced``: they are
-    tainted from entry, and letting the flow-sensitive walk clear them is what
-    keeps ``uid = "1"`` before the sink from reading as a finding. The price of
-    the wider net on body-discovered names is over-reporting one that is
-    reassigned to a literal *after* being read from the request — noise, in the
-    reporting direction, never a silent miss.
-
-    A call with no snapshot at all stays ``None``, so callers still abstain
-    rather than reasoning from a state that was never computed.
-    """
-    state = call_states.get(id(call))
-    if state is None or not introduced:
-        return state
-    return CallState(state.bindings, {**state.tainted, **introduced})
 
 
 def _finding_for(

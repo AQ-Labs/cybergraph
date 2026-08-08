@@ -1,15 +1,41 @@
-"""How was this string value constructed?
+"""How was this string value constructed, and did the user's data reach it?
 
-Answers one question and knows nothing about security:
+Two orthogonal axes, tracked together because both are flow-sensitive facts
+about the same statement sequence.
+
+*Construction* answers one question and knows nothing about security:
 
 ``LITERAL``   a constant, or a name bound only to constants
 ``COMPOSED``  assembled here by ``+``, an f-string, ``%``, ``.format()`` or ``.join()``
 ``OPAQUE``    from a call, a parameter, or anything not tracked
 
-Orthogonal to taint, which ``analysis.python._add_python_dataflows`` tracks
-separately. Keeping the axes apart is what lets ``f"... ORDER BY {allowlisted}"``
-be COMPOSED *and* clean. Collapsing them forces a false choice between a false
+Keeping it apart from taint is what lets ``f"... ORDER BY {allowlisted}"`` be
+COMPOSED *and* clean. Collapsing them forces a false choice between a false
 positive on dynamic-but-safe queries and a provenance label that is a lie.
+
+*Taint* answers where a value came from, and this module owns **both** halves of
+it: which expressions **introduce** it (``reads_user_input``) and how it moves
+between names. An earlier revision owned only the second half and left
+introduction to ``analysis.python._add_python_dataflows``, which walks the
+function once and accumulates a name-keyed map with no notion of statement
+order. The two could then only be reconciled by re-asserting that map on every
+snapshot in the function, which is wrong in both directions at once: taint
+appears at call sites *upstream* of the read that produced it, and any binding
+form the accumulating pass did not model — a ``for`` target, a walrus, ``+=``, a
+comprehension generator, ``with ... as``, or an inline read with no binding at
+all — introduced no taint anywhere. Introduction lives here now, so every
+binding form this module already understands gets it for free and every one of
+them respects source order.
+
+Taint is a ``TaintFact`` rather than a bare origin string so that one further
+fact can ride along: the expression the value was **built by**. A path
+confined by ``os.path.basename`` inside a sink argument is recognised there;
+the identical confinement one line earlier, through a local, was not, because
+by the time the sink saw the name the expression that produced it was gone.
+``TaintFact.origin`` keeps it, and :mod:`cybergraph.security.predicates` decides
+per vulnerability class whether a given producer actually confines — ``basename``
+confines a *path* and does nothing whatever for SQL, so the judgement cannot
+live here.
 """
 
 from __future__ import annotations
@@ -17,9 +43,16 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
+from cybergraph.security.ontology import SOURCE_KEYWORDS
+
 LITERAL = "literal"
 COMPOSED = "composed"
 OPAQUE = "opaque"
+
+# The origin recorded for taint that entered through an expression rather than
+# through a name the caller seeded — an inline ``request.args.get(...)`` has no
+# named source to point at.
+USER_INPUT = "user-input"
 
 # Weakest wins at a join: a value is only as safe as its least safe origin.
 _RANK = {LITERAL: 0, COMPOSED: 1, OPAQUE: 2}
@@ -74,12 +107,128 @@ def classify_expr(node: ast.AST | None, bindings: dict[str, str]) -> str:
     return OPAQUE
 
 
+def reads_user_input(node: ast.AST | None) -> bool:
+    """Does this expression read anything the user controls?
+
+    The test is a substring scan of the unparsed text against
+    ``SOURCE_KEYWORDS``, deliberately unchanged from the one
+    ``analysis.python`` applied to assignment right-hand sides before
+    introduction moved here. It is consulted to **introduce** taint, so a
+    keyword missing from the set costs detection and never correctness — and
+    reusing the identical rule means widening *where* taint is introduced
+    cannot quietly narrow *what* introduces it.
+    """
+    if node is None:
+        return False
+    text = ast.unparse(node).lower()
+    return any(keyword in text for keyword in SOURCE_KEYWORDS)
+
+
+def user_input_nodes(node: ast.AST | None) -> list[ast.AST]:
+    """The individual sub-expressions inside ``node`` that read user input.
+
+    ``reads_user_input`` answers "somewhere in here", which is all a binding
+    needs. Deciding whether a *particular* read sits inside a confining call
+    needs the read itself, and a whole-subtree text scan cannot supply it:
+    every ancestor of ``request.args.get(f)`` also contains that text, so
+    ``os.path.basename(request.args.get(f))`` would report an unconfined read
+    at the ``basename`` call and at the enclosing ``+`` as well.
+
+    So a node counts here only when the *name chain it is rooted in* names a
+    source: ``request.args.get(f)`` and ``request.files["f"]`` do,
+    ``os.path.basename(...)`` and ``"/data/" + ...`` do not, whatever text they
+    enclose. Used only at sink arguments, where nothing was recognised at all
+    before, so it can only widen what is reported.
+
+    A bare ``ast.Name`` is excluded, and that exclusion is load-bearing rather
+    than cosmetic. Whether a *local* holds user data is precisely what the
+    flow-sensitive taint map answers, and answering it a second time from the
+    variable's spelling contradicts it: ``query`` is in ``SOURCE_KEYWORDS``, so
+    counting the name alone made ``query = "select " + allowlisted; execute(query)``
+    a **high** finding — measured, not hypothesised. What is left is the case
+    the map genuinely cannot see, a read of an external object written out
+    where it is used and bound to nothing.
+    """
+    if node is None:
+        return []
+    found: list[ast.AST] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            continue
+        chain = _name_chain(child)
+        if chain is not None and any(keyword in chain for keyword in SOURCE_KEYWORDS):
+            found.append(child)
+    return found
+
+
+def _name_chain(node: ast.AST) -> str | None:
+    """The dotted text an expression is rooted in, lowercased, or ``None``.
+
+    ``request.args.get`` for a call to it, ``request.files`` for a subscript of
+    it. Anything that is not a name, attribute, call or subscript — a constant,
+    an operator — is rooted in no name and answers ``None``, which is what
+    keeps the literal text of ``"select * from t where body = 1"`` from reading
+    as a request.
+    """
+    if isinstance(node, ast.Name):
+        return node.id.lower()
+    if isinstance(node, ast.Attribute):
+        base = _name_chain(node.value)
+        return f"{base}.{node.attr.lower()}" if base is not None else None
+    if isinstance(node, ast.Call):
+        return _name_chain(node.func)
+    if isinstance(node, ast.Subscript):
+        return _name_chain(node.value)
+    return None
+
+
+@dataclass(frozen=True)
+class TaintFact:
+    """User data reached this name, and here is what built the value.
+
+    ``origin`` is the expression the name was last assigned, kept so that a
+    confinement applied one line before the sink can still be seen at it. It is
+    ``None`` for taint that arrived some other way — a route parameter, a loop
+    target, a value joined from two paths — and a caller must read ``None`` as
+    "nothing is known about how this was built", never as "nothing was done to
+    it".
+    """
+
+    source: str = USER_INPUT
+    origin: ast.expr | None = None
+
+    def carried(self) -> TaintFact:
+        """The same taint, moved somewhere this module cannot vouch for.
+
+        Propagation drops ``origin`` by default: the fact that ``name`` was
+        confined says nothing about ``name + other``, and a stale ``origin``
+        would be read as a confinement that no longer holds.
+        """
+        return self if self.origin is None else TaintFact(self.source)
+
+
+def _merge_taint(into: dict[str, TaintFact], other: dict[str, TaintFact]) -> None:
+    """Union the taint maps, keeping ``origin`` only where both paths agree.
+
+    Taint itself unions — a name tainted on any reachable path is tainted.
+    ``origin`` is the opposite: it is consulted to *grant* safety, so it may
+    only survive where every contributing path built the value the same way. A
+    name confined on one branch and taken raw on the other is not confined.
+    """
+    for name, fact in other.items():
+        existing = into.get(name)
+        if existing is None:
+            into[name] = fact
+        elif existing.origin is not fact.origin:
+            into[name] = TaintFact(existing.source)
+
+
 @dataclass(frozen=True)
 class CallState:
     """Construction and taint state as it was *at* one call site."""
 
     bindings: dict[str, str] = field(default_factory=dict)
-    tainted: dict[str, str] = field(default_factory=dict)
+    tainted: dict[str, TaintFact] = field(default_factory=dict)
 
 
 class _PrefixState:
@@ -102,14 +251,14 @@ class _PrefixState:
     def __init__(
         self,
         bindings: dict[str, str],
-        tainted: dict[str, str],
+        tainted: dict[str, TaintFact],
         parent: _PrefixState | None = None,
     ) -> None:
         self.bindings = dict(bindings)
         self.tainted = dict(tainted)
         self.parent = parent
 
-    def absorb(self, bindings: dict[str, str], tainted: dict[str, str]) -> None:
+    def absorb(self, bindings: dict[str, str], tainted: dict[str, TaintFact]) -> None:
         """Weaken towards ``bindings`` and take on its taint, up the whole chain.
 
         Called once per statement per enclosing ``try``, so the rank compare
@@ -123,7 +272,7 @@ class _PrefixState:
                 current = own.get(name)
                 if current is None or _RANK[value_class] > _RANK[current]:
                     own[name] = value_class
-            target.tainted.update(tainted)
+            _merge_taint(target.tainted, tainted)
             target = target.parent
 
 
@@ -152,7 +301,9 @@ def snapshot_call_sites(
     ``_run_loop_to_fixpoint``.
     """
     bindings: dict[str, str] = {}
-    tainted: dict[str, str] = dict(initial_taint or {})
+    tainted: dict[str, TaintFact] = {
+        name: TaintFact(source) for name, source in (initial_taint or {}).items()
+    }
 
     for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]:
         if arg.arg not in {"self", "cls"}:
@@ -166,7 +317,7 @@ def snapshot_call_sites(
 def _walk_body(
     body: list[ast.stmt],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -187,7 +338,7 @@ def _walk_body(
 def _snapshot_calls_in(
     statement: ast.stmt,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
 ) -> None:
     """Record state for calls in this statement's own expressions.
@@ -204,22 +355,71 @@ def _snapshot_calls_in(
         _snapshot_calls_in_expr(node, bindings, tainted, states)
 
 
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
 def _snapshot_calls_in_expr(
     node: ast.AST,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
 ) -> None:
-    """Record state for every call inside one expression, merging on revisit."""
-    for call in [n for n in ast.walk(node) if isinstance(n, ast.Call)]:
-        existing = states.get(id(call))
-        if existing is None:
-            states[id(call)] = CallState(dict(bindings), dict(tainted))
-            continue
-        merged = dict(existing.bindings)
-        for name, value_class in bindings.items():
-            merged[name] = weakest(merged.get(name, value_class), value_class)
-        states[id(call)] = CallState(merged, {**existing.tainted, **tainted})
+    """Record state for every call inside one expression, merging on revisit.
+
+    A comprehension is descended into with a scope of its own. Its generator
+    targets are ordinary binding forms — ``[q(x) for x in request.args]`` binds
+    ``x`` from the request exactly as a ``for`` statement would — but they are
+    not statements, so the statement walk never reached them and every call in
+    the element expression was snapshotted against a state where the target was
+    an unbound, untainted name. The bindings are made in a copy, because a
+    comprehension's targets do not leak into the enclosing scope.
+    """
+    if isinstance(node, _COMPREHENSIONS):
+        _snapshot_calls_in_comprehension(node, bindings, tainted, states)
+        return
+    if isinstance(node, ast.Call):
+        _record_call_state(node, bindings, tainted, states)
+    for child in ast.iter_child_nodes(node):
+        _snapshot_calls_in_expr(child, bindings, tainted, states)
+
+
+def _snapshot_calls_in_comprehension(
+    node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+    bindings: dict[str, str],
+    tainted: dict[str, TaintFact],
+    states: dict[int, CallState],
+) -> None:
+    """Walk one comprehension in evaluation order, in a scope of its own."""
+    inner_bindings = dict(bindings)
+    inner_tainted = dict(tainted)
+    for generator in node.generators:
+        _snapshot_calls_in_expr(generator.iter, inner_bindings, inner_tainted, states)
+        _bind_target_opaque(generator.target, generator.iter, inner_bindings, inner_tainted)
+        for condition in generator.ifs:
+            _snapshot_calls_in_expr(condition, inner_bindings, inner_tainted, states)
+    elements = (
+        [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+    )
+    for element in elements:
+        _snapshot_calls_in_expr(element, inner_bindings, inner_tainted, states)
+
+
+def _record_call_state(
+    call: ast.Call,
+    bindings: dict[str, str],
+    tainted: dict[str, TaintFact],
+    states: dict[int, CallState],
+) -> None:
+    existing = states.get(id(call))
+    if existing is None:
+        states[id(call)] = CallState(dict(bindings), dict(tainted))
+        return
+    merged = dict(existing.bindings)
+    for name, value_class in bindings.items():
+        merged[name] = weakest(merged.get(name, value_class), value_class)
+    merged_tainted = dict(existing.tainted)
+    _merge_taint(merged_tainted, tainted)
+    states[id(call)] = CallState(merged, merged_tainted)
 
 
 def _has_nested_stmt_body(statement: ast.stmt) -> bool:
@@ -255,7 +455,7 @@ def _own_expressions(statement: ast.stmt) -> list[ast.AST]:
 def _apply_effect(
     statement: ast.stmt,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -265,27 +465,30 @@ def _apply_effect(
 
     if isinstance(statement, ast.Assign):
         value_class = classify_expr(statement.value, bindings)
-        source = _tainted_source(statement.value, tainted)
+        source = _assigned_taint(statement.value, tainted)
         for target in statement.targets:
             for name in _names(target):
                 bindings[name] = value_class
-                if source:
+                if source is not None:
                     tainted[name] = source
                 else:
                     tainted.pop(name, None)
     elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
         value_class = classify_expr(statement.value, bindings)
-        source = _tainted_source(statement.value, tainted)
+        source = _assigned_taint(statement.value, tainted)
         for name in _names(statement.target):
             bindings[name] = value_class
-            if source:
+            if source is not None:
                 tainted[name] = source
     elif isinstance(statement, ast.AugAssign):
+        # `q += <tainted>` composes rather than replaces, so whatever built the
+        # old value no longer describes the new one: taint carries, origin does
+        # not.
         source = _tainted_source(statement.value, tainted)
         for name in _names(statement.target):
             bindings[name] = COMPOSED
-            if source:
-                tainted[name] = source
+            if source is not None:
+                tainted[name] = source.carried()
     elif isinstance(statement, ast.If):
         _merge_branches(
             [statement.body, statement.orelse],
@@ -327,7 +530,7 @@ def _apply_effect(
 def _apply_walrus_bindings(
     statement: ast.stmt,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Bind walrus (``:=``) targets found in this statement's own expressions.
 
@@ -344,7 +547,7 @@ def _bind_target_opaque(
     target: ast.AST,
     source_expr: ast.AST | None,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Bind a non-assignment target (a ``for`` or ``with`` target) to OPAQUE.
 
@@ -356,8 +559,10 @@ def _bind_target_opaque(
     source = _tainted_source(source_expr, tainted)
     for name in _names(target):
         bindings[name] = OPAQUE
-        if source:
-            tainted[name] = source
+        if source is not None:
+            # Iterating or entering a value says nothing about how the element
+            # it yields was built, so the origin does not carry over.
+            tainted[name] = source.carried()
         else:
             tainted.pop(name, None)
 
@@ -384,9 +589,9 @@ def _match_capture_names(pattern: ast.pattern) -> list[str]:
 
 def _bind_captures(
     names: list[str],
-    source: str,
+    source: TaintFact | None,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Bind names a pattern *did* capture: OPAQUE, taint replaced by the subject's.
 
@@ -395,16 +600,16 @@ def _bind_captures(
     """
     for name in names:
         bindings[name] = OPAQUE
-        if source:
-            tainted[name] = source
+        if source is not None:
+            tainted[name] = source.carried()
         else:
             tainted.pop(name, None)
 
 
 def _bind_captures_weakly(
-    captures: list[tuple[str, str]],
+    captures: list[tuple[str, TaintFact | None]],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Bind names a pattern *may* have captured: OPAQUE, taint added never removed.
 
@@ -417,22 +622,22 @@ def _bind_captures_weakly(
     """
     for name, source in captures:
         bindings[name] = OPAQUE
-        if source and name not in tainted:
-            tainted[name] = source
+        if source is not None and name not in tainted:
+            tainted[name] = source.carried()
 
 
 def _apply_walrus_in(
     expr: ast.AST,
     bindings: dict[str, str],
-    tainted: dict[str, str],
-) -> list[tuple[str, str]]:
-    """Bind every walrus target in one expression; return (name, taint source)."""
-    bound: list[tuple[str, str]] = []
+    tainted: dict[str, TaintFact],
+) -> list[tuple[str, TaintFact | None]]:
+    """Bind every walrus target in one expression; return (name, taint fact)."""
+    bound: list[tuple[str, TaintFact | None]] = []
     for node in ast.walk(expr):
         if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-            source = _tainted_source(node.value, tainted)
+            source = _assigned_taint(node.value, tainted)
             bindings[node.target.id] = OPAQUE
-            if source:
+            if source is not None:
                 tainted[node.target.id] = source
             else:
                 tainted.pop(node.target.id, None)
@@ -443,7 +648,7 @@ def _apply_walrus_in(
 def _apply_match_cases(
     statement: ast.Match,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -493,8 +698,8 @@ def _apply_match_cases(
     entry_tainted = dict(tainted)
     subject_source = _tainted_source(statement.subject, tainted)
     # (name, taint source) for every name a *preceding* case may have left bound.
-    carried: list[tuple[str, str]] = []
-    paths: list[tuple[dict[str, str], dict[str, str]]] = []
+    carried: list[tuple[str, TaintFact | None]] = []
+    paths: list[tuple[dict[str, str], dict[str, TaintFact]]] = []
 
     for case in statement.cases:
         branch_bindings = dict(entry_bindings)
@@ -546,7 +751,7 @@ def _pattern_is_irrefutable(pattern: ast.pattern) -> bool:
 def _run_loop_to_fixpoint(
     body: list[ast.stmt],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -597,7 +802,7 @@ def _run_loop_to_fixpoint(
 def _widen_after_cap_exhaustion(
     body: list[ast.stmt],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Fail safe instead of failing silent when a loop can't be proven to converge.
 
@@ -609,11 +814,11 @@ def _widen_after_cap_exhaustion(
     names = _all_assigned_names(body)
     if not names:
         return
-    source = next((tainted[name] for name in names if name in tainted), "")
+    source = next((tainted[name] for name in names if name in tainted), None)
     for name in names:
         bindings[name] = OPAQUE
-        if source:
-            tainted[name] = source
+        if source is not None:
+            tainted[name] = source.carried()
 
 
 def _all_assigned_names(nodes: list[ast.stmt]) -> set[str]:
@@ -654,7 +859,7 @@ def _collect_all_assigned_names(node: ast.AST, names: set[str]) -> None:
 def _apply_try_statement(
     statement: ast.Try | ast.TryStar,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -703,7 +908,7 @@ def _apply_try_statement(
     # Path B: an exception was raised somewhere in the body — reachable from
     # any prefix, hence `body_any` rather than the body's post-state. Each
     # handler is an alternative to the others and all start from `body_any`.
-    caught_paths: list[tuple[dict[str, str], dict[str, str]]] = []
+    caught_paths: list[tuple[dict[str, str], dict[str, TaintFact]]] = []
     for handler in statement.handlers:
         handler_bindings = dict(body_any.bindings)
         handler_tainted = dict(body_any.tainted)
@@ -754,7 +959,7 @@ def _apply_try_statement(
 def _merge_branches(
     bodies: list[list[ast.stmt]],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     *,
     exhaustive: bool,
@@ -784,7 +989,7 @@ def _merge_branches(
     """
     entry_bindings = dict(bindings)
     entry_tainted = dict(tainted)
-    paths: list[tuple[dict[str, str], dict[str, str]]] = []
+    paths: list[tuple[dict[str, str], dict[str, TaintFact]]] = []
     for body in bodies:
         if not body:
             continue
@@ -798,22 +1003,22 @@ def _merge_branches(
 
 
 def _join_paths(
-    paths: list[tuple[dict[str, str], dict[str, str]]],
-) -> tuple[dict[str, str], dict[str, str]]:
+    paths: list[tuple[dict[str, str], dict[str, TaintFact]]],
+) -> tuple[dict[str, str], dict[str, TaintFact]]:
     """Weakest class per name and the union of taint, over reachable paths."""
     joined_bindings: dict[str, str] = {}
-    joined_tainted: dict[str, str] = {}
+    joined_tainted: dict[str, TaintFact] = {}
     for path_bindings, path_tainted in paths:
         for name, value_class in path_bindings.items():
             joined_bindings[name] = weakest(joined_bindings.get(name, value_class), value_class)
-        joined_tainted.update(path_tainted)
+        _merge_taint(joined_tainted, path_tainted)
     return joined_bindings, joined_tainted
 
 
 def _replace_with_join(
-    paths: list[tuple[dict[str, str], dict[str, str]]],
+    paths: list[tuple[dict[str, str], dict[str, TaintFact]]],
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
 ) -> None:
     """Overwrite the live state, in place, with the join of ``paths``."""
     joined_bindings, joined_tainted = _join_paths(paths)
@@ -826,7 +1031,7 @@ def _replace_with_join(
 def _apply_generic_effect(
     statement: ast.stmt,
     bindings: dict[str, str],
-    tainted: dict[str, str],
+    tainted: dict[str, TaintFact],
     states: dict[int, CallState],
     accumulator: _PrefixState | None = None,
 ) -> None:
@@ -840,16 +1045,16 @@ def _apply_generic_effect(
     function doesn't specifically recognise are still walked, each from a copy
     of the current state merged back weakest-wins, rather than skipped.
     """
-    source = ""
+    source: TaintFact | None = None
     for expr in _generic_expr_fields(statement):
         found = _tainted_source(expr, tainted)
-        if found:
+        if found is not None:
             source = found
 
     for name in _generic_bound_names(statement):
         bindings[name] = OPAQUE
-        if source:
-            tainted[name] = source
+        if source is not None:
+            tainted[name] = source.carried()
         else:
             tainted.pop(name, None)
 
@@ -912,13 +1117,39 @@ def _generic_bound_names(node: ast.AST) -> list[str]:
     return names
 
 
-def _tainted_source(node: ast.AST | None, tainted: dict[str, str]) -> str:
+def _tainted_source(node: ast.AST | None, tainted: dict[str, TaintFact]) -> TaintFact | None:
+    """Taint reaching this expression, from a tainted name or from a read of its own.
+
+    The second clause is what makes every binding form in this module see a
+    request read. It answers ``None`` only when neither holds, so an
+    unrecognised expression contributes no taint — which costs detection, never
+    correctness.
+    """
     if node is None:
-        return ""
+        return None
     for child in ast.walk(node):
         if isinstance(child, ast.Name) and child.id in tainted:
             return tainted[child.id]
-    return ""
+    return TaintFact() if reads_user_input(node) else None
+
+
+def _assigned_taint(
+    value: ast.expr | None, tainted: dict[str, TaintFact]
+) -> TaintFact | None:
+    """Taint for a name bound to ``value``, recording what built it.
+
+    A plain copy (``p = q``) inherits ``q``'s origin — the same value, so
+    whatever confined it still did. Anything else records ``value`` itself as
+    the origin, which is the expression a class predicate can inspect to decide
+    whether that construction confines for *its* class. Nothing here decides
+    that it does.
+    """
+    if isinstance(value, ast.Name) and value.id in tainted:
+        return tainted[value.id]
+    source = _tainted_source(value, tainted)
+    if source is None:
+        return None
+    return TaintFact(source.source, value)
 
 
 def _names(target: ast.AST) -> list[str]:
