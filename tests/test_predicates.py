@@ -814,3 +814,61 @@ def test_a_version_suffixed_runner_named_downstream_abstains(body):
 )
 def test_version_normalisation_does_not_invent_a_runner(body):
     assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
+
+
+# R7-2 (Critical): `shell=` is consulted to prove DANGER, so a value that cannot
+# be resolved must not read as "no shell". `subprocess` tests the value for
+# truth, not identity, so `shell=1` and `shell="yes"` run a shell as surely as
+# `shell=True` — the old `value is True` comparison read both as absent.
+
+
+@pytest.mark.parametrize(
+    "body,callee",
+    [
+        ('subprocess.run(["git", "show", cmd], shell=1)', "run"),
+        ('subprocess.run(["git", "show", cmd], shell="yes")', "run"),
+        ('subprocess.run("git show " + cmd, shell=1)', "run"),
+        ('subprocess.run("git show " + cmd, shell=2)', "run"),
+        ('subprocess.Popen(["git", "show", cmd], shell=1)', "Popen"),
+        ('subprocess.check_output(["git", "show", cmd], shell=1)', "check_output"),
+    ],
+)
+def test_a_truthy_non_bool_shell_keyword_is_a_shell(body, callee):
+    assert _assess(body, callee, params="cmd") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        # A name, an attribute, a call or a comparison: unreadable, so the shell
+        # status is unknown and the call cannot be cleared.
+        ('subprocess.run(["git", "show", cmd], shell=use_shell)', "cmd"),
+        ('subprocess.run(["git", "show", cmd], shell=self.use_shell)', "cmd"),
+        ('subprocess.run(["git", "show", cmd], shell=bool(x))', "cmd"),
+        ('subprocess.run(["git", "show", cmd], shell=os.name == "nt")', "cmd"),
+        # `**kwargs` may carry `shell=True`, so its absence proves nothing.
+        ('subprocess.run(["git", "show", cmd], **opts)', "cmd, **opts"),
+        ('subprocess.run(["git", "show", cmd], check=True, **opts)', "cmd, **opts"),
+        # An unresolved shell status must not clear a rule-5 safe either.
+        ('subprocess.run(["python", "-m", "pytest", cmd], shell=use_shell)', "cmd"),
+    ],
+)
+def test_an_unresolvable_shell_keyword_is_unknown_not_absent(body, params):
+    assert _assess(body, "run", params=params) == VERDICT_UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        # A falsey constant really is "no shell", and still clears.
+        ('subprocess.run(["git", "show", cmd], shell=False)', VERDICT_SAFE),
+        ('subprocess.run(["git", "show", cmd], shell=0)', VERDICT_SAFE),
+        ('subprocess.run(["git", "show", cmd], shell=None)', VERDICT_SAFE),
+        ('subprocess.run(["git", "show", cmd], shell="")', VERDICT_SAFE),
+        # And an unresolved shell status never demotes a confirmed injection.
+        ('subprocess.run(["bash", "-c", cmd], shell=use_shell)', VERDICT_UNSAFE),
+        ('subprocess.run(["bash", "-c", cmd], **opts)', VERDICT_UNSAFE),
+    ],
+)
+def test_a_falsey_shell_keyword_still_clears(body, expected):
+    assert _assess(body, "run", params="cmd, **opts") == expected

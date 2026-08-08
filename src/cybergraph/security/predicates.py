@@ -294,13 +294,19 @@ def _assess_command(sink: Sink, call: ast.Call, state: CallState) -> str:
         return VERDICT_UNKNOWN
     if not _has_tainted_name(command, state):
         return VERDICT_SAFE  # (1) nothing of the user's reaches the command
-    if sink.shell == SHELL_INHERENT or (
-        sink.shell == SHELL_CONDITIONAL and _keyword_is_true(call, "shell")
-    ):
+    shell = _shell_status(sink, call)
+    if shell is True:
         return VERDICT_UNSAFE  # (2) the shell is the mechanism, whatever argv says
 
     if isinstance(command, ast.List | ast.Tuple):
-        return _assess_list_argv(list(command.elts), state)
+        verdict = _assess_list_argv(list(command.elts), state)
+        if shell is None and verdict == VERDICT_SAFE:
+            # (2b) Whether a shell runs here cannot be read off the call, and on
+            # Windows `shell=True` with a list argv goes through `list2cmdline`
+            # into `cmd /c`, so a tainted element carrying `&` is live
+            # injection. An unresolved `shell=` must not be able to clear.
+            return VERDICT_UNKNOWN
+        return verdict
 
     # (9) A string command with no shell is passed as the executable *name* on
     # POSIX and parsed differently on Windows. Platform-dependent, so not a
@@ -636,8 +642,29 @@ def _has_tainted_name(node: ast.AST, state: CallState) -> bool:
     )
 
 
-def _keyword_is_true(call: ast.Call, name: str) -> bool:
+def _shell_status(sink: Sink, call: ast.Call) -> bool | None:
+    """Does a shell run here: yes, no, or unreadable?
+
+    Three states, and the third is the whole point. This is consulted to prove
+    DANGER, so anything it cannot resolve must not come back as *no shell*: that
+    answer sends a list argv on to rule 8 and out as ``safe``.
+
+    ``subprocess`` tests ``shell`` for truth, not for identity, so ``shell=1``
+    and ``shell="yes"`` run a shell exactly as ``shell=True`` does — the earlier
+    ``value is True`` comparison read both as no shell. A value that is not a
+    constant (``shell=self.use_shell``, ``shell=os.name == "nt"``) cannot be
+    resolved from the AST, and neither can a ``**kwargs`` that may well carry
+    ``shell=True``; both are unreadable, never absent.
+    """
+    if sink.shell == SHELL_INHERENT:
+        return True
+    if sink.shell != SHELL_CONDITIONAL:
+        return False
     for keyword in call.keywords:
-        if keyword.arg == name:
-            return isinstance(keyword.value, ast.Constant) and keyword.value.value is True
+        if keyword.arg == "shell":
+            if isinstance(keyword.value, ast.Constant):
+                return bool(keyword.value.value)
+            return None
+    if any(keyword.arg is None for keyword in call.keywords):
+        return None  # `**kwargs` may carry `shell=`
     return False
