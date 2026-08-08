@@ -26,6 +26,16 @@ _RANK = {LITERAL: 0, COMPOSED: 1, OPAQUE: 2}
 
 _COMPOSING_METHODS = {"format", "join"}
 
+# ast.TryStar (``except*``) only exists from 3.11. Falling back to ast.Try keeps
+# the module importable on 3.10 without a runtime version branch; on 3.10 the
+# tuple below is simply (ast.Try, ast.Try), which isinstance tolerates fine.
+_TRY_STAR = getattr(ast, "TryStar", ast.Try)
+_TRY_TYPES = (ast.Try, _TRY_STAR)
+
+# Loop bodies are walked to a fixpoint rather than a fixed number of times; the
+# cap exists only to guarantee termination, see `_run_loop_to_fixpoint`.
+_MAX_LOOP_PASSES = 10
+
 
 def weakest(*classes: str) -> str:
     """The least safe of several construction classes."""
@@ -79,16 +89,22 @@ def snapshot_call_sites(
     """Record construction and taint state at every call site, in source order.
 
     Keyed by ``id()`` of the ``ast.Call`` node, which is stable for the lifetime
-    of the parsed tree.
+    of the parsed tree. A call absent from the returned mapping was not
+    analysed at all — for example one inside a nested function or class body —
+    and a caller must treat a missing entry as maximally conservative (opaque
+    and tainted), never as clean.
 
-    A whole-function state applied to every call lets an assignment that happens
-    *after* a call influence it. Because merges take the weakest class that can
-    only over-report, but over-reporting is exactly the noise this detector
-    exists to remove.
+    A single whole-function binding map applied to every call site would let an
+    assignment that happens *after* a call influence it. State is threaded
+    through a source-ordered walk instead, so a call's snapshot reflects only
+    what has executed up to that point; branches are walked from a shared copy
+    of the entry state and merged back weakest-wins.
 
-    Loop bodies are walked twice so a value composed on iteration *n* is visible
-    to a call on iteration *n+1*. Two passes are enough: the lattice has three
-    levels and merges are monotonically weakening, so the state has converged.
+    Loop bodies are walked to a fixpoint rather than a fixed number of times:
+    propagation speed through a chain of assignments is bounded by the number
+    of hops between variables, not by the height of the LITERAL/COMPOSED/OPAQUE
+    lattice, so a fixed pass count can under-count. See
+    ``_run_loop_to_fixpoint``.
     """
     bindings: dict[str, str] = {}
     tainted: dict[str, str] = dict(initial_taint or {})
@@ -124,7 +140,7 @@ def _snapshot_calls_in(
     Nested bodies are skipped here; ``_apply_effect`` walks them with their own
     branch-local state.
 
-    A call visited more than once — a loop body is walked twice — *merges*
+    A call visited more than once — a loop body is walked repeatedly — *merges*
     rather than keeping the first snapshot. A call inside a loop must see the
     weakest state across iterations, or a value composed on iteration *n* would
     be invisible to the call on iteration *n+1*.
@@ -141,6 +157,14 @@ def _snapshot_calls_in(
             states[id(call)] = CallState(merged, {**existing.tainted, **tainted})
 
 
+def _has_nested_stmt_body(statement: ast.stmt) -> bool:
+    """True if any field of this statement is a non-empty list of statements."""
+    return any(
+        isinstance(value, list) and value and all(isinstance(item, ast.stmt) for item in value)
+        for _, value in ast.iter_fields(statement)
+    )
+
+
 def _own_expressions(statement: ast.stmt) -> list[ast.AST]:
     if isinstance(statement, ast.If | ast.While):
         return [statement.test]
@@ -148,10 +172,18 @@ def _own_expressions(statement: ast.stmt) -> list[ast.AST]:
         return [statement.iter]
     if isinstance(statement, ast.With | ast.AsyncWith):
         return [item.context_expr for item in statement.items]
-    if isinstance(statement, ast.Try):
+    if isinstance(statement, ast.Match):
+        return [statement.subject]
+    if isinstance(statement, _TRY_TYPES):
         return []
     if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         return []  # nested definitions have their own scope
+    if _has_nested_stmt_body(statement):
+        # An unrecognised compound statement: its nested bodies are merged
+        # generically by `_apply_effect`, not walked here at the pre-effect
+        # state — walking the whole subtree now would snapshot calls in those
+        # bodies against a state from before they actually run.
+        return []
     return [statement]
 
 
@@ -161,6 +193,10 @@ def _apply_effect(
     tainted: dict[str, str],
     states: dict[int, CallState],
 ) -> None:
+    # A walrus target takes effect as soon as its enclosing expression is
+    # evaluated, regardless of which branch below the statement dispatches to.
+    _apply_walrus_bindings(statement, bindings, tainted)
+
     if isinstance(statement, ast.Assign):
         value_class = classify_expr(statement.value, bindings)
         source = _tainted_source(statement.value, tainted)
@@ -185,21 +221,114 @@ def _apply_effect(
             if source:
                 tainted[name] = source
     elif isinstance(statement, ast.If):
-        _merge_branches(
-            [statement.body, statement.orelse], bindings, tainted, states
-        )
-    elif isinstance(statement, ast.For | ast.AsyncFor | ast.While):
-        # Two passes: iteration n+1 must see what iteration n built.
-        for _ in range(2):
-            _merge_branches([statement.body], bindings, tainted, states)
+        _merge_branches([statement.body, statement.orelse], bindings, tainted, states)
+    elif isinstance(statement, ast.For | ast.AsyncFor):
+        _bind_target_opaque(statement.target, statement.iter, bindings, tainted)
+        _run_loop_to_fixpoint(statement.body, bindings, tainted, states)
+        _merge_branches([statement.orelse], bindings, tainted, states)
+    elif isinstance(statement, ast.While):
+        _run_loop_to_fixpoint(statement.body, bindings, tainted, states)
+        _merge_branches([statement.orelse], bindings, tainted, states)
     elif isinstance(statement, ast.With | ast.AsyncWith):
+        for item in statement.items:
+            if item.optional_vars is not None:
+                _bind_target_opaque(item.optional_vars, item.context_expr, bindings, tainted)
         _walk_body(statement.body, bindings, tainted, states)
-    elif isinstance(statement, ast.Try):
+    elif isinstance(statement, _TRY_TYPES):
+        for handler in statement.handlers:
+            if handler.name:
+                bindings[handler.name] = OPAQUE
+                tainted.pop(handler.name, None)
         _merge_branches(
-            [statement.body, *(h.body for h in statement.handlers),
-             statement.orelse, statement.finalbody],
-            bindings, tainted, states,
+            [
+                statement.body,
+                *(handler.body for handler in statement.handlers),
+                statement.orelse,
+                statement.finalbody,
+            ],
+            bindings,
+            tainted,
+            states,
         )
+    elif isinstance(statement, ast.Match):
+        _merge_branches([case.body for case in statement.cases], bindings, tainted, states)
+    elif isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        pass  # nested definitions have their own scope
+    else:
+        _apply_generic_effect(statement, bindings, tainted, states)
+
+
+def _apply_walrus_bindings(
+    statement: ast.stmt,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Bind walrus (``:=``) targets found in this statement's own expressions.
+
+    Scoped to ``_own_expressions`` so a walrus buried in a nested body isn't
+    applied to the parent state before that body's branch-local walk runs.
+    """
+    for expr in _own_expressions(statement):
+        for node in ast.walk(expr):
+            if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+                source = _tainted_source(node.value, tainted)
+                bindings[node.target.id] = OPAQUE
+                if source:
+                    tainted[node.target.id] = source
+                else:
+                    tainted.pop(node.target.id, None)
+
+
+def _bind_target_opaque(
+    target: ast.AST,
+    source_expr: ast.AST | None,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Bind a non-assignment target (a ``for`` or ``with`` target) to OPAQUE.
+
+    These forms never carry a construction class of their own — the module
+    tracks how *strings* are built, not iterables or context managers — so the
+    name they bind is always OPAQUE, with taint carried over if the source
+    expression is tainted.
+    """
+    source = _tainted_source(source_expr, tainted)
+    for name in _names(target):
+        bindings[name] = OPAQUE
+        if source:
+            tainted[name] = source
+        else:
+            tainted.pop(name, None)
+
+
+def _run_loop_to_fixpoint(
+    body: list[ast.stmt],
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+    states: dict[int, CallState],
+) -> None:
+    """Walk a loop body repeatedly until it stops changing the enclosing state.
+
+    A single extra pass is not always enough: propagation speed through a
+    chain of assignments (``q = a; a = b; b = f(uid)``) is bounded by the
+    number of hops between variables, not by the height of the
+    LITERAL/COMPOSED/OPAQUE lattice. Each pass can move a composition back by
+    at most one hop, so an *n*-hop chain needs *n* extra passes to reach a call
+    at the top of the loop body.
+
+    Passes are capped at ``_MAX_LOOP_PASSES`` purely to guarantee termination.
+    Because merges only ever weaken a class (never strengthen it back towards
+    LITERAL), the state is monotonically non-decreasing per variable and stops
+    changing well before the cap in any realistic function body.
+    """
+    if not body:
+        return
+    for _ in range(_MAX_LOOP_PASSES):
+        before_bindings = dict(bindings)
+        before_tainted = dict(tainted)
+        _merge_branches([body], bindings, tainted, states)
+        if bindings == before_bindings and tainted == before_tainted:
+            return
 
 
 def _merge_branches(
@@ -208,16 +337,101 @@ def _merge_branches(
     tainted: dict[str, str],
     states: dict[int, CallState],
 ) -> None:
-    """Walk each branch with a copy, then merge weakest-wins back into the parent."""
+    """Walk each branch from a shared entry snapshot, then merge weakest-wins.
+
+    Every branch starts from the *same* pre-branch state, not from whatever
+    the previous branch in this call left behind. An ``else`` arm can never
+    execute after the ``if`` arm ran, so judging it with the ``if`` arm's
+    effects already applied would be a false positive in exactly the shape
+    this module exists to avoid.
+    """
+    entry_bindings = dict(bindings)
+    entry_tainted = dict(tainted)
     for body in bodies:
         if not body:
             continue
-        branch_bindings = dict(bindings)
-        branch_tainted = dict(tainted)
+        branch_bindings = dict(entry_bindings)
+        branch_tainted = dict(entry_tainted)
         _walk_body(body, branch_bindings, branch_tainted, states)
         for name, value_class in branch_bindings.items():
             bindings[name] = weakest(bindings.get(name, value_class), value_class)
         tainted.update(branch_tainted)
+
+
+def _apply_generic_effect(
+    statement: ast.stmt,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+    states: dict[int, CallState],
+) -> None:
+    """Fallback for statement shapes with no specific handling above.
+
+    Fail-safe by construction: any name this statement could plausibly bind —
+    an exception name, a comprehension target, a binding form a future Python
+    grammar adds — becomes OPAQUE rather than being left at whatever, possibly
+    safer-looking, class it already had. An unrecognised construct must make a
+    value OPAQUE, never leave it LITERAL. Nested statement bodies this
+    function doesn't specifically recognise are still walked, each from a copy
+    of the current state merged back weakest-wins, rather than skipped.
+    """
+    source = ""
+    for expr in _generic_expr_fields(statement):
+        found = _tainted_source(expr, tainted)
+        if found:
+            source = found
+
+    for name in _generic_bound_names(statement):
+        bindings[name] = OPAQUE
+        if source:
+            tainted[name] = source
+        else:
+            tainted.pop(name, None)
+
+    nested_bodies = [
+        value
+        for _, value in ast.iter_fields(statement)
+        if isinstance(value, list) and value and all(isinstance(item, ast.stmt) for item in value)
+    ]
+    if nested_bodies:
+        _merge_branches(nested_bodies, bindings, tainted, states)
+
+
+def _generic_expr_fields(node: ast.AST) -> list[ast.AST]:
+    """Direct expression-valued fields of a node, for taint propagation."""
+    exprs: list[ast.AST] = []
+    for _, value in ast.iter_fields(node):
+        if isinstance(value, ast.expr):
+            exprs.append(value)
+        elif isinstance(value, list):
+            exprs.extend(item for item in value if isinstance(item, ast.expr))
+    return exprs
+
+
+def _generic_bound_names(node: ast.AST) -> list[str]:
+    """Names a subtree binds, without crossing into nested function/class scopes.
+
+    Nested statement-list fields (a body, an ``orelse``, a handler's body, ...)
+    are skipped: those are merged separately by whoever calls this, and
+    walking them here too would apply their effects to the parent state
+    unconditionally instead of branch-locally.
+    """
+    names: list[str] = []
+    for _, value in ast.iter_fields(node):
+        if isinstance(value, list) and value and all(isinstance(item, ast.stmt) for item in value):
+            continue
+        children = value if isinstance(value, list) else [value]
+        for child in children:
+            if not isinstance(child, ast.AST):
+                continue
+            nested_scope = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+            if isinstance(child, nested_scope):
+                continue  # nested scope: does not bind names in the enclosing one
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                names.append(child.id)
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                names.append(child.name)
+            names.extend(_generic_bound_names(child))
+    return names
 
 
 def _tainted_source(node: ast.AST | None, tainted: dict[str, str]) -> str:

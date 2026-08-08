@@ -1,4 +1,5 @@
 import ast
+import sys
 
 import pytest
 
@@ -216,3 +217,178 @@ def test_taint_is_also_call_site_sensitive():
     )
     state, call = _state_at(src)
     assert "safe_value" not in state.tainted
+
+
+# --- Fix round 1 regressions -------------------------------------------------
+
+
+def _states_for(src: str, callee: str = "execute"):
+    """Like _state_at, but returns every matching call's state, in source order."""
+    fn = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)][0]
+    tainted = {a.arg: f"input:{a.arg}" for a in fn.args.args}
+    states = snapshot_call_sites(fn, tainted)
+    calls = [
+        n
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(callee)
+    ]
+    return [states[id(call)] for call in calls], calls
+
+
+def test_branch_merge_does_not_leak_if_arm_into_else_arm():
+    """C1: an else arm must not see effects from the if arm it never ran after."""
+    src = (
+        "def f(uid, flag):\n"
+        '    q = "SELECT 1"\n'
+        "    if flag:\n"
+        '        q = f"SELECT {uid}"\n'
+        "    else:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+def test_loop_two_hop_chain_converges():
+    """C2: convergence must track assignment hops, not lattice height."""
+    src = (
+        "def f(uid, rows):\n"
+        '    a = "SELECT 1"\n'
+        '    b = "SELECT 1"\n'
+        "    for r in rows:\n"
+        "        cursor.execute(b)\n"
+        "        b = a\n"
+        '        a = f"SELECT {uid}"\n'
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_loop_three_hop_chain_converges():
+    """C2: a longer chain still converges within the pass cap."""
+    src = (
+        "def f(uid, rows):\n"
+        '    a = "SELECT 1"\n'
+        '    b = "SELECT 1"\n'
+        '    c = "SELECT 1"\n'
+        "    for r in rows:\n"
+        "        cursor.execute(c)\n"
+        "        c = b\n"
+        "        b = a\n"
+        '        a = f"SELECT {uid}"\n'
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_match_case_composition_is_visible_in_case_and_after():
+    """C3: match/case bodies must be walked with their own branch-local state."""
+    src = (
+        "def f(uid, flag):\n"
+        '    q = "SELECT 1"\n'
+        "    match flag:\n"
+        "        case 1:\n"
+        '            q = f"SELECT {uid}"\n'
+        "            cursor.execute(q)\n"
+        "    cursor.execute(q)\n"
+    )
+    states, calls = _states_for(src)
+    assert len(calls) == 2
+    for state, call in zip(states, calls, strict=True):
+        assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="except* requires Python 3.11+")
+def test_except_star_composition_is_visible_in_body_and_after():
+    """C4: ast.TryStar must be recognised, not silently fall through to LITERAL."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        "        risky()\n"
+        "    except* ValueError:\n"
+        '        q = f"SELECT {uid}"\n'
+        "        cursor.execute(q)\n"
+        "    cursor.execute(q)\n"
+    )
+    states, calls = _states_for(src)
+    assert len(calls) == 2
+    for state, call in zip(states, calls, strict=True):
+        assert classify_expr(call.args[0], state.bindings) == COMPOSED
+
+
+def test_for_target_shadowing_prior_literal_is_not_literal():
+    """C5: a for-loop target must overwrite a prior binding of the same name."""
+    src = (
+        "def f(uid, rows):\n"
+        '    q = "SELECT 1"\n'
+        "    for q in rows:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_with_target_shadowing_prior_literal_is_not_literal():
+    """C5: a with-target must overwrite a prior binding of the same name."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    with make(uid) as q:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_except_target_shadowing_prior_literal_is_not_literal():
+    """C5: an except-as name must overwrite a prior binding of the same name."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        "        risky()\n"
+        "    except Exception as q:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_walrus_shadowing_prior_literal_is_not_literal():
+    """C5: a walrus target must overwrite a prior binding of the same name."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    if (q := make(uid)):\n"
+        "        pass\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_comprehension_target_shadowing_prior_literal_is_not_literal():
+    """C5: a comprehension target must overwrite a prior binding of the same name."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    [q for q in range(3)]\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_call_in_for_else_body_is_snapshotted():
+    """I1: a for/else body must be covered by the returned mapping."""
+    src = (
+        "def f(uid, rows):\n"
+        '    q = "SELECT 1"\n'
+        "    for row in rows:\n"
+        "        pass\n"
+        "    else:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
