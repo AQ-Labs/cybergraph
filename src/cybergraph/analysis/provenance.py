@@ -332,17 +332,12 @@ def _apply_walrus_bindings(
     """Bind walrus (``:=``) targets found in this statement's own expressions.
 
     Scoped to ``_own_expressions`` so a walrus buried in a nested body isn't
-    applied to the parent state before that body's branch-local walk runs.
+    applied to the parent state before that body's branch-local walk runs. A
+    ``match`` reports only its subject here; ``_apply_match_cases`` handles the
+    walrus in each ``case`` guard itself, scoped to that case.
     """
     for expr in _own_expressions(statement):
-        for node in ast.walk(expr):
-            if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-                source = _tainted_source(node.value, tainted)
-                bindings[node.target.id] = OPAQUE
-                if source:
-                    tainted[node.target.id] = source
-                else:
-                    tainted.pop(node.target.id, None)
+        _apply_walrus_in(expr, bindings, tainted)
 
 
 def _bind_target_opaque(
@@ -393,13 +388,56 @@ def _bind_captures(
     bindings: dict[str, str],
     tainted: dict[str, str],
 ) -> None:
-    """Bind ``match`` capture names to OPAQUE, with taint from the subject."""
+    """Bind names a pattern *did* capture: OPAQUE, taint replaced by the subject's.
+
+    Used inside the arm the pattern matched, where the capture certainly holds
+    a piece of the subject, so a clean subject genuinely clears the name.
+    """
     for name in names:
         bindings[name] = OPAQUE
         if source:
             tainted[name] = source
         else:
             tainted.pop(name, None)
+
+
+def _bind_captures_weakly(
+    captures: list[tuple[str, str]],
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Bind names a pattern *may* have captured: OPAQUE, taint added never removed.
+
+    Used where control arrived without knowing whether the bind happened — a
+    later case, or falling out of a non-exhaustive ``match``. Both outcomes are
+    reachable, so this is their join: OPAQUE covers "it bound", and keeping any
+    taint the name already carried covers "it did not". Clearing taint here
+    would be a silent miss whenever a clean subject's pattern failed against a
+    name that was already tainted.
+    """
+    for name, source in captures:
+        bindings[name] = OPAQUE
+        if source and name not in tainted:
+            tainted[name] = source
+
+
+def _apply_walrus_in(
+    expr: ast.AST,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Bind every walrus target in one expression; return (name, taint source)."""
+    bound: list[tuple[str, str]] = []
+    for node in ast.walk(expr):
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            source = _tainted_source(node.value, tainted)
+            bindings[node.target.id] = OPAQUE
+            if source:
+                tainted[node.target.id] = source
+            else:
+                tainted.pop(node.target.id, None)
+            bound.append((node.target.id, source))
+    return bound
 
 
 def _apply_match_cases(
@@ -430,35 +468,57 @@ def _apply_match_cases(
     reads as LITERAL and clean unless ``q`` is carried forward. A partial
     structural match that binds and then fails does the same thing.
 
-    So a running map of preceding cases' captures is threaded through the
-    loop: case *n* starts from the entry state plus every capture bound by
-    cases *0..n-1*, applies its own captures on top, and is merged back
+    So a running list of preceding cases' captures is threaded through the
+    loop: case *n* starts from the entry state plus every name bound by cases
+    *0..n-1*, applies its own captures on top, and is merged back
     weakest-wins. A case placed *before* the one that captures a name is
     unaffected, which is what keeps a reading arm's own value intact.
+
+    The same names must survive falling out of the bottom of a *non-exhaustive*
+    match, for the same reason: the last pattern can bind and then fail, with
+    no later case to carry it into. So the fall-through path is the entry state
+    plus every capture, not the plain entry state.
+
+    A walrus in a guard binds exactly like a capture — it runs before the guard
+    yields a verdict, so it survives a failing guard too — and is carried
+    forward the same way. ``_own_expressions`` returns only ``subject`` for a
+    ``Match``, so the module's general walrus handling never reaches a guard.
+
+    Everything a case's pattern and guard bound is live *before* its body runs,
+    and the guard itself can raise, so that state is absorbed into any
+    enclosing ``try`` accumulator at that point rather than only after the
+    body has had a chance to overwrite it.
     """
     entry_bindings = dict(bindings)
     entry_tainted = dict(tainted)
     subject_source = _tainted_source(statement.subject, tainted)
-    preceding_captures: list[str] = []
+    # (name, taint source) for every name a *preceding* case may have left bound.
+    carried: list[tuple[str, str]] = []
     paths: list[tuple[dict[str, str], dict[str, str]]] = []
 
     for case in statement.cases:
         branch_bindings = dict(entry_bindings)
         branch_tainted = dict(entry_tainted)
-        _bind_captures(preceding_captures, subject_source, branch_bindings, branch_tainted)
+        _bind_captures_weakly(carried, branch_bindings, branch_tainted)
         own_captures = _match_capture_names(case.pattern)
         _bind_captures(own_captures, subject_source, branch_bindings, branch_tainted)
+        carried.extend((name, subject_source) for name in own_captures)
         if case.guard is not None:
+            carried.extend(_apply_walrus_in(case.guard, branch_bindings, branch_tainted))
             # The guard runs after the pattern bound this case's captures, so
             # a call in it must be snapshotted against that state — not left
             # out of the mapping entirely, as it was before.
             _snapshot_calls_in_expr(case.guard, branch_bindings, branch_tainted, states)
+        if accumulator is not None:
+            accumulator.absorb(branch_bindings, branch_tainted)
         _walk_body(case.body, branch_bindings, branch_tainted, states, accumulator)
         paths.append((branch_bindings, branch_tainted))
-        preceding_captures.extend(own_captures)
 
     if not _match_is_exhaustive(statement):
-        paths.append((entry_bindings, entry_tainted))
+        fallthrough_bindings = dict(entry_bindings)
+        fallthrough_tainted = dict(entry_tainted)
+        _bind_captures_weakly(carried, fallthrough_bindings, fallthrough_tainted)
+        paths.append((fallthrough_bindings, fallthrough_tainted))
     _replace_with_join(paths, bindings, tainted)
 
 
@@ -650,7 +710,19 @@ def _apply_try_statement(
         if handler.name:
             handler_bindings[handler.name] = OPAQUE
             handler_tainted.pop(handler.name, None)
+            # The name holds the caught exception from here on, and
+            # `_walk_body` only absorbs *after* each statement — so a handler
+            # whose first statement rebinds it would overwrite OPAQUE before
+            # anything recorded it. Absorb the binding now, while it is
+            # unambiguously live.
+            if accumulator is not None:
+                accumulator.absorb(handler_bindings, handler_tainted)
         _walk_body(handler.body, handler_bindings, handler_tainted, states, accumulator)
+        if handler.name:
+            # CPython deletes the name when the handler ends, whatever the
+            # body rebound it to. A deleted name is OPAQUE here, the same way
+            # `del q` is — leaving a stale LITERAL behind is a silent miss.
+            handler_bindings[handler.name] = OPAQUE
         caught_paths.append((handler_bindings, handler_tainted))
 
     # `finally` runs on every path, including the one where no handler

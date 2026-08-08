@@ -1086,3 +1086,243 @@ def test_finally_sees_the_raising_path_but_the_continuation_does_not():
     after, after_call = _state_at(src, "run")
     assert classify_expr(after_call.args[0], after.bindings) == LITERAL
     assert "q" not in after.tainted
+
+
+# --- Fix round 5 regressions -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,src",
+    [
+        (
+            "outer handler",
+            "def f(uid):\n"
+            "    try:\n"
+            "        try:\n"
+            "            pass\n"
+            "        except Exception as q:\n"
+            '            q = "L"\n'
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "outer finally",
+            "def f(uid):\n"
+            "    try:\n"
+            "        try:\n"
+            "            pass\n"
+            "        except Exception as q:\n"
+            '            q = "L"\n'
+            "    finally:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "continuation",
+            "def f(uid):\n"
+            "    try:\n"
+            "        pass\n"
+            "    except Exception as q:\n"
+            '        q = "L"\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "continuation over a prior literal",
+            "def f(uid):\n"
+            '    q = "S"\n'
+            "    try:\n"
+            "        pass\n"
+            "    except Exception as q:\n"
+            '        q = "L"\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "inside a loop",
+            "def f(uid, rows):\n"
+            "    for r in rows:\n"
+            "        try:\n"
+            "            pass\n"
+            "        except Exception as q:\n"
+            '            q = "L"\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "two handlers, one rebinds",
+            "def f(uid):\n"
+            "    try:\n"
+            "        pass\n"
+            "    except ValueError as q:\n"
+            '        q = "L"\n'
+            "    except TypeError:\n"
+            "        pass\n"
+            "    cursor.execute(q)\n",
+        ),
+    ],
+)
+def test_exception_name_stays_opaque_when_the_handler_rebinds_it(name, src):
+    """R5-1: `_walk_body` absorbs after each statement, so a handler whose first
+    statement rebinds the exception name would overwrite OPAQUE before anything
+    recorded it."""
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE, name
+
+
+def test_exception_name_read_after_its_own_rebind_is_flow_sensitive():
+    """R5-1 must not overshoot: inside the handler, after the rebind, the name
+    really does hold the new value."""
+    src = (
+        "def f(uid):\n"
+        "    try:\n"
+        "        pass\n"
+        "    except Exception as q:\n"
+        '        q = "L"\n'
+        "        try:\n"
+        "            pass\n"
+        "        except Exception:\n"
+        "            cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+def test_match_fall_through_keeps_a_capture_whose_guard_failed():
+    """R5-2: the last case can bind and then fail, with no later case to carry it."""
+    src = (
+        "def f(subject):\n"
+        '    q = "SELECT 1"\n'
+        "    match subject:\n"
+        "        case [q] if ok(q):\n"
+        '            q = "L"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_match_fall_through_keeps_a_partially_bound_capture():
+    """R5-2: `case [q, 2]` binds q, then fails on the 2, and falls out."""
+    src = (
+        "def f(subject):\n"
+        '    q = "SELECT 1"\n'
+        "    match subject:\n"
+        "        case [q, 2]:\n"
+        '            q = "L"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_match_fall_through_does_not_clear_taint_a_clean_subject_never_touched():
+    """R5-2: "the pattern did not bind" is reachable too, so entry taint stands."""
+    src = (
+        "def f(uid):\n"
+        "    q = uid\n"
+        '    payload = "const"\n'
+        "    match payload:\n"
+        "        case [q]:\n"
+        "            pass\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+@pytest.mark.parametrize(
+    "name,case_line",
+    [("guarded", "case [q] if validate(q):"), ("unguarded", "case [q]:")],
+)
+def test_enclosing_handler_sees_a_match_capture_before_the_case_body_runs(name, case_line):
+    """R5-2: the pattern and guard have run and may raise before the body does."""
+    src = (
+        "def f(s):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        "        match s:\n"
+        f"            {case_line}\n"
+        '                q = "L"\n'
+        "    except Exception:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE, name
+    assert "q" in state.tainted, name
+
+
+@pytest.mark.parametrize(
+    "name,src",
+    [
+        (
+            "read in the arm",
+            "def f(uid, subject):\n"
+            '    q = "SELECT 1"\n'
+            "    match subject:\n"
+            '        case 1 if (q := "x" + uid):\n'
+            "            cursor.execute(q)\n",
+        ),
+        (
+            "read after the match",
+            "def f(uid, subject):\n"
+            '    q = "SELECT 1"\n'
+            "    match subject:\n"
+            '        case 1 if (q := "x" + uid):\n'
+            "            pass\n"
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "read in a later case",
+            "def f(uid, subject):\n"
+            '    q = "SELECT 1"\n'
+            "    match subject:\n"
+            '        case 1 if (q := "x" + uid):\n'
+            "            pass\n"
+            "        case 2:\n"
+            "            cursor.execute(q)\n",
+        ),
+        (
+            "read after an exhaustive match",
+            "def f(uid, subject):\n"
+            '    q = "SELECT 1"\n'
+            "    match subject:\n"
+            '        case 1 if (q := "x" + uid):\n'
+            "            pass\n"
+            "        case _:\n"
+            "            pass\n"
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "read in an enclosing handler",
+            "def f(uid, subject):\n"
+            '    q = "SELECT 1"\n'
+            "    try:\n"
+            "        match subject:\n"
+            '            case 1 if (q := "x" + uid):\n'
+            "                pass\n"
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+    ],
+)
+def test_walrus_in_a_case_guard_shadows_a_prior_literal(name, src):
+    """R5-3: `_own_expressions` reports only the subject for a Match, so the
+    module's walrus handling never reached a guard — and a name bound to a
+    literal beforehand read LITERAL and clean."""
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE, name
+    assert "q" in state.tainted, name
+
+
+def test_walrus_in_a_case_guard_shadows_even_with_a_clean_value():
+    """R5-3: the shadowing is about the binding, not about taint."""
+    src = (
+        "def f(subject):\n"
+        '    q = "SELECT 1"\n'
+        "    match subject:\n"
+        "        case 1 if (q := build()):\n"
+        "            cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" not in state.tainted
