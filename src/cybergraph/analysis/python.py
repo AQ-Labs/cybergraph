@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 
+from cybergraph.analysis.provenance import CallState, snapshot_call_sites
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
@@ -27,6 +28,13 @@ from cybergraph.security.ontology import (
     SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
+from cybergraph.security.predicates import (
+    VERDICT_SAFE,
+    VERDICT_UNKNOWN,
+    VERDICT_UNSAFE,
+    assess_call,
+)
+from cybergraph.security.sinks import SEVERITY_MEDIUM, Sink, lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
 SECRET_EXPOSURE_SINKS = {
@@ -111,31 +119,34 @@ def analyze_python_file(
                     Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"})
                 )
 
-            _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
+            tainted = _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
+            call_states = snapshot_call_sites(item, tainted)
+            introduced = {
+                name: source for name, source in tainted.items() if name not in tainted_values
+            }
 
             for call in [n for n in _scoped_walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
                 if not call_name:
                     continue
-                edges.append(
-                    Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno))
-                )
+                line_no = getattr(call, "lineno", item.lineno)
+                edges.append(Edge("CALLS", key, call_name, rel, line_no))
                 lowered = call_name.lower()
-                if any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)):
-                    line_no = getattr(call, "lineno", item.lineno)
+
+                sink = lookup_sink(call_name, "python") or _custom_sink(call_name, custom_sinks)
+                if sink is not None:
+                    # Inventory is always recorded, whether or not this call site
+                    # is an unsafe use of the sink.
                     edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, line_no))
-                    if not is_inline_suppressed(lines, line_no, "CG-SINK-CALL"):
-                        findings.append(
-                            Finding(
-                                rule_id="CG-SINK-CALL",
-                                severity="medium",
-                                message=f"Function reaches sensitive sink `{call_name}`",
-                                file_path=rel,
-                                line_start=line_no,
-                                cwe="CWE-20",
-                                evidence=call_name,
-                            )
+                    state = _state_for(call, call_states, introduced)
+                    assessment = (
+                        assess_call(sink, call, state) if state is not None else VERDICT_UNKNOWN
                     )
+                    finding = _finding_for(sink, assessment, call_name, rel, line_no)
+                    if finding is not None and not is_inline_suppressed(
+                        lines, line_no, finding.rule_id
+                    ):
+                        findings.append(finding)
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
                     edges.append(
                         Edge(
@@ -269,8 +280,10 @@ def _add_python_dataflows(
     tainted_values: dict[str, str],
     nodes: list[Node],
     edges: list[Edge],
-) -> None:
-    """Track simple local propagation from request inputs into sink arguments."""
+) -> dict[str, str]:
+    """Track simple local propagation from request inputs into sink arguments.
+
+    Returns the accumulated taint map, used to seed per-call-site snapshots."""
     tainted = dict(tainted_values)
     for node in _scoped_walk(item):
         if isinstance(node, ast.Assign):
@@ -345,6 +358,7 @@ def _add_python_dataflows(
                         {"function": function_key, "reason": "tainted argument"},
                     )
                 )
+    return tainted
 
 
 def _ensure_input_node(
@@ -394,6 +408,78 @@ def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
 def _is_user_input_expr(node: ast.AST) -> bool:
     text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
     return any(keyword in text for keyword in SOURCE_KEYWORDS)
+
+
+def _state_for(
+    call: ast.Call, call_states: dict[int, CallState], introduced: dict[str, str]
+) -> CallState | None:
+    """The snapshot for one call site, with body-introduced taint kept alive.
+
+    ``snapshot_call_sites`` propagates taint *between* names but has no notion of
+    which expressions *introduce* it — ``SOURCE_KEYWORDS`` matching lives in
+    ``_add_python_dataflows``. So ``name = request.args.get("name")`` reads to it
+    as an assignment from a clean expression and **clears** whatever the seeded
+    taint map said about ``name``, which silently exonerated the single most
+    common injection shape there is (measured: the demo Flask handler reported
+    nothing). Names the dataflow pass discovered inside the body are therefore
+    re-asserted on every snapshot for this function.
+
+    Route parameters are deliberately left out of ``introduced``: they are
+    tainted from entry, and letting the flow-sensitive walk clear them is what
+    keeps ``uid = "1"`` before the sink from reading as a finding. The price of
+    the wider net on body-discovered names is over-reporting one that is
+    reassigned to a literal *after* being read from the request — noise, in the
+    reporting direction, never a silent miss.
+
+    A call with no snapshot at all stays ``None``, so callers still abstain
+    rather than reasoning from a state that was never computed.
+    """
+    state = call_states.get(id(call))
+    if state is None or not introduced:
+        return state
+    return CallState(state.bindings, {**state.tainted, **introduced})
+
+
+def _finding_for(
+    sink: Sink, assessment: str, call_name: str, rel: str, line_no: int
+) -> Finding | None:
+    """Build the finding for an assessment, or None when the call site is safe.
+
+    An ``unknown`` assessment gets its own rule id at reduced severity. Not being
+    able to see how a value was built is a different fact from knowing it is
+    dangerous, and a different fact again from knowing it is safe.
+    """
+    if assessment == VERDICT_SAFE:
+        return None
+    unsafe = assessment == VERDICT_UNSAFE
+    return Finding(
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}-UNVERIFIED",
+        severity=sink.severity if unsafe else SEVERITY_MEDIUM,
+        message=(
+            f"`{call_name}` {sink.plain}"
+            if unsafe
+            else f"`{call_name}` {sink.plain}, and CyberGraph could not confirm "
+                 f"the value is safe"
+        ),
+        file_path=rel,
+        line_start=line_no,
+        cwe=sink.cwe,
+        evidence=call_name,
+    )
+
+
+def _custom_sink(call_name: str, custom_sinks: tuple[str, ...]) -> Sink | None:
+    """Wrap a user-configured sink so it flows through the same predicate path."""
+    if call_name not in custom_sinks:
+        return None
+    return Sink(
+        name=call_name,
+        rule_id="CG-CUSTOM-SINK",
+        cwe="CWE-20",
+        severity=SEVERITY_MEDIUM,
+        plain="receives this value, and your project marked it sensitive",
+        vuln_class="custom",
+    )
 
 
 def _is_secret_exposure(call_name: str, call_text: str, secret_markers: tuple[str, ...]) -> bool:

@@ -68,7 +68,7 @@ def test_secret_on_context_line_near_nonsecret_finding_is_redacted(tmp_path: Pat
     )
     g = {"nodes": [{
         "id": "app.py::h", "file": "app.py", "line": 3,
-        "findings": [{"rule_id": "CG-SINK-CALL", "severity": "high", "message": "sql", "line": 3}],
+        "findings": [{"rule_id": "CG-SQL-EXEC", "severity": "high", "message": "sql", "line": 3}],
     }]}
     attach_source_snippets(tmp_path, g, context=3)
     joined = " ".join(ln["text"] for ln in g["nodes"][0]["snippet"]["lines"])

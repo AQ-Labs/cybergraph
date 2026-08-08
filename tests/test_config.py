@@ -15,7 +15,7 @@ def test_load_config_reads_ignored_paths_and_markers(tmp_path: Path) -> None:
         "sinks = ['dangerous_call']\n"
         "auth_markers = ['require_admin']\n"
         "\n[suppressions]\n"
-        "rules = ['CG-SINK-CALL']\n"
+        "rules = ['CG-SQL-EXEC']\n"
         "paths = ['legacy/**']\n",
         encoding="utf-8",
     )
@@ -25,7 +25,7 @@ def test_load_config_reads_ignored_paths_and_markers(tmp_path: Path) -> None:
     assert config.ignored_paths == ("vendor/**",)
     assert config.custom_sinks == ("dangerous_call",)
     assert config.auth_markers == ("require_admin",)
-    assert config.suppressed_rules == ("CG-SINK-CALL",)
+    assert config.suppressed_rules == ("CG-SQL-EXEC",)
     assert config.suppressed_paths == ("legacy/**",)
 
 
@@ -78,12 +78,15 @@ def test_build_graph_suppresses_configured_finding_rules(tmp_path: Path) -> None
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".cybergraph.toml").write_text(
-        "[suppressions]\nrules = ['CG-SINK-CALL']\n",
+        "[suppressions]\nrules = ['CG-SQL-EXEC']\n",
         encoding="utf-8",
     )
+    # The query has to be genuinely unsafe, or the suppression is untested: a
+    # parameterized query produces no finding to suppress in the first place.
     (repo / "app.py").write_text(
-        "def handler():\n"
-        "    return db.execute('select 1')\n",
+        "@app.get('/u')\n"
+        "def handler(uid):\n"
+        "    return db.execute('select ' + uid)\n",
         encoding="utf-8",
     )
 

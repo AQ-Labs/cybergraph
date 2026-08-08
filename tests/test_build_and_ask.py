@@ -28,7 +28,7 @@ def test_answer_question_returns_file_evidence(tmp_path: Path) -> None:
     answer = answer_question(repo, "sql query")
 
     assert "app.py" in answer
-    assert "CG-SINK-CALL" in answer
+    assert "CG-SQL-EXEC" in answer
 
 
 def test_attack_path_api_returns_list(tmp_path: Path) -> None:

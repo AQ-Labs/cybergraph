@@ -2,6 +2,25 @@ from pathlib import Path
 
 from cybergraph.analysis.python import analyze_python_file
 
+# A route whose query really is unsafe, so a suppression test cannot pass by
+# accident. The earlier fixture used `db.execute('select 1')`, which the sink
+# predicates now correctly clear — the test would have gone on "passing" while
+# testing nothing at all.
+UNSAFE_ROUTE = (
+    "@app.get('/u')\n"
+    "def handler(uid):\n"
+    "{comment}"
+    "    return db.execute('select ' + uid)\n"
+)
+
+
+def _analyze(tmp_path: Path, source: str):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.py"
+    app.write_text(source, encoding="utf-8")
+    return analyze_python_file(app, repo)
+
 
 def test_python_analyzer_maps_routes_guards_and_sanitizers(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
@@ -28,38 +47,31 @@ def test_python_analyzer_maps_routes_guards_and_sanitizers(tmp_path: Path) -> No
     assert any(edge.kind == "EXPOSES_ENTRYPOINT" for edge in edges)
     assert any(edge.kind == "GUARDS" for edge in edges)
     assert any(edge.kind == "SANITIZES" for edge in edges)
-    assert any(finding.rule_id == "CG-SINK-CALL" for finding in findings)
+    # The query is parameterized, so the sink is inventory and not a finding.
+    assert any(edge.kind == "REACHES_SINK" and edge.target == "db.execute" for edge in edges)
+    assert findings == [], [finding.rule_id for finding in findings]
+
+
+def test_python_analyzer_reports_the_registry_rule_for_an_unsafe_route(tmp_path: Path) -> None:
+    _nodes, _edges, findings = _analyze(tmp_path, UNSAFE_ROUTE.format(comment=""))
+
+    assert [finding.rule_id for finding in findings] == ["CG-SQL-EXEC"]
 
 
 def test_python_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    app = repo / "app.py"
-    app.write_text(
-        "def handler():\n"
-        "    # cybergraph: ignore CG-SINK-CALL accepted in test fixture\n"
-        "    return db.execute('select 1')\n",
-        encoding="utf-8",
+    _nodes, edges, findings = _analyze(
+        tmp_path,
+        UNSAFE_ROUTE.format(comment="    # cybergraph: ignore CG-SQL-EXEC accepted in fixture\n"),
     )
-
-    _nodes, edges, findings = analyze_python_file(app, repo)
 
     assert any(edge.kind == "REACHES_SINK" for edge in edges)
     assert findings == []
 
 
 def test_python_analyzer_respects_bare_inline_suppression(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    app = repo / "app.py"
-    app.write_text(
-        "def handler():\n"
-        "    # cybergraph: ignore\n"
-        "    return db.execute('select 1')\n",
-        encoding="utf-8",
+    _nodes, edges, findings = _analyze(
+        tmp_path, UNSAFE_ROUTE.format(comment="    # cybergraph: ignore\n")
     )
-
-    _nodes, edges, findings = analyze_python_file(app, repo)
 
     assert any(edge.kind == "REACHES_SINK" for edge in edges)
     assert findings == []

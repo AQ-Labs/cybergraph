@@ -20,7 +20,7 @@ class _Client:
 
 
 def _finding():
-    return Finding(rule_id="CG-SINK-CALL", severity="medium", message="reaches sink",
+    return Finding(rule_id="CG-SQL-EXEC", severity="medium", message="reaches sink",
                    file_path="app.py", line_start=3, evidence="db.execute('select '+q)")
 
 

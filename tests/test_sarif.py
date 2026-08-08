@@ -9,8 +9,9 @@ def test_export_sarif_writes_findings(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "app.py").write_text(
-        "def run_query(db):\n"
-        "    return db.execute('select 1')\n",
+        "@app.get('/users')\n"
+        "def run_query(db, name):\n"
+        "    return db.execute('select * from users where name = ' + name)\n",
         encoding="utf-8",
     )
     build_graph(repo)
@@ -20,6 +21,6 @@ def test_export_sarif_writes_findings(tmp_path: Path) -> None:
     data = json.loads(output.read_text(encoding="utf-8"))
     assert data["version"] == "2.1.0"
     assert data["runs"][0]["tool"]["driver"]["name"] == "CyberGraph"
-    assert data["runs"][0]["results"][0]["ruleId"] == "CG-SINK-CALL"
+    assert data["runs"][0]["results"][0]["ruleId"] == "CG-SQL-EXEC"
     location = data["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
     assert location["artifactLocation"]["uri"] == "app.py"
