@@ -47,17 +47,28 @@ _KEYWORD_NAMES = {
     "sql": ("sql", "query", "statement"),
     "command": ("args",),
     "path": ("file",),
+    "template": ("source", "template"),
 }
 
 
-def assess_call(sink: Sink, call: ast.Call, state: CallState) -> str:
-    """Decide whether this specific call site is an unsafe use of the sink."""
+def assess_call(sink: Sink, call: ast.Call, state: CallState | None) -> str:
+    """Decide whether this specific call site is an unsafe use of the sink.
+
+    ``state`` is ``None`` for a call ``snapshot_call_sites`` never recorded —
+    inside a nested function, for instance. Per its own contract that is
+    "maximally conservative", not "clean", so it is unknown here too, never
+    safe.
+    """
+    if state is None:
+        return VERDICT_UNKNOWN
     if sink.vuln_class == "sql":
         return _assess_sql(call, state)
     if sink.vuln_class == "command":
         return _assess_command(sink, call, state)
     if sink.vuln_class == "path":
         return _assess_path(call, state)
+    if sink.vuln_class == "template":
+        return _assess_template(call, state)
     return _assess_any_tainted_argument(call, state)
 
 
@@ -67,12 +78,13 @@ def _find_argument(call: ast.Call, vuln_class: str) -> ast.expr | None:
     ``call.args`` being empty means the arguments arrived as keywords, not
     that there are none — a predicate that reads that as "no argument, so
     safe" is exactly the bug this module exists to avoid. Returns ``None``
-    when the argument cannot be located at all, which callers must treat as
-    unknown, never safe.
+    when the argument cannot be located at all — an unrecognised vuln class,
+    or an unrecognised keyword name — which callers must treat as unknown,
+    never safe.
     """
     if call.args:
         return call.args[0]
-    for name in _KEYWORD_NAMES[vuln_class]:
+    for name in _KEYWORD_NAMES.get(vuln_class, ()):
         for keyword in call.keywords:
             if keyword.arg == name:
                 return keyword.value
@@ -117,17 +129,24 @@ def _assess_command(sink: Sink, call: ast.Call, state: CallState) -> str:
             _has_tainted_name(element, state) for element in elements[1:]
         ):
             return VERDICT_UNSAFE  # sh -c <tainted>, whatever shell= says
+        # With shell=True (or a SHELL_INHERENT sink) and tainted argv, the
+        # shell IS the mechanism — nothing left to be uncertain about. This
+        # must be decided before the argv[0]-shape fallback below, or a
+        # confirmed injection gets demoted to merely unknown.
+        if shell and any(_has_tainted_name(element, state) for element in elements):
+            return VERDICT_UNSAFE
         if (
             elements
             and not isinstance(elements[0], ast.Constant)
+            and _argv0_shape_could_be_shell(elements)
             and any(_has_tainted_name(element, state) for element in elements)
         ):
-            # A non-constant argv[0] might itself be a shell executable
-            # (e.g. a variable holding "sh"); we can't rule that out, and the
-            # rest of argv carries taint, so this is not provably safe.
+            # A non-constant argv[0] might itself resolve to a shell
+            # executable (e.g. a variable holding "sh"), and argv[1] does not
+            # rule out a `<shell> -c <arg>` invocation. We can't rule that
+            # out, and the rest of argv carries taint, so this is not
+            # provably safe.
             return VERDICT_UNKNOWN
-        if shell and any(_has_tainted_name(element, state) for element in elements):
-            return VERDICT_UNSAFE
         return VERDICT_SAFE
 
     if not _has_tainted_name(command, state):
@@ -140,22 +159,60 @@ def _assess_command(sink: Sink, call: ast.Call, state: CallState) -> str:
 
 
 def _assess_path(call: ast.Call, state: CallState) -> str:
-    """Tainted paths are unsafe unless something actually confines them."""
+    """Tainted paths are unsafe unless something actually confines them.
+
+    A confining call only exonerates the tainted names *inside its own
+    argument subtree* — ``user_dir + os.path.basename(name)`` still leaks
+    ``user_dir`` untouched, and ``os.path.basename("x")`` confines nothing
+    relevant just by appearing in the same expression as an unrelated
+    tainted ``base``. So confinement is scoped per tainted name, not applied
+    to the expression as a whole the moment any confining call is seen
+    anywhere in it.
+    """
     target = _find_argument(call, "path")
     if target is None:
         return VERDICT_UNKNOWN
     if not _has_tainted_name(target, state):
         return VERDICT_SAFE
+
+    confined_ids: set[int] = set()
     normalised = False
     for node in ast.walk(target):
         if not isinstance(node, ast.Call):
             continue
         name = ast.unparse(node.func).rsplit(".", 1)[-1]
         if name in _CONFINING:
-            return VERDICT_SAFE
-        if name in _NORMALISING:
+            for confined_arg in [*node.args, *(kw.value for kw in node.keywords)]:
+                confined_ids.update(
+                    id(descendant)
+                    for descendant in ast.walk(confined_arg)
+                    if isinstance(descendant, ast.Name)
+                )
+        elif name in _NORMALISING:
             normalised = True
+
+    tainted_outside_confinement = any(
+        isinstance(child, ast.Name) and child.id in state.tainted and id(child) not in confined_ids
+        for child in ast.walk(target)
+    )
+    if not tainted_outside_confinement:
+        return VERDICT_SAFE
     return VERDICT_UNKNOWN if normalised else VERDICT_UNSAFE
+
+
+def _assess_template(call: ast.Call, state: CallState) -> str:
+    """Only the template *text* is the injection vector; context values are
+    the safe mechanism — mirrors ``_assess_sql``, where bind parameters play
+    the same role.
+    """
+    template = _find_argument(call, "template")
+    if template is None:
+        return VERDICT_UNKNOWN
+    if _has_tainted_name(template, state):
+        return VERDICT_UNSAFE
+    if not isinstance(template, ast.Constant) and classify_expr(template, state.bindings) == OPAQUE:
+        return VERDICT_UNKNOWN
+    return VERDICT_SAFE
 
 
 def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
@@ -167,6 +224,25 @@ def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
         if not isinstance(arg, ast.Constant) and classify_expr(arg, state.bindings) == OPAQUE:
             unknown = True
     return VERDICT_UNKNOWN if unknown else VERDICT_SAFE
+
+
+def _argv0_shape_could_be_shell(elements: list[ast.expr]) -> bool:
+    """True unless ``argv[1]`` rules out a ``<shell> -c <arg>`` invocation.
+
+    The shape this abstains for is ``[<non-constant>, "-c", tainted]`` — a
+    variable, attribute, or call standing in for a shell executable. When
+    ``argv[1]`` is a constant string that is *not* a shell flag (``"-m"``,
+    ``"show"``, ``"-i"``, ...), the call cannot be that shape whatever
+    ``argv[0]`` resolves to, so there is nothing to abstain over. An absent or
+    non-constant ``argv[1]`` cannot be ruled out either way, so it still
+    counts as "could be".
+    """
+    if len(elements) < 2:
+        return True
+    second = elements[1]
+    if isinstance(second, ast.Constant) and isinstance(second.value, str):
+        return second.value in _SHELL_FLAGS
+    return True
 
 
 def _invokes_a_shell(elements: list[ast.expr]) -> bool:
