@@ -1375,7 +1375,38 @@ git commit -m "fix(paths): suppress before applying the traversal limit"
 
 **Files:** Create `benchmark/precision/cases/*`, `benchmark/run_precision.py`, `benchmark/precision/README.md`; test `tests/test_precision_gate.py`; modify `.gitignore`.
 
-**Gate: precision ≥ 0.90, recall ≥ 0.95, and safe-abstention rate ≤ 0.15.**
+**Gate (rev. 3 — four metrics, abstention and false positives gated PER CLASS):**
+
+| Metric | Threshold | Scope |
+|---|---|---|
+| precision | ≥ 0.90 | over gated cases |
+| recall | ≥ 0.95 | over gated cases, **excluding `known_gap` cases** |
+| safe-case **false-positive** rate | ≤ 0.05 | **per vulnerability class** |
+| safe-case abstention rate | ≤ 0.15 | **per class**, except `command`, which is measured and reported but not gated |
+
+Three findings during implementation forced this away from the original single
+aggregate. Each is a way the original gate could be passed by a worse tool:
+
+**A single aggregate abstention gate is satisfiable by over-reporting.** Measured
+during Task 4: abstention fell 17.6% → 12.9% purely because 23 safe sites moved
+from UNKNOWN to *false positive*. The number improved while the tool got worse.
+Gating abstention without gating the false-positive rate rewards exactly the
+failure this plan exists to remove, so both are gated, and both per class.
+
+**Abstention is workload-dependent, not a detector property.** Measured on real
+code: 3.4% on a SQL-heavy repository, 20.0% on a subprocess-heavy one — nearly
+all of the latter being one irreducible shape, a shell-out to a binary the source
+does not name literally. A single aggregate is therefore gameable by corpus
+composition: a SQL-heavy corpus passes trivially. The `command` class is exempt
+from the abstention gate and carries a stated limitation instead — *CyberGraph
+cannot verify a shell-out to a binary that is not named literally* — while its
+false-positive rate stays gated.
+
+**`recall ≥ 0.95` on a corpus this size is arithmetically a zero-miss gate.** At
+~15 unsafe expectations, 14/15 = 0.933 fails. State that in
+`benchmark/precision/README.md` rather than implying the threshold has
+resolution it does not have, and never report the figure without the case count
+beside it.
 
 The third metric is C2. Rev. 2 excluded `-UNVERIFIED` findings from tp/fp — correct, because
 penalising an honest abstention as a false positive pushes the detector toward guessing.
@@ -1388,10 +1419,30 @@ change to a human. Abstention is now measured and gated separately.
 Each case is `benchmark/precision/cases/<name>/` containing `app.py` and `expected.json`:
 
 ```json
-{"label": "unsafe", "findings": [{"file": "app.py", "line": 7, "rule": "CG-SQL-EXEC"}]}
+{"label": "unsafe", "vuln_class": "sql", "known_gap": false,
+ "findings": [{"file": "app.py", "line": 7, "rule": "CG-SQL-EXEC"}]}
 ```
 
 `label` ∈ `unsafe` | `safe` | `unknown`. A `safe` case has `"findings": []`.
+`vuln_class` is required — the gate is per class and cannot be computed without it.
+
+**Scoring is label-aware.** The runner strips `-UNVERIFIED` findings into an
+abstention count and excludes them from `confirmed`, so a naive comparison scores
+an `unknown`-labelled case as a false negative against its own expectation. Score
+each label on its own terms:
+
+| label | passes when |
+|---|---|
+| `unsafe` | the expected confirmed findings are all present |
+| `safe` | zero confirmed findings **and** zero abstentions |
+| `unknown` | the expected abstention count is present; excluded from tp/fp/fn entirely |
+
+**`known_gap: true`** marks a case that is expected to fail today. Exclude such
+cases from the gated precision and recall figures, but **count and print them
+separately** (`known gaps: 2 (alias_import, from_import)`). Without this the
+recall gate fails on day one and the obvious repair — deleting the two cases —
+destroys the only property they exist to provide. A silently dropped case is
+forbidden; a visibly excluded one is the point.
 
 Required cases — every one must exist:
 
