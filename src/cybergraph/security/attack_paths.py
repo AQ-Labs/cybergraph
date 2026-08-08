@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 from collections import deque
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from cybergraph.analysis.resolve import EDGE_CALLS_RESOLVED
+from cybergraph.config import load_config
 from cybergraph.graph import GraphStore
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -49,7 +51,18 @@ def find_attack_paths(
     max_depth: int = 8,
     limit: int = 20,
     interprocedural: bool = True,
+    apply_suppressions: bool = True,
 ) -> list[AttackPath]:
+    """Find entrypoint-to-sink attack paths for ``repo_root``.
+
+    ``apply_suppressions`` drops paths whose every file is covered by
+    ``[suppressions] paths`` in ``.cybergraph.toml`` **before** ``limit`` is
+    applied, so accepted fixture noise cannot starve the real results behind it.
+    Pass ``apply_suppressions=False`` on exploration and evidence surfaces
+    (graph export, visualisation, MCP, grounded RAG, investigate): suppressions
+    hide *findings*, but the graph still keeps the underlying edges so reviewers
+    can inspect the real code path.
+    """
     store = GraphStore.open_for_repo(repo_root)
     try:
         entrypoints = [
@@ -83,7 +96,10 @@ def find_attack_paths(
 
         taints = _load_taints(store)
 
-        return _traverse(entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit)
+        patterns = load_config(repo_root).suppressed_paths if apply_suppressions else ()
+        return _traverse(
+            entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit, patterns
+        )
     finally:
         store.close()
 
@@ -96,6 +112,7 @@ def _traverse(
     taints: dict[tuple[str, str], tuple[str, ...]],
     max_depth: int,
     limit: int,
+    patterns: tuple[str, ...] = (),
 ) -> list[AttackPath]:
     paths: list[AttackPath] = []
     seen_paths: set[tuple[str, str, tuple[str, ...]]] = set()
@@ -117,6 +134,8 @@ def _traverse(
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
+                if patterns and _is_suppressed(path + (sink_name,), patterns):
+                    continue
                 taint_sources = taints.get((node, sink_name), ())
                 risk = _score_attack_path(
                     sink_name, bool(taint_sources), sanitized, _RANK_CONF[conf_rank]
@@ -160,6 +179,22 @@ def _traverse(
                     )
                 )
     return paths
+
+
+def _is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
+    """Suppress only when every file the path touches is suppressed.
+
+    Conservative on purpose: a path crossing from suppressed fixture code into
+    real application code is still reported. Node keys that carry no file
+    component (bare sink names such as ``subprocess.run``) are ignored, and a
+    path with no identifiable file is never suppressed -- an unknown file is
+    treated as unsuppressed, so incomplete information abstains from hiding
+    rather than hiding silently.
+    """
+    files = {node.split("::", 1)[0] for node in nodes if "::" in node}
+    if not files:
+        return False
+    return all(any(fnmatch(file, pattern) for pattern in patterns) for file in files)
 
 
 def format_attack_paths(paths: list[AttackPath]) -> str:
