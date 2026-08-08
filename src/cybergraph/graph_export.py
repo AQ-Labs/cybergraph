@@ -155,6 +155,11 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
         "attack_paths": attack_paths,
         "top_risks": top_risks,
         "truncated": len(node_list) < len(nodes),
+        # Pre-cap size of the exported graph. This is larger than
+        # ``counts["nodes"]`` because the export synthesises nodes for edge
+        # endpoints that have no row of their own, so it is the only correct
+        # denominator when reporting how much of the graph was truncated.
+        "graph_nodes_total": len(nodes),
     }
 
 

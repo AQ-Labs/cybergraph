@@ -7,6 +7,24 @@ CyberGraph maps a repository into a cybersecurity knowledge graph so developers 
 > **🔒 No API keys. Fully offline. Your code never leaves your machine.**
 > `pip install cybergraph` and you get the complete toolkit — the interactive HTML report, attack-path graphs, cited findings, and SARIF export — with **zero API keys, zero signup, and zero network calls**. There are no runtime dependencies. An LLM is entirely optional and only rephrases answers the graph has already grounded in evidence; nothing about the analysis requires one.
 
+## See it in action
+
+CyberGraph turns a codebase into an interactive security map. Below it is analyzing [OWASP PyGoat](https://github.com/adeyosemanputra/pygoat), a deliberately vulnerable app — **826 nodes, 25 attack paths, no API key**. Everything renders in one self-contained, offline HTML file.
+
+**Security zones — your app as an attack narrative.** Entrypoints flow left-to-right through guards and application logic into sensitive sinks, secrets, and dependencies:
+
+![CyberGraph security-zones view of OWASP PyGoat](docs/assets/report-zones.png)
+
+**Guided report — posture grade, top risks, and stats at a glance.** Real reachable vulnerabilities (`eval`, `pickle.loads`, `sql_lab_table.objects.raw`, `subprocess.Popen`) rank at the top, each with an evidence-backed score:
+
+![CyberGraph report overview with security posture grade and top risks](docs/assets/report-overview.png)
+
+**Attack-path explorer — trace user input to a dangerous sink.** The report opens on the highest-risk path, glowing from route entrypoint to sink:
+
+![CyberGraph attack-path explorer highlighting a route-to-sink path](docs/assets/report-attack-paths.png)
+
+Generate this for any repo with `cybergraph visualize path/to/repo` (dark theme shown; a light theme and toggle are built in).
+
 ## Why this exists
 
 Security scanners are useful, but their output is usually flat: a file, a line, a rule, and a warning. Developers still have to answer the hard questions:
