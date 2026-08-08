@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+from collections import deque
+from collections.abc import Iterator
 from pathlib import Path
 
 from cybergraph.graph import Edge, Finding, Node
@@ -111,7 +113,7 @@ def analyze_python_file(
 
             _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
 
-            for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
+            for call in [n for n in _scoped_walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
                 if not call_name:
                     continue
@@ -164,6 +166,38 @@ def analyze_python_file(
     _add_django_url_routes(tree, rel, nodes, edges)
     _add_imports(tree, rel, edges)
     return nodes, edges, findings
+
+
+def _scoped_walk(item: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    """``ast.walk`` over one function, stopping at every nested ``def``.
+
+    Each call site belongs to exactly one function: the nearest enclosing one.
+    ``analyze_python_file`` finds functions with ``ast.walk(tree)``, which yields
+    a nested ``def`` as an item in its own right, so walking the outer
+    function's whole subtree would attribute the inner function's calls to the
+    outer one as well — duplicate ``CALLS`` and ``REACHES_SINK`` edges,
+    duplicate dataflow edges, and two findings for one call site. Worse once
+    verdicts are involved: the outer pass holds none of the inner function's
+    local bindings, so it abstains and emits a spurious ``-UNVERIFIED`` finding
+    beside the inner pass's correct verdict.
+
+    A function's own ``decorator_list`` stays inside its scope here, which keeps
+    the ``CALLS`` edge for route decorators. Those calls have no snapshot —
+    ``snapshot_call_sites`` walks body statements — so a sink reached from a
+    decorator abstains rather than being cleared.
+
+    Yields the same nodes as ``ast.walk`` in the same breadth-first order, minus
+    the nested-function subtrees; ``Lambda`` and ``ClassDef`` bodies are left in
+    place because nothing else claims them.
+    """
+    queue: deque[ast.AST] = deque([item])
+    while queue:
+        node = queue.popleft()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            queue.append(child)
 
 
 def _add_imports(tree: ast.AST, rel: str, edges: list[Edge]) -> None:
@@ -238,7 +272,7 @@ def _add_python_dataflows(
 ) -> None:
     """Track simple local propagation from request inputs into sink arguments."""
     tainted = dict(tainted_values)
-    for node in ast.walk(item):
+    for node in _scoped_walk(item):
         if isinstance(node, ast.Assign):
             source_key = _tainted_source_key(node.value, tainted)
             if not source_key and _is_user_input_expr(node.value):
