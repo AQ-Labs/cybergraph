@@ -392,3 +392,297 @@ def test_call_in_for_else_body_is_snapshotted():
     )
     state, call = _state_at(src)
     assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+# --- Fix round 2 regressions -------------------------------------------------
+
+
+def test_try_body_composition_reaches_finally_call():
+    """R1: finally is a sequential successor of the body, not an alternative to it."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        '        q = "SELECT * FROM t WHERE id=" + uid\n'
+        "    finally:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_try_body_composition_reaches_else_call():
+    """R1: else is a sequential successor of the body, not an alternative to it."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        '        q = "SELECT * FROM t WHERE id=" + uid\n'
+        "    except Exception:\n"
+        "        pass\n"
+        "    else:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_try_body_composition_reaches_except_call():
+    """R1: a handler sees the body's post-state, even though it may run partway through."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        '        q = "SELECT * FROM t WHERE id=" + uid\n'
+        "        raise ValueError()\n"
+        "    except ValueError:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_try_body_opaque_assignment_reaches_finally_call():
+    """R1: the worst-case regression — an opaque, tainted value must not read as clean."""
+    src = (
+        "def f(uid):\n"
+        '    q = "SELECT 1"\n'
+        "    try:\n"
+        "        q = build(uid)\n"
+        "    finally:\n"
+        "        cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_match_case_does_not_leak_into_sibling_case():
+    """C1 must still hold for match: sibling cases are alternatives, not successors."""
+    src = (
+        "def f(uid, flag):\n"
+        '    q = "SELECT 1"\n'
+        "    match flag:\n"
+        "        case 1:\n"
+        '            q = f"SELECT {uid}"\n'
+        "        case 2:\n"
+        "            cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+
+
+@pytest.mark.parametrize(
+    "case_line",
+    [
+        "case [q]:",
+        "case {'k': q}:",
+        "case Point(x=q):",
+        "case str() as q:",
+        "case [1, *q]:",
+    ],
+)
+def test_match_capture_patterns_shadow_prior_literal(case_line):
+    """R2: MatchAs/MatchStar/MatchMapping capture names must rebind, not be missed."""
+    src = (
+        "def f(payload):\n"
+        '    q = "SELECT 1"\n'
+        "    match payload:\n"
+        f"        {case_line}\n"
+        "            cursor.execute(q)\n"
+        "    cursor.execute(q)\n"
+    )
+    states, calls = _states_for(src)
+    assert len(calls) == 2
+    for state, call in zip(states, calls, strict=True):
+        assert classify_expr(call.args[0], state.bindings) != LITERAL
+        assert "q" in state.tainted
+
+
+def test_match_bare_name_and_class_positional_capture_shadow_prior_literal():
+    """R2: a bare-name pattern and a positional class-pattern capture are both MatchAs."""
+    for case_line in ("case q:", "case Point(q):"):
+        src = (
+            "def f(payload):\n"
+            '    q = "SELECT 1"\n'
+            "    match payload:\n"
+            f"        {case_line}\n"
+            "            cursor.execute(q)\n"
+            "    cursor.execute(q)\n"
+        )
+        states, calls = _states_for(src)
+        assert len(calls) == 2
+        for state, call in zip(states, calls, strict=True):
+            assert classify_expr(call.args[0], state.bindings) != LITERAL
+            assert "q" in state.tainted
+
+
+def test_match_or_pattern_as_capture_shadows_prior_literal():
+    """R2: an ``as`` capture on an or-pattern is still MatchAs."""
+    src = (
+        "def f(payload):\n"
+        '    q = "SELECT 1"\n'
+        "    match payload:\n"
+        "        case (1 | 2) as q:\n"
+        "            cursor.execute(q)\n"
+        "    cursor.execute(q)\n"
+    )
+    states, calls = _states_for(src)
+    assert len(calls) == 2
+    for state, call in zip(states, calls, strict=True):
+        assert classify_expr(call.args[0], state.bindings) != LITERAL
+        assert "q" in state.tainted
+
+
+def test_match_double_star_mapping_rest_shadows_prior_literal():
+    """R2: MatchMapping's ``**rest`` capture must rebind too."""
+    src = (
+        "def f(payload):\n"
+        '    q = "SELECT 1"\n'
+        "    match payload:\n"
+        "        case {**q}:\n"
+        "            cursor.execute(q)\n"
+        "    cursor.execute(q)\n"
+    )
+    states, calls = _states_for(src)
+    assert len(calls) == 2
+    for state, call in zip(states, calls, strict=True):
+        assert classify_expr(call.args[0], state.bindings) != LITERAL
+        assert "q" in state.tainted
+
+
+def test_match_wildcard_does_not_bind():
+    """R2: MatchAs with name=None is the wildcard `_` and captures nothing."""
+    src = (
+        "def f(payload):\n"
+        '    q = "SELECT 1"\n'
+        "    match payload:\n"
+        "        case _:\n"
+        "            pass\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+    assert "q" not in state.tainted
+
+
+def test_loop_ten_variable_chain_widens_on_cap_exhaustion():
+    """R3: a chain long enough to outrun the pass cap must widen, not miss."""
+    names = [f"v{i}" for i in range(10)]
+    lines = ["def f(uid, rows):"]
+    for name in names:
+        lines.append(f'    {name} = "SELECT 1"')
+    lines.append("    for r in rows:")
+    lines.append(f"        cursor.execute({names[0]})")
+    for a, b in zip(names, names[1:]):
+        lines.append(f"        {a} = {b}")
+    lines.append(f'        {names[-1]} = f"SELECT {{uid}}"')
+    src = "\n".join(lines) + "\n"
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+    assert "v0" in state.tainted
+
+
+def test_import_as_shadows_prior_literal():
+    """R4: import ... as q must rebind q, via alias.asname."""
+    src = (
+        "def f():\n"
+        '    q = "SELECT 1"\n'
+        "    import os as q\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+def test_del_shadows_prior_literal():
+    """R4: del q must rebind q, via Name with Del context."""
+    src = (
+        "def f():\n"
+        '    q = "SELECT 1"\n'
+        "    del q\n"
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) != LITERAL
+
+
+@pytest.mark.parametrize(
+    "name,src",
+    [
+        ("plain literal", 'def f():\n    q = "SELECT 1"\n    cursor.execute(q)\n'),
+        (
+            "if",
+            'def f(flag):\n    q = "SELECT 1"\n    if flag:\n        pass\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "if/else",
+            'def f(flag):\n    q = "SELECT 1"\n    if flag:\n        pass\n'
+            "    else:\n        pass\n    cursor.execute(q)\n",
+        ),
+        (
+            "for",
+            'def f(rows):\n    q = "SELECT 1"\n    for x in rows:\n        pass\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "while",
+            'def f(flag):\n    q = "SELECT 1"\n    while flag:\n        break\n'
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "with",
+            "def f():\n    q = \"SELECT 1\"\n    with open('f') as fh:\n        pass\n"
+            "    cursor.execute(q)\n",
+        ),
+        (
+            "try/except",
+            'def f():\n    q = "SELECT 1"\n    try:\n        pass\n'
+            "    except Exception:\n        pass\n    cursor.execute(q)\n",
+        ),
+        (
+            "try/finally",
+            'def f():\n    q = "SELECT 1"\n    try:\n        pass\n'
+            "    finally:\n        pass\n    cursor.execute(q)\n",
+        ),
+        (
+            "for/else",
+            'def f(rows):\n    q = "SELECT 1"\n    for x in rows:\n        pass\n'
+            "    else:\n        pass\n    cursor.execute(q)\n",
+        ),
+        (
+            "match",
+            'def f(flag):\n    q = "SELECT 1"\n    match flag:\n        case 1:\n'
+            "            pass\n    cursor.execute(q)\n",
+        ),
+        (
+            "nested for+if+with",
+            "def f(rows, flag):\n    q = \"SELECT 1\"\n    for x in rows:\n"
+            "        if flag:\n            with open('f'):\n                pass\n"
+            "    cursor.execute(q)\n",
+        ),
+        ("constant concat", 'def f():\n    q = "a" + "b"\n    cursor.execute(q)\n'),
+        ("constant-only f-string", 'def f():\n    q = f"SELECT 1"\n    cursor.execute(q)\n'),
+        (
+            "comprehension",
+            'def f(rows):\n    q = "SELECT 1"\n    [x for x in rows]\n    cursor.execute(q)\n',
+        ),
+        ("assert", 'def f(flag):\n    q = "SELECT 1"\n    assert flag\n    cursor.execute(q)\n'),
+        ("import", 'def f():\n    q = "SELECT 1"\n    import os\n    cursor.execute(q)\n'),
+        (
+            "nested def",
+            'def f():\n    q = "SELECT 1"\n    def helper():\n        pass\n'
+            "    cursor.execute(q)\n",
+        ),
+        ("annotated assign", 'def f():\n    q: str = "SELECT 1"\n    cursor.execute(q)\n'),
+        ("global", 'def f():\n    global q\n    q = "SELECT 1"\n    cursor.execute(q)\n'),
+    ],
+)
+def test_ordinary_safe_code_stays_literal(name, src):
+    """The round-2 fixes must not make ordinary, unambiguously-safe code noisy."""
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL, name

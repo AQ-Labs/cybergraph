@@ -235,22 +235,35 @@ def _apply_effect(
                 _bind_target_opaque(item.optional_vars, item.context_expr, bindings, tainted)
         _walk_body(statement.body, bindings, tainted, states)
     elif isinstance(statement, _TRY_TYPES):
+        # The body always runs; its effects flow to everything after it.
+        _walk_body(statement.body, bindings, tainted, states)
         for handler in statement.handlers:
             if handler.name:
                 bindings[handler.name] = OPAQUE
                 tainted.pop(handler.name, None)
+        # Handlers and else are alternatives to each other, but both run
+        # AFTER the body, so they start from the body's post state. Treating
+        # a handler as seeing the body's *complete* post state is a
+        # deliberate over-approximation: an exception can fire partway
+        # through the body, and assuming it completed is the conservative
+        # direction.
         _merge_branches(
-            [
-                statement.body,
-                *(handler.body for handler in statement.handlers),
-                statement.orelse,
-                statement.finalbody,
-            ],
+            [*(handler.body for handler in statement.handlers), statement.orelse],
             bindings,
             tainted,
             states,
         )
+        # finally always runs, after everything above.
+        _walk_body(statement.finalbody, bindings, tainted, states)
     elif isinstance(statement, ast.Match):
+        for case in statement.cases:
+            for name in _match_capture_names(case.pattern):
+                bindings[name] = OPAQUE
+                source = _tainted_source(statement.subject, tainted)
+                if source:
+                    tainted[name] = source
+                else:
+                    tainted.pop(name, None)
         _merge_branches([case.body for case in statement.cases], bindings, tainted, states)
     elif isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         pass  # nested definitions have their own scope
@@ -301,6 +314,26 @@ def _bind_target_opaque(
             tainted.pop(name, None)
 
 
+def _match_capture_names(pattern: ast.pattern) -> list[str]:
+    """Names a ``match`` pattern captures.
+
+    Capture names live in ``MatchAs.name``, ``MatchStar.name`` and
+    ``MatchMapping.rest`` — none of them are ``ast.Name`` nodes with a
+    ``Store`` context, so the generic name walk used everywhere else in this
+    module never sees them. ``MatchAs`` with ``name=None`` is the wildcard
+    ``_``, which captures nothing.
+    """
+    names: list[str] = []
+    for node in ast.walk(pattern):
+        if isinstance(node, ast.MatchAs) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.append(node.rest)
+    return names
+
+
 def _run_loop_to_fixpoint(
     body: list[ast.stmt],
     bindings: dict[str, str],
@@ -320,6 +353,14 @@ def _run_loop_to_fixpoint(
     Because merges only ever weaken a class (never strengthen it back towards
     LITERAL), the state is monotonically non-decreasing per variable and stops
     changing well before the cap in any realistic function body.
+
+    If the cap is exhausted without converging — an *n*-variable copy chain
+    needs *n+1* passes, so a long enough chain can still outrun the cap — the
+    result must not be reported as whatever partial, possibly-LITERAL state
+    the last pass happened to leave behind. Every name the body assigns
+    anywhere is widened to OPAQUE instead: exhausting the cap degrades to
+    over-reporting, never to a silent miss. See
+    ``_widen_after_cap_exhaustion``.
     """
     if not body:
         return
@@ -329,6 +370,69 @@ def _run_loop_to_fixpoint(
         _merge_branches([body], bindings, tainted, states)
         if bindings == before_bindings and tainted == before_tainted:
             return
+    _widen_after_cap_exhaustion(body, bindings, tainted)
+    # One more pass so calls already snapshotted inside the body get the
+    # widened, now-OPAQUE state merged into their recorded snapshot too —
+    # otherwise the widening would only protect code that runs after the
+    # loop, not a call on the very line that failed to converge.
+    _merge_branches([body], bindings, tainted, states)
+
+
+def _widen_after_cap_exhaustion(
+    body: list[ast.stmt],
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Fail safe instead of failing silent when a loop can't be proven to converge.
+
+    Every name assigned anywhere in the loop body — however deeply nested —
+    becomes OPAQUE, and tainted if any of those names was already tainted.
+    We don't know the true fixpoint at this point, so the conservative
+    assumption is that any of them could carry the others' taint.
+    """
+    names = _all_assigned_names(body)
+    if not names:
+        return
+    source = next((tainted[name] for name in names if name in tainted), "")
+    for name in names:
+        bindings[name] = OPAQUE
+        if source:
+            tainted[name] = source
+
+
+def _all_assigned_names(nodes: list[ast.stmt]) -> set[str]:
+    """Every name any statement in this subtree could bind, recursively.
+
+    Unlike ``_generic_bound_names`` — which deliberately skips nested
+    statement bodies so a caller can merge them branch-locally instead — this
+    wants the complete set across arbitrarily nested ``if``/``for``/``try``/
+    ``match`` bodies inside a loop, for the cap-exhaustion fallback above.
+    Nested function/class/lambda scopes are still excluded: names bound there
+    don't leak into the enclosing scope even under this wider net.
+    """
+    names: set[str] = set()
+    for root in nodes:
+        _collect_all_assigned_names(root, names)
+    return names
+
+
+def _collect_all_assigned_names(node: ast.AST, names: set[str]) -> None:
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            continue
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            names.add(child.id)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.alias) and child.asname:
+            names.add(child.asname)
+        elif isinstance(child, ast.MatchAs) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchStar) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest:
+            names.add(child.rest)
+        _collect_all_assigned_names(child, names)
 
 
 def _merge_branches(
@@ -414,6 +518,11 @@ def _generic_bound_names(node: ast.AST) -> list[str]:
     are skipped: those are merged separately by whoever calls this, and
     walking them here too would apply their effects to the parent state
     unconditionally instead of branch-locally.
+
+    Covers ``ast.Name`` with ``Store`` *or* ``Del`` context (``del q`` removes
+    a binding, and the contract is that any name a statement could plausibly
+    touch becomes OPAQUE rather than staying at a stale, possibly-LITERAL
+    class), an exception name, and ``import ... as`` (``alias.asname``).
     """
     names: list[str] = []
     for _, value in ast.iter_fields(node):
@@ -426,10 +535,12 @@ def _generic_bound_names(node: ast.AST) -> list[str]:
             nested_scope = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
             if isinstance(child, nested_scope):
                 continue  # nested scope: does not bind names in the enclosing one
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store | ast.Del):
                 names.append(child.id)
             elif isinstance(child, ast.ExceptHandler) and child.name:
                 names.append(child.name)
+            elif isinstance(child, ast.alias) and child.asname:
+                names.append(child.asname)
             names.extend(_generic_bound_names(child))
     return names
 
