@@ -413,3 +413,210 @@ def test_missing_call_state_is_unknown_not_safe(body, callee, params):
 def test_find_argument_unknown_vuln_class_returns_none():
     call = ast.parse("f(x=1)", mode="eval").body
     assert _find_argument(call, "not-a-real-class") is None
+
+
+# --- Fix round 4 ---
+
+# N-A + N-B (Critical): a program determines which argv positions it treats as
+# code, and the program is not always at position 0. Identity without position
+# calls every ordinary interpreter invocation critical; position without
+# identity misses every shell sitting one slot right of a wrapper.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ('["python", "manage.py", "migrate", app]', "app"),
+        ('["python", "script.py", arg]', "arg"),
+        ('["python3", "-m", "pip", "install", pkg]', "pkg"),
+        ('["python", "-m", "pytest", test_id]', "test_id"),
+        ('["node", "build.js", target]', "target"),
+        ('["perl", "fix.pl", filename]', "filename"),
+        ('["ruby", "app.rb", "-p", port]', "port"),
+        ('["awk", "{print $2}", user_file]', "user_file"),
+        ('["awk", "-F,", "{print $1}", csv]', "csv"),
+        ('["busybox", "ls", d]', "d"),
+        ('["bash", "deploy.sh", version]', "version"),
+        ('["sh", "./configure", "--prefix=" + prefix]', "prefix"),
+        ('["pwsh", "-File", "build.ps1", target]', "target"),
+        ('["powershell", "-File", script_path]', "script_path"),
+        ('["python", "-u", worker_script]', "worker_script"),
+        ('["mawk", "-f", "prog.awk", data]', "data"),
+        # The same class, read off the program table rather than the report.
+        ('["java", "-jar", jar_path]', "jar_path"),
+        ('["java", "-cp", classpath, "Main", arg]', "classpath, arg"),
+        ('["Rscript", "report.R", input_csv]', "input_csv"),
+        ('["sed", "-e", "s/a/b/", data_file]', "data_file"),
+        ('["tar", "-cf", archive, folder]', "archive, folder"),
+        ('["scp", src, "host:/tmp/"]', "src"),
+        ('["rsync", "-a", src, dest]', "src, dest"),
+        ('["git", "show", rev]', "rev"),
+        ('["python", "-m", "pip", "download", pkg, "-d", "/tmp"]', "pkg"),
+    ],
+)
+def test_taint_outside_the_programs_code_positions_is_safe(body, params):
+    """An interpreter running a script is not an interpreter running user data."""
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_SAFE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '["env", "bash", "-c", cmd]',
+        '["/usr/bin/env", "sh", "-c", cmd]',
+        '["sudo", "sh", "-c", cmd]',
+        '["sudo", "-u", "www", "bash", "-c", cmd]',
+        '["nohup", "bash", "-c", cmd]',
+        '["timeout", "5", "sh", "-c", cmd]',
+        '["nice", "sh", "-c", cmd]',
+        '["setsid", "bash", "-c", cmd]',
+        '["stdbuf", "-o0", "sh", "-c", cmd]',
+        '["flock", "/tmp/l", "sh", "-c", cmd]',
+        '["xargs", "-I{}", "sh", "-c", cmd]',
+        '["docker", "run", "img", "sh", "-c", cmd]',
+        '["docker", "exec", "c", "sh", "-c", cmd]',
+        '["kubectl", "exec", "p", "--", "sh", "-c", cmd]',
+        '["wsl", "bash", "-c", cmd]',
+        # Wrapper folding: absolute paths, case, and a `.exe` suffix.
+        '["sudo", "/bin/BASH", "-c", cmd]',
+        '["env", "CMD.EXE", "/c", cmd]',
+        '["nohup", "C:\\\\Windows\\\\System32\\\\cmd.exe", "/c", cmd]',
+        '["podman", "run", "img", "bash", "-c", cmd]',
+        '["doas", "sh", "-c", cmd]',
+        '["chroot", "/jail", "sh", "-c", cmd]',
+        '["unbuffer", "bash", "-c", cmd]',
+        '["ionice", "-c2", "sh", "-c", cmd]',
+        '["busybox", "sh", "-lc", cmd]',
+    ],
+)
+def test_a_shell_behind_a_wrapper_is_unsafe(body):
+    """The shell is in argv, one slot right; reading only argv[0] misses it."""
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '["sh", "-c", cmd]', '["bash", "-lc", cmd]', '["zsh", "-c", cmd]',
+        '["dash", "-c", cmd]', '["ksh", "-c", cmd]', '["ash", "-c", cmd]',
+        '["fish", "-c", cmd]', '["csh", "-c", cmd]', '["tcsh", "-c", cmd]',
+        '["bash", "-eic", cmd]',
+        '["cmd", "/c", cmd]', '["cmd.exe", "/K", cmd]', '["command.com", "/c", cmd]',
+        '["powershell", "-Command", cmd]', '["powershell", "-Comm", cmd]',
+        '["pwsh", "-enc", cmd]',
+        '["python", "-c", cmd]', '["python3", "-c", cmd]', '["ipython", "-c", cmd]',
+        '["perl", "-e", cmd]', '["ruby", "-e", cmd]', '["node", "-e", cmd]',
+        '["node", "--eval", cmd]', '["deno", "eval", cmd]', '["bun", "-e", cmd]',
+        '["php", "-r", cmd]', '["lua", "-e", cmd]', '["luajit", "-e", cmd]',
+        '["groovy", "-e", cmd]', '["scala", "-e", cmd]', '["expect", "-c", cmd]',
+        '["tclsh", "-c", cmd]', '["wish", "-c", cmd]',
+        '["R", "-e", cmd]', '["Rscript", "-e", cmd]', '["osascript", "-e", cmd]',
+        '["awk", "-f", cmd]', '["gawk", "--source", cmd]', '["mawk", "-f", cmd]',
+        '["nawk", "-f", cmd]', '["sed", "-e", cmd]',
+        '["find", ".", "-exec", cmd, ";"]',
+        '["ssh", "-o", cmd]', '["scp", "-o", cmd, "a", "b"]',
+        '["rsync", "-e", cmd, "a", "b"]',
+        '["vim", "-c", cmd]', '["ex", "--eval", cmd]', '["emacs", "--eval", cmd]',
+        '["make", "-f", cmd]', '["cmake", "-P", cmd]',
+        '["mysql", "-e", cmd]', '["mysql", "--execute", cmd]', '["psql", "-c", cmd]',
+        '["nc", "-e", cmd]', '["ncat", "-e", cmd]', '["socat", "-e", cmd]',
+        '["tar", "-I", cmd, "-cf", "a.tgz", "d"]',
+        '["git", "-c", cmd, "fetch"]',
+        '["wscript", cmd]', '["cscript", cmd]', '["mshta", cmd]',
+        '["rundll32", cmd]', '["regsvr32", cmd]',
+        '["ssh", cmd]', '["ssh", "myhost", cmd]', '["ed", cmd]',
+        '["socat", cmd, "-"]',
+    ],
+)
+def test_taint_in_a_code_position_is_unsafe(body):
+    """Every program in the table, with a flag that hands it something to run."""
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        # `-m` names a module to run: a tainted module name is code selection,
+        # a tainted argument to an already-named module is not.
+        ('["python", "-m", "pytest", cmd]', VERDICT_SAFE),
+        ('["python", "-m", cmd]', VERDICT_UNSAFE),
+        # awk's first bare operand *is* the program â€” unless `-f` supplied it,
+        # after which the operands are data files.
+        ('["awk", "{print}", cmd]', VERDICT_SAFE),
+        ('["awk", cmd, "f.txt"]', VERDICT_UNSAFE),
+        ('["awk", "-f", "p.awk", cmd]', VERDICT_SAFE),
+        # `-jar` names an archive path, not code the caller composed.
+        ('["java", "-jar", cmd]', VERDICT_SAFE),
+        # `-File` takes a path; `-Command` takes code.
+        ('["powershell", "-File", cmd]', VERDICT_SAFE),
+        ('["powershell", "-Command", cmd]', VERDICT_UNSAFE),
+    ],
+)
+def test_the_same_flag_letter_means_different_things_per_program(body, expected):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == expected
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # `-c core.sshCommand=<cmd>` makes git run a command of the attacker's
+        # choosing on its next transport operation.
+        '["git", "-c", "core.sshCommand=" + cmd, "fetch"]',
+        '["git", "--exec-path=" + cmd, "fetch"]',
+        # A short flag carrying its value in the same token.
+        '["ssh", "-oProxyCommand=" + cmd, "host"]',
+        # `cmd /c` and `-Command` take the *rest* of the command line, not one
+        # element of it.
+        '["cmd", "/c", "dir", cmd]',
+        '["powershell", "-Command", "ls", cmd]',
+    ],
+)
+def test_code_bundled_into_a_flags_own_element_is_unsafe(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_UNSAFE
+
+
+def test_starred_argv_in_a_code_position_is_unsafe_not_unknown():
+    """`["bash", "-c", *args]` is provable; `["git", *args]` is not."""
+    assert (
+        _assess('subprocess.run(["bash", "-c", *args])', "run", params="args")
+        == VERDICT_UNSAFE
+    )
+    assert (
+        _assess('subprocess.run(["git", *args])', "run", params="args") == VERDICT_UNKNOWN
+    )
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        # An unreadable element beside the tainted one might have been a code
+        # flag, which would make the tainted element its operand.
+        ('["bash", flag, cmd]', "cmd"),
+        ('["python", opt, cmd]', "cmd"),
+        ('["awk", opt, cmd]', "cmd"),
+        # A wrapper whose own arguments hid the program: no program, no
+        # positions, no verdict.
+        ('["sudo", "systemctl", "restart", cmd]', "cmd"),
+        ('["timeout", "30", "curl", "-sS", cmd]', "cmd"),
+        ('["sudo", "-u", "www", sh, "-c", cmd]', "cmd"),
+        ('["docker", subcommand, "img", "sh", "-c", cmd]', "cmd"),
+    ],
+)
+def test_a_position_that_cannot_be_pinned_down_abstains(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # `docker build` and `kubectl get` do not run a program the caller
+        # named, so they are not wrappers here and resolution stops on them.
+        '["docker", "build", "-t", cmd, "."]',
+        '["kubectl", "get", "pod", cmd]',
+        # A wrapper that does resolve, over ordinary safe code.
+        '["env", "FOO=1", "python", "x.py", cmd]',
+        '["sudo", "tar", "-xf", cmd]',
+    ],
+)
+def test_a_subcommand_that_wraps_nothing_is_not_a_wrapper(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
