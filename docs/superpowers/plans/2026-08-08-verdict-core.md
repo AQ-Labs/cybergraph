@@ -630,10 +630,22 @@ def _snapshot_calls_in(
 
     Nested bodies are skipped here; ``_apply_effect`` walks them with their own
     branch-local state.
+
+    A call visited more than once — a loop body is walked twice — *merges*
+    rather than keeping the first snapshot. A call inside a loop must see the
+    weakest state across iterations, or a value composed on iteration *n* would
+    be invisible to the call on iteration *n+1*.
     """
     for node in _own_expressions(statement):
         for call in [n for n in ast.walk(node) if isinstance(n, ast.Call)]:
-            states.setdefault(id(call), CallState(dict(bindings), dict(tainted)))
+            existing = states.get(id(call))
+            if existing is None:
+                states[id(call)] = CallState(dict(bindings), dict(tainted))
+                continue
+            merged = dict(existing.bindings)
+            for name, value_class in bindings.items():
+                merged[name] = weakest(merged.get(name, value_class), value_class)
+            states[id(call)] = CallState(merged, {**existing.tainted, **tainted})
 
 
 def _own_expressions(statement: ast.stmt) -> list[ast.AST]:
@@ -739,11 +751,11 @@ def _names(target: ast.AST) -> list[str]:
 
 Run: `python -m pytest tests/test_provenance.py -v` — PASS (22 tests)
 
-Note: `states.setdefault` is deliberate — a loop body is walked twice, and the *first*
-pass records the state a call sees on the first iteration. The second pass exists to
-propagate loop-carried effects into the parent scope, not to overwrite the snapshot. The
-`test_loop_carried_composition_is_visible` case passes because the assignment inside the
-loop is merged back before the second pass reaches the call.
+Note on the loop: the body is walked twice and a call's snapshot **merges** across passes,
+weakest-wins. First-write-wins would record `q=LITERAL` from iteration one and never see
+the `q = f"SELECT {uid}"` that follows the call in the loop body, so
+`test_loop_carried_composition_is_visible` would fail. Two passes are sufficient: the
+lattice has three levels and merges only ever weaken, so the state has converged.
 
 - [ ] **Step 5: Commit**
 
