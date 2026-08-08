@@ -46,7 +46,9 @@ def classify_expr(node: ast.AST | None, bindings: dict[str, str]) -> str:
             for value in node.values
             if isinstance(value, ast.FormattedValue)
         ]
-        return COMPOSED if parts else LITERAL
+        if not parts or all(p == LITERAL for p in parts):
+            return LITERAL
+        return COMPOSED
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add | ast.Mod):
         left = classify_expr(node.left, bindings)
         right = classify_expr(node.right, bindings)
