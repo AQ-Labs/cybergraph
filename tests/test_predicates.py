@@ -750,3 +750,67 @@ def test_an_unreadable_program_before_a_code_flag_abstains(body, params):
 def test_rule_7b_does_not_widen_into_the_ruled_scope_boundary(body):
     """Firing on a code flag *anywhere* would drag all of these to abstaining."""
     assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE
+
+
+# --- Fix round 7 ---
+
+# R7-1 (Critical): `_CODE_RUNNERS` was keyed on exact basenames, so a
+# version-suffixed interpreter named no runner at all and fell through to rule 8
+# → safe. The table is consulted to prove DANGER, so a missing name reads as
+# safety; the fix normalises the name rather than lengthening the list, because
+# a list has to be complete to be correct and no list of interpreter names
+# survives next year's release.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '["python3.11", "-c", cmd]',
+        '["python3.12", "-c", cmd]',
+        '["python3.14", "-c", cmd]',
+        '["/usr/bin/python3.11", "-c", cmd]',
+        '["python3.11.exe", "-c", cmd]',
+        '["python-3.11", "-c", cmd]',
+        '["php8", "-r", cmd]',
+        '["php8.2", "-r", cmd]',
+        '["node20", "-e", cmd]',
+        '["perl5", "-e", cmd]',
+        '["ruby3.1", "-e", cmd]',
+        '["ksh93", "-c", cmd]',
+        '["mksh", "-c", cmd]',
+        '["xonsh", "-c", cmd]',
+        '["zsh5.9", "-c", cmd]',
+        '["C:\\\\Python311\\\\python3.11.exe", "-c", cmd]',
+    ],
+)
+def test_a_version_suffixed_runner_is_still_a_runner(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_UNSAFE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Rule 7 reads the downstream name through the same normalisation.
+        '["env", "python3.11", "-c", cmd]',
+        '["sudo", "python3.11", "-c", cmd]',
+        '["timeout", "5", "php8.2", "-r", cmd]',
+    ],
+)
+def test_a_version_suffixed_runner_named_downstream_abstains(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Numeric operands must not normalise into a runner name: a bare `3`,
+        # `30`, `644` or `./...` strips to nothing, not to a shell.
+        '["ping", "-c", "3", cmd]',
+        '["timeout", "30", "curl", "-sS", cmd]',
+        '["chmod", "644", cmd]',
+        '["go", "build", "-o", cmd, "./..."]',
+        '["head", "-n", "20", cmd]',
+    ],
+)
+def test_version_normalisation_does_not_invent_a_runner(body):
+    assert _assess(f"subprocess.run({body})", "run", params="cmd") == VERDICT_SAFE

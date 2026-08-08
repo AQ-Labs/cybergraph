@@ -160,8 +160,11 @@ _VISIBLE_CODE_FLAGS = frozenset({
 _VISIBLE_CODE_FLAGS_FOLDED = frozenset({"/c", "/k", "-command", "-encodedcommand"})
 
 _CODE_RUNNERS: dict[str, _Runner] = {
+    # `mksh`, `ksh93` and `xonsh` are spelled out because their trailing text is
+    # part of the name, not a version suffix `_deversioned` can strip.
     **{name: _POSIX_SHELL for name in (
-        "sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "csh", "tcsh",
+        "sh", "bash", "zsh", "dash", "ksh", "ksh93", "mksh", "ash", "fish",
+        "csh", "tcsh", "xonsh",
     )},
     **{name: _WINDOWS_SHELL for name in ("cmd", "command")},
     **{name: _POWERSHELL for name in ("powershell", "pwsh")},
@@ -338,8 +341,8 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
     if 0 in tainted and not isinstance(elements[0], ast.Starred):
         return VERDICT_UNSAFE  # (3) the attacker picks the executable
 
-    argv0 = _constant_str(elements[0]) if elements else None
-    runner = _CODE_RUNNERS.get(_program_name(argv0)) if argv0 is not None else None
+    argv0 = _constant_str(elements[0])
+    runner = _runner_for(argv0) if argv0 is not None else None
     if runner is not None:
         if any(index in _code_indices(elements, runner) for index in tainted):
             return VERDICT_UNSAFE  # (4) handed to the runner as code
@@ -417,7 +420,7 @@ def _names_a_runner(elements: list[ast.expr]) -> bool:
     """Does any readable element name a code runner? — the generic wrapper rule."""
     for element in elements:
         text = _constant_str(element)
-        if text is not None and _program_name(text) in _CODE_RUNNERS:
+        if text is not None and _runner_for(text) is not None:
             return True
     return False
 
@@ -516,6 +519,39 @@ def _program_name(text: str) -> str:
         if tail.endswith(suffix):
             return tail[: -len(suffix)]
     return tail
+
+
+def _deversioned(name: str) -> str | None:
+    """``python3.11`` → ``python``; ``None`` when there is no suffix to strip.
+
+    A trailing run of digits and dots, and any ``-`` or ``_`` joining it to the
+    name, is a release number rather than a different program.
+    """
+    stripped = name.rstrip("0123456789.").rstrip("-_")
+    return stripped if stripped and stripped != name else None
+
+
+def _runner_for(text: str) -> _Runner | None:
+    """The runner this program name denotes, if any.
+
+    The raw basename is tried first, so an exact entry always wins, and only
+    then the name with a version suffix removed: ``python3.11``, ``php8.2``,
+    ``node20``, ``perl5``, ``ruby3.1`` are the same runners as their unversioned
+    spellings, and ``python3.11 -c <tainted>`` is inline code to an interpreter
+    by any reading.
+
+    Normalising is the fix here rather than a longer table, and the difference
+    is polarity, not taste. ``_CODE_RUNNERS`` is consulted to prove DANGER, so a
+    name missing from it falls through to rule 8 and reads *safe* — a table has
+    to be complete to be correct, and no list of interpreter names survives next
+    year's release. A normalisation rule carries no such debt.
+    """
+    name = _program_name(text)
+    runner = _CODE_RUNNERS.get(name)
+    if runner is not None:
+        return runner
+    base = _deversioned(name)
+    return _CODE_RUNNERS.get(base) if base is not None else None
 
 
 def _assess_path(call: ast.Call, state: CallState) -> str:
