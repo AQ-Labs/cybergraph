@@ -69,8 +69,18 @@ _PYTHON: tuple[Sink, ...] = (
     Sink("raw", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
     Sink("render_template_string", "CG-TEMPLATE-INJECT", "CWE-1336", SEVERITY_HIGH,
          "renders this value as a template, which can run code", "template"),
+    # `open` is matched by exact name only. As a bare sink it matched *any*
+    # `x.open(...)`, which made `webbrowser.open(report.as_uri())` a high
+    # CG-PATH-TRAVERSAL finding on this repository's own code. `bare` is for
+    # receivers that cannot be resolved without type inference — `cursor.execute`
+    # is one, and `open` is not: the builtin is spelled unqualified, and the
+    # module-level spellings are enumerable.
     Sink("open", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
+         "opens a file whose path comes from this value", "path"),
+    Sink("io.open", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path"),
+    Sink("codecs.open", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path"),
 )
 
 _BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {"python": _PYTHON}
