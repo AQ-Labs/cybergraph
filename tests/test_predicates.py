@@ -917,3 +917,49 @@ def test_an_unreadable_element_before_a_takes_rest_taint_abstains(body, params):
 )
 def test_the_takes_rest_widening_does_not_reach_readable_argv(body, params):
     assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_SAFE
+
+
+# R7-4 (Critical): the unreadable-width guard was computed over *tainted* indices
+# only, so an untainted `*opts` of unknown width and unknown contents blocked
+# neither rule 5 nor rule 8. `opts = ["-u", "www", "bash", "-c"]` makes
+# `["sudo", *opts, <tainted>]` an arbitrary command at runtime, and moving the
+# `-c` inside the starred region defeats rule 7b. Position gives no guarantee
+# either — an expansion can be empty or hold twenty elements — so this is not
+# narrowed to "starred before the taint".
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        # The starred element is UNTAINTED; only the trailing operand is tainted.
+        ('["sudo", *opts, cmd]', "cmd"),
+        ('["git", *opts, cmd]', "cmd"),
+        ('["ssh", *opts, cmd]', "cmd"),
+        ('["env", *opts, cmd]', "cmd"),
+        ('["cmd", *opts, "/q", cmd]', "cmd"),
+        # Rule 5's side of it: a known runner whose argv width cannot be read.
+        ('["bash", *opts, "-i", cmd]', "cmd"),
+        ('["python", *opts, "x.py", cmd]', "cmd"),
+        ('["powershell", *opts, "-NoLogo", cmd]', "cmd"),
+        # A starred element *after* the taint bounds nothing either.
+        ('["git", "show", cmd, *opts]', "cmd"),
+        ('["sudo", cmd, *opts]', "cmd"),
+        # And the already-correct tainted-starred cases keep abstaining.
+        ('["git", *extra]', "extra"),
+        ('["sudo", *extra, "-c", cmd]', "extra, cmd"),
+    ],
+)
+def test_an_untainted_starred_element_blocks_a_clearance(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_UNKNOWN
+
+
+def test_a_starred_element_in_a_proven_code_position_is_still_unsafe():
+    """An unreadable width must not demote a code position it cannot escape."""
+    assert (
+        _assess('subprocess.run(["bash", "-c", *args])', "run", params="args")
+        == VERDICT_UNSAFE
+    )
+    assert (
+        _assess('subprocess.run(["python", "-c", *args])', "run", params="args")
+        == VERDICT_UNSAFE
+    )

@@ -343,7 +343,14 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
     tainted = [index for index, element in enumerate(elements) if _has_tainted_name(element, state)]
     if not tainted:
         return VERDICT_SAFE  # (1)
-    starred = any(isinstance(elements[index], ast.Starred) for index in tainted)
+    # An unreadable *width*, computed over every element and not only the
+    # tainted ones. A `*opts` expands to any number of elements holding
+    # anything, so `["sudo", *opts, <tainted>]` may well be
+    # `sudo -u www bash -c <tainted>` — and it says nothing about the width
+    # whether or not the starred element is itself tainted. Position gives no
+    # guarantee either, which is why this is not narrowed to "starred before the
+    # taint": the expansion can be empty or hold twenty elements.
+    unreadable_width = any(isinstance(element, ast.Starred) for element in elements)
     if 0 in tainted and not isinstance(elements[0], ast.Starred):
         return VERDICT_UNSAFE  # (3) the attacker picks the executable
 
@@ -352,7 +359,7 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
     if runner is not None:
         if any(index in _code_indices(elements, runner) for index in tainted):
             return VERDICT_UNSAFE  # (4) handed to the runner as code
-        if starred or not _flags_all_known(elements, runner):
+        if unreadable_width or not _flags_all_known(elements, runner):
             return VERDICT_UNKNOWN  # (6) a flag, or a width, we cannot account for
         if _unreadable_could_be_a_code_flag(elements, tainted, runner):
             return VERDICT_UNKNOWN  # (6b) see the helper
@@ -362,7 +369,7 @@ def _assess_list_argv(elements: list[ast.expr], state: CallState) -> str:
         return VERDICT_UNKNOWN  # (7) a runner downstream: the wrapper rule
     if _hides_a_runner_before_a_code_flag(elements):
         return VERDICT_UNKNOWN  # (7b) a runner downstream we could not name
-    if argv0 is None or starred:
+    if argv0 is None or unreadable_width:
         return VERDICT_UNKNOWN  # (9)
     return VERDICT_SAFE  # (8) names no runner anywhere — see the docstring
 
