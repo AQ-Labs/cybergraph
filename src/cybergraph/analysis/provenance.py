@@ -82,6 +82,51 @@ class CallState:
     tainted: dict[str, str] = field(default_factory=dict)
 
 
+class _PrefixState:
+    """The weakest state reachable at *any* prefix of a statement sequence.
+
+    A ``try`` handler is reachable from wherever the body raised, which may be
+    partway through a nested ``if``, ``for``, ``with`` or inner ``try`` — not
+    only between two top-level statements of the body. An accumulator is
+    therefore threaded down through ``_walk_body`` and every branch walk it
+    reaches, and absorbs the live state after *every* statement at *every*
+    depth.
+
+    ``parent`` chains an inner ``try``'s accumulator to an enclosing one, so a
+    nested ``try`` still feeds each of its own body prefixes to the outer
+    handler as well as to its own.
+    """
+
+    __slots__ = ("bindings", "parent", "tainted")
+
+    def __init__(
+        self,
+        bindings: dict[str, str],
+        tainted: dict[str, str],
+        parent: _PrefixState | None = None,
+    ) -> None:
+        self.bindings = dict(bindings)
+        self.tainted = dict(tainted)
+        self.parent = parent
+
+    def absorb(self, bindings: dict[str, str], tainted: dict[str, str]) -> None:
+        """Weaken towards ``bindings`` and take on its taint, up the whole chain.
+
+        Called once per statement per enclosing ``try``, so the rank compare
+        is inlined rather than going through ``weakest`` — the dict scan here
+        dominates the cost of analysing a large ``try`` body.
+        """
+        target: _PrefixState | None = self
+        while target is not None:
+            own = target.bindings
+            for name, value_class in bindings.items():
+                current = own.get(name)
+                if current is None or _RANK[value_class] > _RANK[current]:
+                    own[name] = value_class
+            target.tainted.update(tainted)
+            target = target.parent
+
+
 def snapshot_call_sites(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     initial_taint: dict[str, str] | None = None,
@@ -123,10 +168,20 @@ def _walk_body(
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
+    """Walk statements in source order, threading state through each.
+
+    ``accumulator``, when given, records the state after every statement —
+    including every statement of every nested body this walk descends into,
+    because it is passed down unchanged. With no accumulator the walk behaves
+    exactly as if the parameter did not exist.
+    """
     for statement in body:
         _snapshot_calls_in(statement, bindings, tainted, states)
-        _apply_effect(statement, bindings, tainted, states)
+        _apply_effect(statement, bindings, tainted, states, accumulator)
+        if accumulator is not None:
+            accumulator.absorb(bindings, tainted)
 
 
 def _snapshot_calls_in(
@@ -146,15 +201,25 @@ def _snapshot_calls_in(
     be invisible to the call on iteration *n+1*.
     """
     for node in _own_expressions(statement):
-        for call in [n for n in ast.walk(node) if isinstance(n, ast.Call)]:
-            existing = states.get(id(call))
-            if existing is None:
-                states[id(call)] = CallState(dict(bindings), dict(tainted))
-                continue
-            merged = dict(existing.bindings)
-            for name, value_class in bindings.items():
-                merged[name] = weakest(merged.get(name, value_class), value_class)
-            states[id(call)] = CallState(merged, {**existing.tainted, **tainted})
+        _snapshot_calls_in_expr(node, bindings, tainted, states)
+
+
+def _snapshot_calls_in_expr(
+    node: ast.AST,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+    states: dict[int, CallState],
+) -> None:
+    """Record state for every call inside one expression, merging on revisit."""
+    for call in [n for n in ast.walk(node) if isinstance(n, ast.Call)]:
+        existing = states.get(id(call))
+        if existing is None:
+            states[id(call)] = CallState(dict(bindings), dict(tainted))
+            continue
+        merged = dict(existing.bindings)
+        for name, value_class in bindings.items():
+            merged[name] = weakest(merged.get(name, value_class), value_class)
+        states[id(call)] = CallState(merged, {**existing.tainted, **tainted})
 
 
 def _has_nested_stmt_body(statement: ast.stmt) -> bool:
@@ -192,6 +257,7 @@ def _apply_effect(
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
     # A walrus target takes effect as soon as its enclosing expression is
     # evaluated, regardless of which branch below the statement dispatches to.
@@ -221,30 +287,41 @@ def _apply_effect(
             if source:
                 tainted[name] = source
     elif isinstance(statement, ast.If):
-        _merge_branches([statement.body, statement.orelse], bindings, tainted, states)
+        _merge_branches(
+            [statement.body, statement.orelse],
+            bindings,
+            tainted,
+            states,
+            # No `else` arm means "do nothing" is a real path of its own.
+            exhaustive=bool(statement.orelse),
+            accumulator=accumulator,
+        )
     elif isinstance(statement, ast.For | ast.AsyncFor):
         _bind_target_opaque(statement.target, statement.iter, bindings, tainted)
-        _run_loop_to_fixpoint(statement.body, bindings, tainted, states)
-        _merge_branches([statement.orelse], bindings, tainted, states)
+        _run_loop_to_fixpoint(statement.body, bindings, tainted, states, accumulator)
+        _merge_branches(
+            [statement.orelse], bindings, tainted, states,
+            exhaustive=False, accumulator=accumulator,
+        )
     elif isinstance(statement, ast.While):
-        _run_loop_to_fixpoint(statement.body, bindings, tainted, states)
-        _merge_branches([statement.orelse], bindings, tainted, states)
+        _run_loop_to_fixpoint(statement.body, bindings, tainted, states, accumulator)
+        _merge_branches(
+            [statement.orelse], bindings, tainted, states,
+            exhaustive=False, accumulator=accumulator,
+        )
     elif isinstance(statement, ast.With | ast.AsyncWith):
         for item in statement.items:
             if item.optional_vars is not None:
                 _bind_target_opaque(item.optional_vars, item.context_expr, bindings, tainted)
-        _walk_body(statement.body, bindings, tainted, states)
+        _walk_body(statement.body, bindings, tainted, states, accumulator)
     elif isinstance(statement, _TRY_TYPES):
-        _apply_try_body_and_handlers(statement, bindings, tainted, states)
-        # finally always runs last, on whichever path (body-only or a
-        # handler) was actually taken.
-        _walk_body(statement.finalbody, bindings, tainted, states)
+        _apply_try_statement(statement, bindings, tainted, states, accumulator)
     elif isinstance(statement, ast.Match):
-        _apply_match_cases(statement, bindings, tainted, states)
+        _apply_match_cases(statement, bindings, tainted, states, accumulator)
     elif isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         pass  # nested definitions have their own scope
     else:
-        _apply_generic_effect(statement, bindings, tainted, states)
+        _apply_generic_effect(statement, bindings, tainted, states, accumulator)
 
 
 def _apply_walrus_bindings(
@@ -310,41 +387,100 @@ def _match_capture_names(pattern: ast.pattern) -> list[str]:
     return names
 
 
+def _bind_captures(
+    names: list[str],
+    source: str,
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Bind ``match`` capture names to OPAQUE, with taint from the subject."""
+    for name in names:
+        bindings[name] = OPAQUE
+        if source:
+            tainted[name] = source
+        else:
+            tainted.pop(name, None)
+
+
 def _apply_match_cases(
     statement: ast.Match,
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
-    """Walk each case from the shared entry state, binding that case's own captures.
+    """Walk cases in source order, carrying earlier cases' captures forward.
 
-    Capture names must be scoped to the case that binds them. Binding a
-    capture into the *shared* pre-merge state (as an earlier revision did)
-    means a sibling case that never mentions that name would still have it
-    rebound in its branch — worse, `tainted.pop(name, None)` on a clean
-    subject would strip taint from a name the sibling case never touches at
-    all. Each case here starts from its own copy of the entry state, applies
-    only its own captures, walks its own body, and only then is merged back
-    weakest-wins.
+    Capture names must be scoped to the case that binds them *and to every
+    case after it*. Binding every case's captures into one shared pre-merge
+    state (as an early revision did) lets a later case's capture reach back
+    into an earlier case that reads the same name — a false positive. Giving
+    every case an identical copy of the entry state (as the revision after it
+    did) is worse: it is a silent miss. CPython leaves a capture bound when
+    the pattern matched but the case's guard then failed, and control falls
+    through to the next case, so::
+
+        q = "SELECT 1"
+        match subject:
+            case [q] if not is_safe(q):
+                pass
+            case _:
+                cursor.execute(q)   # q holds the attacker's value
+
+    reads as LITERAL and clean unless ``q`` is carried forward. A partial
+    structural match that binds and then fails does the same thing.
+
+    So a running map of preceding cases' captures is threaded through the
+    loop: case *n* starts from the entry state plus every capture bound by
+    cases *0..n-1*, applies its own captures on top, and is merged back
+    weakest-wins. A case placed *before* the one that captures a name is
+    unaffected, which is what keeps a reading arm's own value intact.
     """
     entry_bindings = dict(bindings)
     entry_tainted = dict(tainted)
     subject_source = _tainted_source(statement.subject, tainted)
+    preceding_captures: list[str] = []
+    paths: list[tuple[dict[str, str], dict[str, str]]] = []
+
     for case in statement.cases:
-        if not case.body:
-            continue
         branch_bindings = dict(entry_bindings)
         branch_tainted = dict(entry_tainted)
-        for name in _match_capture_names(case.pattern):
-            branch_bindings[name] = OPAQUE
-            if subject_source:
-                branch_tainted[name] = subject_source
-            else:
-                branch_tainted.pop(name, None)
-        _walk_body(case.body, branch_bindings, branch_tainted, states)
-        for name, value_class in branch_bindings.items():
-            bindings[name] = weakest(bindings.get(name, value_class), value_class)
-        tainted.update(branch_tainted)
+        _bind_captures(preceding_captures, subject_source, branch_bindings, branch_tainted)
+        own_captures = _match_capture_names(case.pattern)
+        _bind_captures(own_captures, subject_source, branch_bindings, branch_tainted)
+        if case.guard is not None:
+            # The guard runs after the pattern bound this case's captures, so
+            # a call in it must be snapshotted against that state — not left
+            # out of the mapping entirely, as it was before.
+            _snapshot_calls_in_expr(case.guard, branch_bindings, branch_tainted, states)
+        _walk_body(case.body, branch_bindings, branch_tainted, states, accumulator)
+        paths.append((branch_bindings, branch_tainted))
+        preceding_captures.extend(own_captures)
+
+    if not _match_is_exhaustive(statement):
+        paths.append((entry_bindings, entry_tainted))
+    _replace_with_join(paths, bindings, tainted)
+
+
+def _match_is_exhaustive(statement: ast.Match) -> bool:
+    """True if some case is guaranteed to run, so "no case matched" is unreachable.
+
+    Only an unguarded irrefutable pattern qualifies: ``case _`` or a bare
+    capture ``case rest``, or an or-pattern with an irrefutable alternative.
+    A guard makes even ``case _`` refutable.
+    """
+    return any(
+        case.guard is None and _pattern_is_irrefutable(case.pattern)
+        for case in statement.cases
+    )
+
+
+def _pattern_is_irrefutable(pattern: ast.pattern) -> bool:
+    if isinstance(pattern, ast.MatchAs):
+        return pattern.pattern is None  # `_` or a bare capture name
+    if isinstance(pattern, ast.MatchOr):
+        return any(_pattern_is_irrefutable(item) for item in pattern.patterns)
+    return False
 
 
 def _run_loop_to_fixpoint(
@@ -352,6 +488,7 @@ def _run_loop_to_fixpoint(
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
     """Walk a loop body repeatedly until it stops changing the enclosing state.
 
@@ -380,7 +517,11 @@ def _run_loop_to_fixpoint(
     for _ in range(_MAX_LOOP_PASSES):
         before_bindings = dict(bindings)
         before_tainted = dict(tainted)
-        _merge_branches([body], bindings, tainted, states)
+        # A loop body may run zero times, so the pre-loop state is always a
+        # reachable path alongside it: a loop merge is never exhaustive.
+        _merge_branches(
+            [body], bindings, tainted, states, exhaustive=False, accumulator=accumulator
+        )
         if bindings == before_bindings and tainted == before_tainted:
             return
     _widen_after_cap_exhaustion(body, bindings, tainted)
@@ -388,7 +529,9 @@ def _run_loop_to_fixpoint(
     # widened, now-OPAQUE state merged into their recorded snapshot too —
     # otherwise the widening would only protect code that runs after the
     # loop, not a call on the very line that failed to converge.
-    _merge_branches([body], bindings, tainted, states)
+    _merge_branches(
+        [body], bindings, tainted, states, exhaustive=False, accumulator=accumulator
+    )
 
 
 def _widen_after_cap_exhaustion(
@@ -448,11 +591,12 @@ def _collect_all_assigned_names(node: ast.AST, names: set[str]) -> None:
         _collect_all_assigned_names(child, names)
 
 
-def _apply_try_body_and_handlers(
+def _apply_try_statement(
     statement: ast.Try | ast.TryStar,
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
     """Walk a try body, then its handlers and ``else``, in real try control flow.
 
@@ -466,65 +610,73 @@ def _apply_try_body_and_handlers(
     later overwrites with something safer-looking must still look dangerous
     at the handler if it was ever dangerous along the way.
 
-    ``body_any`` accumulates exactly that: starting from the pre-try state,
-    it is merged weakest-wins (bindings) and unioned (taint) against the live
-    state after *every* statement of the body, so it ends up representing
-    "reachable at some prefix of the body" rather than "true only at the
-    end". Handlers start from a copy of ``body_any``. ``else`` runs only on
-    normal completion, so it starts from the body's actual post-state
-    (``bindings``/``tainted`` after the walk) exactly as before.
+    ``body_any`` accumulates exactly that: starting from the pre-try state, a
+    ``_PrefixState`` absorbs the live state after *every* statement of the
+    body **at every nesting depth**, so it ends up representing "reachable at
+    some prefix of the body" rather than "true only at the end". Merging only
+    after each *top-level* statement of the body — as an earlier revision did
+    — misses a raise inside a nested ``if``/``for``/``with``/``try``, which is
+    a silent miss: the handler reads the safe value the nested block ends
+    with instead of the dangerous one it built halfway through. Handlers start
+    from a copy of ``body_any``. ``else`` runs only on normal completion, so
+    it starts from the body's actual post-state.
 
-    A bare ``try``/``finally`` with no handler still needs ``body_any``: an
-    uncaught exception doesn't stop ``finally`` from running, it only stops
-    execution from continuing to whatever follows the whole statement. So
-    ``body_any`` (refined by handler bodies when there are any) always feeds
-    into the merge below, and the caller always hands the merged result to
-    ``finalbody`` — the only difference with no handler is that there's no
-    handler body to additionally walk.
+    Chaining ``body_any`` to an enclosing accumulator keeps a nested ``try``
+    honest in the other direction too: each prefix of the inner body is also a
+    point at which an *outer* handler could become reachable.
+
+    A bare ``try``/``finally`` with no handler still needs ``body_any`` for
+    ``finally`` itself: an uncaught exception does not stop ``finally`` from
+    running. It does, however, stop execution from continuing past the whole
+    statement, which is why ``finally`` and the continuation are computed from
+    different path sets below.
     """
-    body_any_bindings = dict(bindings)
-    body_any_tainted = dict(tainted)
+    body_any = _PrefixState(bindings, tainted, parent=accumulator)
+    _walk_body(statement.body, bindings, tainted, states, body_any)
 
-    for body_statement in statement.body:
-        _snapshot_calls_in(body_statement, bindings, tainted, states)
-        _apply_effect(body_statement, bindings, tainted, states)
-        for name, value_class in bindings.items():
-            body_any_bindings[name] = weakest(body_any_bindings.get(name, value_class), value_class)
-        body_any_tainted.update(tainted)
-
-    # Path A: the body completed normally, optionally followed by `else`.
+    # Path A: the body completed normally, then `else` — a sequential
+    # successor of the body, not an alternative to it.
     path_a_bindings = dict(bindings)
     path_a_tainted = dict(tainted)
-    _merge_branches([statement.orelse], path_a_bindings, path_a_tainted, states)
+    _walk_body(statement.orelse, path_a_bindings, path_a_tainted, states, accumulator)
 
     # Path B: an exception was raised somewhere in the body — reachable from
-    # any prefix, hence `body_any` rather than the body's post-state. If a
-    # handler catches it, each handler is an alternative to the others, but
-    # all start from `body_any`. If there is no handler, `body_any` itself is
-    # path B: the exception isn't caught here, but `finally` still runs on it
-    # before the exception keeps propagating.
-    path_b_bindings = dict(body_any_bindings)
-    path_b_tainted = dict(body_any_tainted)
-    if statement.handlers:
-        for handler in statement.handlers:
-            if handler.name:
-                path_b_bindings[handler.name] = OPAQUE
-                path_b_tainted.pop(handler.name, None)
-        _merge_branches(
-            [handler.body for handler in statement.handlers],
-            path_b_bindings,
-            path_b_tainted,
-            states,
-        )
+    # any prefix, hence `body_any` rather than the body's post-state. Each
+    # handler is an alternative to the others and all start from `body_any`.
+    caught_paths: list[tuple[dict[str, str], dict[str, str]]] = []
+    for handler in statement.handlers:
+        handler_bindings = dict(body_any.bindings)
+        handler_tainted = dict(body_any.tainted)
+        if handler.name:
+            handler_bindings[handler.name] = OPAQUE
+            handler_tainted.pop(handler.name, None)
+        _walk_body(handler.body, handler_bindings, handler_tainted, states, accumulator)
+        caught_paths.append((handler_bindings, handler_tainted))
 
-    # Either path may be the one `finally` sees.
-    for name, value_class in path_b_bindings.items():
-        path_a_bindings[name] = weakest(path_a_bindings.get(name, value_class), value_class)
-    path_a_tainted.update(path_b_tainted)
+    # `finally` runs on every path, including the one where no handler
+    # matched and the exception is still in flight. Code *after* the whole
+    # statement does not: an unhandled exception never reaches it. Keeping
+    # those two path sets apart is what lets the ordinary sanitising idiom —
+    # every branch assigning a clean literal — come out clean.
+    normal_paths = [(path_a_bindings, path_a_tainted), *caught_paths]
+    propagating = (dict(body_any.bindings), dict(body_any.tainted))
+    continuation_bindings, continuation_tainted = _join_paths(normal_paths)
+
+    if statement.finalbody:
+        raising_bindings, raising_tainted = _join_paths([*normal_paths, propagating])
+        if (raising_bindings, raising_tainted) != (continuation_bindings, continuation_tainted):
+            # Snapshot the calls in `finalbody` against the still-propagating
+            # path too. Snapshots merge weakest-wins, so this can only widen
+            # them, never hide anything the authoritative walk below records.
+            _walk_body(
+                statement.finalbody, raising_bindings, raising_tainted, states, accumulator
+            )
+
     bindings.clear()
-    bindings.update(path_a_bindings)
+    bindings.update(continuation_bindings)
     tainted.clear()
-    tainted.update(path_a_tainted)
+    tainted.update(continuation_tainted)
+    _walk_body(statement.finalbody, bindings, tainted, states, accumulator)
 
 
 def _merge_branches(
@@ -532,26 +684,71 @@ def _merge_branches(
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    *,
+    exhaustive: bool,
+    accumulator: _PrefixState | None = None,
 ) -> None:
-    """Walk each branch from a shared entry snapshot, then merge weakest-wins.
+    """Walk each branch from a shared entry snapshot, then rebuild the join.
 
     Every branch starts from the *same* pre-branch state, not from whatever
     the previous branch in this call left behind. An ``else`` arm can never
     execute after the ``if`` arm ran, so judging it with the ``if`` arm's
     effects already applied would be a false positive in exactly the shape
     this module exists to avoid.
+
+    ``exhaustive`` says whether one of ``bodies`` is guaranteed to run. When
+    it is false — an ``if`` with no ``else``, a loop body that may run zero
+    times, a handler list that need not match — "none of them ran" is itself
+    a reachable path and the entry state joins the others. Callers decide
+    this and pass it explicitly; it depends on the statement kind, not on the
+    bodies, so it cannot be inferred here.
+
+    The parent state is *rebuilt* from the branch post-states rather than
+    updated in place. Updating taint in place could only ever add, so a name
+    that every reachable path reassigns to a clean literal stayed tainted
+    from the stale entry state forever — ordinary sanitising code read as a
+    false positive. After the join a name is tainted iff it is tainted on at
+    least one reachable path, and its class is the weakest over those paths.
     """
     entry_bindings = dict(bindings)
     entry_tainted = dict(tainted)
+    paths: list[tuple[dict[str, str], dict[str, str]]] = []
     for body in bodies:
         if not body:
             continue
         branch_bindings = dict(entry_bindings)
         branch_tainted = dict(entry_tainted)
-        _walk_body(body, branch_bindings, branch_tainted, states)
-        for name, value_class in branch_bindings.items():
-            bindings[name] = weakest(bindings.get(name, value_class), value_class)
-        tainted.update(branch_tainted)
+        _walk_body(body, branch_bindings, branch_tainted, states, accumulator)
+        paths.append((branch_bindings, branch_tainted))
+    if not exhaustive or not paths:
+        paths.append((entry_bindings, entry_tainted))
+    _replace_with_join(paths, bindings, tainted)
+
+
+def _join_paths(
+    paths: list[tuple[dict[str, str], dict[str, str]]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Weakest class per name and the union of taint, over reachable paths."""
+    joined_bindings: dict[str, str] = {}
+    joined_tainted: dict[str, str] = {}
+    for path_bindings, path_tainted in paths:
+        for name, value_class in path_bindings.items():
+            joined_bindings[name] = weakest(joined_bindings.get(name, value_class), value_class)
+        joined_tainted.update(path_tainted)
+    return joined_bindings, joined_tainted
+
+
+def _replace_with_join(
+    paths: list[tuple[dict[str, str], dict[str, str]]],
+    bindings: dict[str, str],
+    tainted: dict[str, str],
+) -> None:
+    """Overwrite the live state, in place, with the join of ``paths``."""
+    joined_bindings, joined_tainted = _join_paths(paths)
+    bindings.clear()
+    bindings.update(joined_bindings)
+    tainted.clear()
+    tainted.update(joined_tainted)
 
 
 def _apply_generic_effect(
@@ -559,6 +756,7 @@ def _apply_generic_effect(
     bindings: dict[str, str],
     tainted: dict[str, str],
     states: dict[int, CallState],
+    accumulator: _PrefixState | None = None,
 ) -> None:
     """Fallback for statement shapes with no specific handling above.
 
@@ -589,7 +787,12 @@ def _apply_generic_effect(
         if isinstance(value, list) and value and all(isinstance(item, ast.stmt) for item in value)
     ]
     if nested_bodies:
-        _merge_branches(nested_bodies, bindings, tainted, states)
+        # An unrecognised construct: assume nothing about whether one of its
+        # bodies has to run.
+        _merge_branches(
+            nested_bodies, bindings, tainted, states,
+            exhaustive=False, accumulator=accumulator,
+        )
 
 
 def _generic_expr_fields(node: ast.AST) -> list[ast.AST]:

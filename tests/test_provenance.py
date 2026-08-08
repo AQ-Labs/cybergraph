@@ -814,3 +814,275 @@ def test_ordinary_safe_code_stays_literal(name, src):
     """The round-2 fixes must not make ordinary, unambiguously-safe code noisy."""
     state, call = _state_at(src)
     assert classify_expr(call.args[0], state.bindings) == LITERAL, name
+
+
+# --- Fix round 4 regressions -------------------------------------------------
+
+
+def test_match_capture_is_visible_to_a_later_case_when_the_guard_fails():
+    """F1: a bound capture whose guard then failed still holds at the next case."""
+    src = (
+        "def f(subject):\n"
+        '    q = "SELECT 1"\n'
+        "    match subject:\n"
+        "        case [q] if not is_safe(q):\n"
+        "            pass\n"
+        "        case _:\n"
+        "            cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_case_before_the_capturing_case_keeps_its_own_value():
+    """F1: ordering runs forwards only — an earlier arm never sees a later capture."""
+    src = (
+        "def f(uid, payload):\n"
+        '    q = "SELECT " + uid\n'
+        "    match payload:\n"
+        "        case 1:\n"
+        "            cursor.execute(q)\n"
+        "        case [q]:\n"
+        "            pass\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_call_in_a_case_guard_is_snapshotted():
+    """F1: guards were never scanned, so a call in one had no state at all."""
+    src = (
+        "def f(uid, payload):\n"
+        '    q = "SELECT " + uid\n'
+        "    match payload:\n"
+        "        case 1 if cursor.execute(q):\n"
+        "            pass\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED
+    assert "q" in state.tainted
+
+
+def test_call_in_a_case_guard_sees_an_earlier_cases_capture():
+    """F1: a guard runs at the state a preceding case's capture left behind."""
+    src = (
+        "def f(payload):\n"
+        '    q = "SELECT 1"\n'
+        "    match payload:\n"
+        "        case [q]:\n"
+        "            pass\n"
+        "        case 2 if cursor.execute(q):\n"
+        "            pass\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+@pytest.mark.parametrize(
+    "name,src",
+    [
+        (
+            "nested if",
+            "def f(uid, flag):\n"
+            "    try:\n"
+            "        if flag:\n"
+            '            q = f"SELECT {uid}"\n'
+            "            validate(q)\n"
+            '            q = "lit"\n'
+            "        else:\n"
+            '            q = "lit"\n'
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "nested for",
+            "def f(uid, rows):\n"
+            '    q = "lit"\n'
+            "    try:\n"
+            "        for r in rows:\n"
+            '            q = f"SELECT {uid}"\n'
+            "            validate(q)\n"
+            '            q = "lit"\n'
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "nested with",
+            "def f(uid):\n"
+            '    q = "lit"\n'
+            "    try:\n"
+            '        with open("x"):\n'
+            '            q = f"SELECT {uid}"\n'
+            "            validate(q)\n"
+            '            q = "lit"\n'
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "nested try",
+            "def f(uid):\n"
+            '    q = "lit"\n'
+            "    try:\n"
+            "        try:\n"
+            '            q = f"SELECT {uid}"\n'
+            "            validate(q)\n"
+            '            q = "lit"\n'
+            "        finally:\n"
+            "            pass\n"
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+        (
+            "if inside loop inside try",
+            "def f(uid, rows, flag):\n"
+            "    try:\n"
+            '        q = "lit"\n'
+            "        for r in rows:\n"
+            "            if flag:\n"
+            '                q = f"SELECT {uid}"\n'
+            "                validate(q)\n"
+            '                q = "lit"\n'
+            "    except Exception:\n"
+            "        cursor.execute(q)\n",
+        ),
+    ],
+)
+def test_handler_sees_a_prefix_ending_inside_a_nested_block(name, src):
+    """F2: the prefix accumulator must cover every depth, not just top level."""
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == COMPOSED, name
+    assert "q" in state.tainted, name
+
+
+def test_try_except_sanitize_idiom_is_clean():
+    """F3: every reachable path assigns a clean literal, so nothing survives."""
+    src = (
+        "def f(uid):\n"
+        "    q = uid\n"
+        "    try:\n"
+        '        q = "SELECT 1"\n'
+        "    except Exception:\n"
+        '        q = "SELECT 2"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+    assert "q" not in state.tainted
+
+
+def test_if_without_else_keeps_entry_taint():
+    """F3: no else arm means "the if never ran" is an extra reachable path."""
+    src = (
+        "def f(uid, flag):\n"
+        "    q = uid\n"
+        "    if flag:\n"
+        '        q = "SELECT 1"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_if_else_both_assigning_literals_drops_entry_taint():
+    """F3: with an else arm the entry state is not a path of its own."""
+    src = (
+        "def f(uid, flag):\n"
+        "    q = uid\n"
+        "    if flag:\n"
+        '        q = "SELECT 1"\n'
+        "    else:\n"
+        '        q = "SELECT 2"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+    assert "q" not in state.tainted
+
+
+def test_loop_body_never_exhausts_the_zero_iteration_path():
+    """F3: a loop may run zero times, so its merge is never exhaustive."""
+    src = (
+        "def f(uid, rows):\n"
+        "    q = uid\n"
+        "    for r in rows:\n"
+        '        q = "SELECT 1"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_match_with_wildcard_case_drops_entry_taint_when_every_case_sanitizes():
+    """F3: a `case _` makes the match exhaustive, so entry is not a path."""
+    src = (
+        "def f(uid, payload):\n"
+        "    q = uid\n"
+        "    match payload:\n"
+        "        case 1:\n"
+        '            q = "SELECT 1"\n'
+        "        case _:\n"
+        '            q = "SELECT 2"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == LITERAL
+    assert "q" not in state.tainted
+
+
+def test_match_without_a_wildcard_case_keeps_entry_taint():
+    """F3: without an irrefutable case, "no case matched" is a reachable path."""
+    src = (
+        "def f(uid, payload):\n"
+        "    q = uid\n"
+        "    match payload:\n"
+        "        case 1:\n"
+        '            q = "SELECT 1"\n'
+        "        case 2:\n"
+        '            q = "SELECT 2"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_guarded_wildcard_case_does_not_make_a_match_exhaustive():
+    """F3: `case _ if cond` can fail, so the entry state is still a path."""
+    src = (
+        "def f(uid, payload, flag):\n"
+        "    q = uid\n"
+        "    match payload:\n"
+        "        case _ if flag:\n"
+        '            q = "SELECT 1"\n'
+        "    cursor.execute(q)\n"
+    )
+    state, call = _state_at(src)
+    assert classify_expr(call.args[0], state.bindings) == OPAQUE
+    assert "q" in state.tainted
+
+
+def test_finally_sees_the_raising_path_but_the_continuation_does_not():
+    """F3: an uncaught exception reaches `finally`, never the code after it."""
+    src = (
+        "def f(uid):\n"
+        '    q = "lit"\n'
+        "    try:\n"
+        '        q = f"SELECT {uid}"\n'
+        "        validate(q)\n"
+        '        q = "lit"\n'
+        "    finally:\n"
+        "        cursor.execute(q)\n"
+        "    other.run(q)\n"
+    )
+    in_finally, finally_call = _state_at(src, "execute")
+    assert classify_expr(finally_call.args[0], in_finally.bindings) == COMPOSED
+    assert "q" in in_finally.tainted
+
+    after, after_call = _state_at(src, "run")
+    assert classify_expr(after_call.args[0], after.bindings) == LITERAL
+    assert "q" not in after.tainted
