@@ -12,7 +12,7 @@ python benchmark/run_precision.py     # writes benchmark/precision/results.json
 python -m pytest tests/test_precision_gate.py
 ```
 
-## The four metrics
+## The five metrics
 
 | Metric | Threshold | Scope |
 |---|---|---|
@@ -20,6 +20,19 @@ python -m pytest tests/test_precision_gate.py
 | recall | ≥ 0.95 | gated cases, **excluding `known_gap` cases** |
 | safe-case **false-positive** rate | ≤ 0.05 | **per vulnerability class** |
 | safe-case **abstention** rate | ≤ 0.15 | **per class**, except `command` — measured and reported, not gated |
+| **case-mismatch** rate | ≤ 0.00 | **per class**, every gated case whatever its label |
+
+**The first four cannot see an `unknown`-labelled case at all.** An
+abstention-by-design case contributes nothing to tp/fp/fn — correctly — and the
+two safe-case rates select on `label == "safe"`, so an `unknown` row fed *no
+gated metric*. Measured: three single-point mutations traded an abstention for
+a confirmed high (`sql_via_builder`), a confirmed critical
+(`cmd_string_no_shell`) and for **`safe`** (`path_normpath`), and all 32 gate
+lines still read PASS. The last of those inverts the governing invariant at the
+bottom of this file. `case_mismatch_rate` gates each row's "came out exactly as
+its expectation says" flag, so every case in the corpus now reaches a gate line.
+It also carries the attack-path cases' *sanitised inventory*, which is scored
+but is not a detection.
 
 Three findings during implementation forced this away from a single aggregate
 abstention figure. Each is a way the original gate could be passed by a *worse*
@@ -59,8 +72,11 @@ tolerance the numbers imply:
   0, 0.33, 0.67 or 1.00. `≤ 0.05` is therefore a **zero-false-positive** gate.
 - With **one** safe case (`deserialize`, `interprocedural`) it is 0 or 1.00.
 - Abstention `≤ 0.15` is a **zero-abstention** gate on the same counts.
-- `recall ≥ 0.95` over **15** unsafe expectations is a **zero-miss** gate:
-  14/15 = 0.933 fails.
+- `recall ≥ 0.95` over **19** unsafe expectations is a **zero-miss** gate:
+  18/19 = 0.947 fails. (This bullet is generated from `recall_n` in the
+  "Current measurement" block below — if the two disagree, the block is
+  authoritative and this line has drifted.)
+- `case_mismatch_rate ≤ 0.00` is literally zero at every n.
 
 So every rate is printed with its `n` beside it, and `run_precision.py` marks
 any gate computed over fewer than 20 observations `[zero-tolerance at this n]`.
@@ -150,7 +166,7 @@ abstention-by-design case as a false negative against its own expectation:
 | Command safe | `cmd_list_args`, `cmd_list_shell_false`, `cmd_constant`, `cmd_config_member` |
 | Command unknown | `cmd_string_no_shell` |
 | Path | `path_direct` (unsafe), `path_basename`, `path_safe_join`, `path_constant`, `path_config_member` (safe), `path_normpath` (unknown) |
-| Deserialize | `pickle_tainted` (unsafe), `yaml_safe_load` (safe) |
+| Deserialize | `pickle_tainted` (unsafe), `yaml_safe_load`, `pickle_literal` (safe) |
 | Template | `template_string_tainted` (unsafe), `template_render_context`, `template_constant` (safe) |
 | Code | `eval_tainted`, `exec_tainted` (unsafe), `literal_eval`, `eval_constant` (safe) |
 | Imports | `alias_import`, `from_import` (unsafe, known gaps) |
@@ -181,20 +197,43 @@ what makes `sanitized_helper` a safe case: the path exists as inventory and
 carries `sanitized: true`. Attack paths have no `-UNVERIFIED` equivalent, so
 **abstention is not observable on these two cases** and is recorded as 0.
 
+Every property a path *claims* is scored, not only its sink. `expected.json`
+declares `{"sink", "data_reachable", "risk"}` for each path, under `paths`
+(unsanitized, scored as tp/fp/fn) and `sanitized_paths` (inventory, scored
+through the mismatch gate). Reading only `sink` and `sanitized` left
+`data_reachable` measured by nothing: mutating the traversal to fall back to a
+synthetic taint source — marking *every* path in *every* repository
+user-data-reachable and escalating `high/72` to `critical/92`, on the eleven
+surfaces that render it as "user-controlled data reaches `<sink>`" — passed the
+gate, the gate test and all 887 tests. It now reddens five gate lines.
+`cross_function` pins `data_reachable: false` because taint is attributed per
+`(function, sink)` pair and the route parameter's edge sits on `ping`, not on
+`run_ping` where the sink is; raising it is an improvement that must be a
+deliberate edit of that file rather than a silent escalation.
+
 **Three safe cases exercise the sink registry rather than a predicate.**
 `yaml_safe_load`, `literal_eval` and the `render_template` call inside
 `template_render_context` name APIs that are deliberately *not* in
 `cybergraph.security.sinks`, so no predicate runs for them at all. They are
-real regression guards — they would fail if someone re-introduced substring
-matching on `eval` or `load` — but they do not exercise
+real regression guards — reinstating substring matching in `lookup_sink`
+reddens both cases and eight gate lines with them — but they do not exercise
 `_assess_any_tainted_argument` or `_assess_template`. Consequences:
 
-- `deserialize` has **one** safe case and it is of this kind, so the
-  `deserialize` safe-case false-positive gate is currently **vacuous**. Adding a
-  `pickle.loads(<literal>)` safe case would fix it.
+- `deserialize` used to have **one** safe case and it was of this kind, so the
+  class's safe-case gates measured the registry and never their own predicate:
+  a mutation making `_assess_any_tainted_argument` report every argument
+  reddened `code` and left `deserialize` green. `pickle_literal` —
+  `pickle.loads(b"…")`, a registered sink with a constant argument — closes it,
+  and that mutation now reddens three `deserialize` gate lines.
 - `code` and `template` are covered, because `eval_constant` and the
   `render_template_string("<h1>Hello {{ name }}</h1>", name=name)` line in
   `template_render_context` do reach their predicates.
+- The `render_template("profile.html", name=name)` line in
+  `template_render_context` is **kept and remains vacuous**. It is the line the
+  brief mandates verbatim; the only way to make a predicate run for it would be
+  to register `render_template` as a sink, which is exactly the false positive
+  the case exists to deny. It is a statement of intent, and the second line of
+  the same case is what makes the case able to fail.
 
 Both `code` and `template` safe cases are written with **literal** arguments on
 purpose. `_assess_any_tainted_argument` returns `unknown` for any non-`Constant`

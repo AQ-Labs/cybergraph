@@ -117,9 +117,16 @@ def test_per_class_gates_are_reported_with_their_case_counts(results: dict) -> N
 def test_known_gaps_are_counted_and_excluded_never_dropped(results: dict) -> None:
     assert set(results["overall"]["known_gap_cases"]) == KNOWN_GAPS
     rows = {row["name"]: row for row in results["cases"]}
+    recovered = results["overall"]["recovered_known_gap_cases"]
     for name in KNOWN_GAPS:
-        assert rows[name]["known_gap"] is True
-        assert rows[name]["fn"] == 1, rows[name]
+        row = rows[name]
+        assert row["known_gap"] is True
+        assert row["expected"], row  # it still carries a real expectation to miss
+        # Asserted *tracked*, not asserted still-failing. `fn == 1` here broke
+        # the moment import resolution improved, which made editing this test
+        # the obvious response to a green improvement. Either the gap is still
+        # open, or the runner is surfacing it for promotion.
+        assert row["fn"] == 1 or name in recovered, row
     assert results["overall"]["gated_cases"] == results["overall"]["cases"] - len(KNOWN_GAPS)
     assert results["overall"]["fn"] == 0, "a known gap leaked into the gated recall"
 

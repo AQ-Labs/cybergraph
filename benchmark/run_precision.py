@@ -230,6 +230,12 @@ def _metrics(rows: list[dict]) -> dict:
         "cases": len(rows),
         "gated_cases": len(gated),
         "known_gap_cases": sorted(row["name"] for row in rows if row["known_gap"]),
+        # A gap that started passing. Not a failure -- it is the improvement the
+        # case exists to wait for -- but it must be visible, or the case sits
+        # excluded from the gated figures forever while quietly succeeding.
+        "recovered_known_gap_cases": sorted(
+            row["name"] for row in rows if row["known_gap"] and row["clean"]
+        ),
         "tp": tp,
         "fp": fp,
         "fn": fn,
@@ -355,6 +361,12 @@ def main() -> int:
     )
     gaps = overall["known_gap_cases"]
     print(f"known gaps: {len(gaps)} ({', '.join(gaps) if gaps else 'none'})")
+    recovered = overall["recovered_known_gap_cases"]
+    if recovered:
+        print(
+            f"known gaps now PASSING: {', '.join(recovered)} "
+            "-- drop `known_gap` from expected.json and let them into the gated recall"
+        )
     print()
     _print_class_table(per_class)
     print()
