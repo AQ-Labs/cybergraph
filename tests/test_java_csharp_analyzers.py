@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cybergraph.analysis.java import analyze_java_file
 from cybergraph.build import build_graph
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
+
+
+def _input_nodes(nodes: list) -> list:
+    return [n for n in nodes if n.kind == "Input"]
 
 
 def _edge_kinds(repo: Path) -> dict[str, int]:
@@ -111,3 +116,59 @@ def test_csharp_secret_access(tmp_path: Path) -> None:
     )
     build_graph(repo)
     assert _edge_kinds(repo).get("USES_SECRET", 0) >= 1
+
+
+def test_java_marker_in_comment_string_or_textblock_is_not_a_source(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String host = "see getParameter docs";  // @RequestParam note\n'
+        '        String block = """\n'
+        "            request.getHeader inside block\n"
+        '            """;\n'
+        "        return host + block;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes) == []
+    assert not any(e.kind == "READS_INPUT" for e in edges)
+
+
+def test_java_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String name = request.getParameter("name");\n'
+        '        return statement.executeQuery("select * from t where n=\'" + name + "\'");\n'
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes), "genuine getParameter must create an Input source"
+    assert any(e.kind == "READS_INPUT" for e in edges)
+    assert any(e.kind == "TAINTS" for e in edges)
+    assert any(f.rule_id == "CG-JAVA-SINK-CALL" for f in findings)
+
+
+def test_java_genuine_source_beside_string_marker_still_detected(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String name = request.getParameter("see getParameter docs");\n'
+        '        return statement.executeQuery("select * from t where n=\'" + name + "\'");\n'
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes)
+    assert any(e.kind == "TAINTS" for e in edges)
