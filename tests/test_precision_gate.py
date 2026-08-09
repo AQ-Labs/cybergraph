@@ -89,6 +89,176 @@ def test_the_exit_status_carries_the_gate_verdict(gate_run: tuple[int, dict]) ->
     assert returncode == (0 if results["passed"] else 1), (returncode, results["passed"])
 
 
+def test_a_single_red_gate_line_fails_the_run(monkeypatch, tmp_path, capsys) -> None:
+    """The only test that ever puts ``main()`` in the failing state.
+
+    ``test_the_exit_status_carries_the_gate_verdict`` reduces to ``0 == 0`` on a
+    green corpus, so on its own it is satisfied by ``return 0``. Forcing one
+    threshold red exercises the state CI never reaches, and pins all three
+    places the verdict is expressed -- the gate rows in ``results.json``, the
+    printed verdict, and the exit status -- against the same red line.
+    """
+    monkeypatch.setattr(run_precision, "RESULTS", tmp_path / "results.json")
+    monkeypatch.setattr(run_precision, "MIN_RECALL", 1.10)
+
+    code = run_precision.main()
+
+    doc = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    red = [gate["name"] for gate in doc["gates"] if not gate["passed"]]
+    assert red, "precondition: the forced threshold must redden at least one gate"
+    assert doc["passed"] is False, red
+    assert "GATE FAILED" in capsys.readouterr().out
+    assert code == 1
+    assert doc["red_gates"] == red, (doc["red_gates"], red)
+
+
+def test_a_green_corpus_still_passes_and_exits_zero(monkeypatch, tmp_path, capsys) -> None:
+    """The other half of the previous test: the verdict tracks the lines *both* ways.
+
+    Without this, `_red_gates` returning a constant non-empty list would satisfy
+    the red case while breaking every real run.
+    """
+    monkeypatch.setattr(run_precision, "RESULTS", tmp_path / "results.json")
+
+    code = run_precision.main()
+
+    doc = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert doc["red_gates"] == []
+    assert doc["passed"] is True
+    out = capsys.readouterr().out
+    assert "GATE PASSED" in out
+    assert "GATE FAILED" not in out
+    assert "  FAIL " not in out
+    assert code == 0
+
+
+def test_only_command_is_exempt_from_the_abstention_gate(results: dict) -> None:
+    """Which classes are exempt is a policy, so it is asserted rather than implied.
+
+    Widening ``ABSTENTION_UNGATED_CLASSES`` to every class removes the abstention
+    gate everywhere while all 32 lines still read PASS or "not gated".
+    """
+    assert results["thresholds"]["abstention_ungated_classes"] == ["command"]
+    unenforced = {
+        gate["name"].split(":")[0]
+        for gate in results["gates"]
+        if gate["name"].endswith(":safe_abstention_rate") and not gate["enforced"]
+    }
+    assert unenforced == {"command"}, sorted(unenforced)
+
+
+def _case(tmp_path: Path, name: str, source: str, expected: dict) -> Path:
+    case = tmp_path / name
+    case.mkdir()
+    (case / "app.py").write_text(source, encoding="utf-8")
+    (case / "expected.json").write_text(json.dumps(expected), encoding="utf-8")
+    return case
+
+
+# `clean` is what `case_mismatch_rate` -- the only gate an `unknown` case ever
+# reaches -- is computed from, and every other test in this file hands
+# hand-built rows to `_metrics`, one layer above the code that decides it. These
+# four run `_score_case` itself, on real detector output.
+
+_ABSTAINS = (
+    '"""One abstention: a tainted string command with no shell."""\n'
+    "import subprocess\n"
+    "from fastapi import FastAPI\n"
+    "app = FastAPI()\n"
+    "\n"
+    '@app.get("/tool")\n'
+    "def run_tool(binary: str):\n"
+    "    subprocess.run(binary, check=False)\n"
+)
+_CONSTANT = (
+    '"""No finding at all."""\n'
+    "import sqlite3\n"
+    'cursor = sqlite3.connect("app.db").cursor()\n'
+    "\n"
+    "def count():\n"
+    '    cursor.execute("SELECT COUNT(*) FROM users")\n'
+)
+
+
+def test_an_unknown_case_whose_abstention_count_is_wrong_is_not_clean(tmp_path: Path) -> None:
+    declared = {"label": "unknown", "vuln_class": "command", "findings": [], "abstentions": 1}
+    matching = run_precision._score_case(_case(tmp_path, "ok", _ABSTAINS, declared))
+    assert matching["abstentions"] == 1
+    assert matching["clean"] is True
+
+    mismatched = run_precision._score_case(
+        _case(tmp_path, "wrong", _ABSTAINS, {**declared, "abstentions": 2})
+    )
+    assert mismatched["clean"] is False, mismatched
+
+
+def test_a_safe_case_that_abstains_is_not_clean(tmp_path: Path) -> None:
+    # An abstention on a safe case is not a true negative: operationally it
+    # sends a clean change to a human.
+    row = run_precision._score_case(
+        _case(
+            tmp_path, "safe_abstains", _ABSTAINS,
+            {"label": "safe", "vuln_class": "command", "findings": [], "abstentions": 0},
+        )
+    )
+    assert (row["tp"], row["fp"], row["fn"]) == (0, 0, 0)
+    assert row["abstentions"] == 1
+    assert row["clean"] is False, row
+
+
+def test_an_unsafe_case_that_is_missed_entirely_is_not_clean(tmp_path: Path) -> None:
+    row = run_precision._score_case(
+        _case(
+            tmp_path, "missed", _CONSTANT,
+            {
+                "label": "unsafe", "vuln_class": "sql", "abstentions": 0,
+                "findings": [{"file": "app.py", "line": 6, "rule": "CG-SQL-EXEC"}],
+            },
+        )
+    )
+    assert (row["fp"], row["fn"]) == (0, 1), row
+    assert row["clean"] is False, row
+
+
+def test_a_wrong_sanitized_inventory_is_not_clean(tmp_path: Path) -> None:
+    # A sanitised path is inventory rather than a detection, so it is scored
+    # through `clean` alone. Drop `inventory_matches` and fabricating -- or
+    # losing -- a barrier becomes invisible to every gate.
+    source = (
+        '"""A sanitising barrier sits between the route and the sink."""\n'
+        "import os\n"
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        'DATA_DIR = "/srv/data"\n'
+        "\n"
+        '@app.get("/doc")\n'
+        "def get_doc(name: str):\n"
+        "    return load_doc(name)\n"
+        "\n"
+        "def load_doc(name):\n"
+        "    safe_name = sanitize_filename(name)\n"
+        "    with open(os.path.join(DATA_DIR, safe_name)) as handle:\n"
+        "        return handle.read()\n"
+        "\n"
+        "def sanitize_filename(value):\n"
+        "    return os.path.basename(value)\n"
+    )
+    declared = {
+        "label": "safe", "vuln_class": "interprocedural", "scoring": "attack_paths",
+        "findings": [], "abstentions": 0, "paths": [],
+        "sanitized_paths": [{"sink": "open", "data_reachable": False, "risk": "medium"}],
+    }
+    matching = run_precision._score_case(_case(tmp_path, "inventory_ok", source, declared))
+    assert matching["sanitized_paths"], matching
+    assert matching["clean"] is True, matching
+
+    row = run_precision._score_case(
+        _case(tmp_path, "inventory_lost", source, {**declared, "sanitized_paths": []})
+    )
+    assert row["sanitized_paths"] != row["sanitized_paths_expected"]
+    assert row["clean"] is False, row
+
+
 def test_every_required_case_exists() -> None:
     cases = {path.name for path in (BENCHMARK_DIR / "precision" / "cases").iterdir()
              if path.is_dir()}

@@ -1,5 +1,6 @@
 {
   "passed": true,
+  "red_gates": [],
   "thresholds": {
     "min_precision": 0.9,
     "min_recall": 0.95,

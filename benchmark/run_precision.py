@@ -291,6 +291,34 @@ def _gates_for(scope: str, stats: dict, vuln_class: str | None) -> list[dict]:
     ]
 
 
+def _gate_state(gate: dict) -> str:
+    """The one place a gate line's state is decided.
+
+    The printed line, ``results.json``'s ``passed``, the ``GATE PASSED`` /
+    ``GATE FAILED`` verdict and the process exit status all read this function,
+    so a line that prints ``FAIL`` cannot coexist with a green verdict or with
+    exit 0 -- there is no second expression for them to disagree through.
+
+    This gate has been repaired twice and stayed defeatable both times, because
+    each repair left the verdict computed separately from the lines it claims to
+    summarise. Measured: mutating the verdict's ``all(...)`` to ``any(...)``
+    printed 8 ``FAIL`` lines under ``GATE PASSED`` and exit 0, with the whole
+    suite green. Keep the derivation single-sourced.
+    """
+    if not gate["enforced"]:
+        return "not gated"
+    return "PASS" if gate["passed"] else "FAIL"
+
+
+def _red_gates(gates: list[dict]) -> list[str]:
+    """Names of the gate lines that print ``FAIL``; empty means the gate is green.
+
+    The verdict and the exit status are both stated as "is this list empty?" so
+    neither can be expressed without the lines it is about.
+    """
+    return [gate["name"] for gate in gates if _gate_state(gate) == "FAIL"]
+
+
 def _print_class_table(per_class: dict[str, dict]) -> None:
     header = (
         f"{'class':16} {'prec':>6} {'n':>4}  {'recall':>6} {'n':>4}  "
@@ -323,10 +351,13 @@ def main() -> int:
     gates = _gates_for("overall", overall, None)
     for name, stats in sorted(per_class.items()):
         gates.extend(_gates_for(name, stats, name))
-    passed = all(gate["passed"] for gate in gates)
+    red = _red_gates(gates)
 
     summary = {
-        "passed": passed,
+        "passed": not red,
+        # Named here as well as counted, so `results.json` carries the evidence
+        # for its own verdict instead of a bare boolean a reader has to trust.
+        "red_gates": red,
         "thresholds": {
             "min_precision": MIN_PRECISION,
             "min_recall": MIN_RECALL,
@@ -372,10 +403,7 @@ def main() -> int:
     print()
 
     for gate in gates:
-        if not gate["enforced"]:
-            state = "not gated"
-        else:
-            state = "PASS" if gate["passed"] else "FAIL"
+        state = _gate_state(gate)
         comparator = ">=" if gate["direction"] == "min" else "<="
         note = "  [zero-tolerance at this n]" if gate["zero_tolerance"] else ""
         print(
@@ -399,11 +427,16 @@ def main() -> int:
 
     print()
     print(f"Wrote {RESULTS}")
-    print("GATE PASSED" if passed else "GATE FAILED")
-    # A red gate must exit non-zero. The README documents this file as *the*
-    # way to run the gate, so a CI step that shells out to it is green on red
-    # for as long as the exit status ignores the verdict it just printed.
-    return 0 if passed else 1
+    # Both the verdict and the exit status are stated as "did any line print
+    # FAIL?" -- see `_gate_state`. A red gate must exit non-zero: the README
+    # documents this file as *the* way to run the gate, so a CI step that shells
+    # out to it is green on red for as long as the exit status ignores the lines
+    # it just printed.
+    if red:
+        print(f"GATE FAILED ({len(red)} red: {', '.join(red)})")
+        return 1
+    print("GATE PASSED")
+    return 0
 
 
 if __name__ == "__main__":
