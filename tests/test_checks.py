@@ -101,3 +101,42 @@ def test_every_capability_is_evaluated_or_absent():
     assert {r.capability_id for r in results} == ids
     for result in results:
         assert result.status in {PASS, FAIL, NOT_APPLICABLE, UNKNOWN, NOT_SUPPORTED}
+
+
+def test_relevant_file_missing_from_coverage_is_unknown_not_pass():
+    """A sink capability must not PASS just because nothing was in `coverage`.
+
+    Zero findings from a file that was never even recorded is not evidence --
+    it is exactly as uninformative as a recorded parse failure.
+    """
+    assert _status(_run(coverage=()), "sql_construction") == UNKNOWN
+
+
+def test_relevant_file_analyzed_with_no_findings_passes():
+    """The positive case: a relevant file that was actually analyzed, clean."""
+    result = next(r for r in _run() if r.capability_id == "sql_construction")
+    assert result.status == PASS
+    assert result.evidence_count == 1
+
+
+def test_unrelated_go_failure_does_not_taint_a_python_capability():
+    """LOW: coverage relevance must be scoped per capability, not global.
+
+    A failed `.go` file must not drag an unrelated Python capability to
+    UNKNOWN -- only failures within that capability's own declared scope count.
+    """
+    coverage = (
+        FileCoverage("app.py", "analyzed"),
+        FileCoverage("main.go", "failed", "the file could not be read"),
+    )
+    results = _run(changed_files=("app.py", "main.go"), coverage=coverage)
+    assert _status(results, "sql_construction") == PASS
+    assert _status(results, "source_analysis_support") == NOT_SUPPORTED
+
+
+def test_login_rules_unknown_when_no_entities_exist_to_check():
+    """INFO: declared_login_rules must not PASS with zero entities in scope.
+
+    Same zero-evidence shape reachable_data_paths already guards against.
+    """
+    assert _status(_run(protected_set=_entities()), "declared_login_rules") == UNKNOWN
