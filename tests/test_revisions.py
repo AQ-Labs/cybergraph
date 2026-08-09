@@ -52,7 +52,21 @@ def test_gitignored_files_are_not_reported(tmp_path: Path):
     repo = _repo(tmp_path)
     (repo / ".gitignore").write_text("secret.py\n", encoding="utf-8")
     (repo / "secret.py").write_text("x = 1\n", encoding="utf-8")
-    assert "secret.py" not in resolve_revisions(repo).changed_files
+    revisions = resolve_revisions(repo)
+    assert "secret.py" not in revisions.changed_files
+    assert revisions.failure == ""
+
+
+def test_unborn_head_with_staged_file_is_a_failure(tmp_path: Path):
+    """An unborn HEAD (no commits yet) makes `git diff --name-only HEAD` fail;
+    that must surface as a failure, not an empty diff that hides the staged file."""
+    _run(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "staged.py").write_text("x = 1\n", encoding="utf-8")
+    _run(tmp_path, "add", "-A")
+
+    revisions = resolve_revisions(tmp_path)
+    assert revisions.failure
+    assert revisions.changed_files == ()
 
 
 def test_clean_tree_on_a_branch_uses_merge_base(tmp_path: Path):
@@ -107,8 +121,25 @@ def test_missing_merge_base_is_a_failure(tmp_path: Path):
     assert revisions.failure
 
 
+def test_no_common_ancestor_is_a_failure(tmp_path: Path):
+    """A base ref that exists but shares no history with HEAD must fail closed,
+    not silently diff against an unrelated root commit."""
+    repo = _repo(tmp_path)
+    _run(repo, "checkout", "-q", "--orphan", "unrelated")
+    _run(repo, "rm", "-qrf", "--cached", ".")
+    (repo / "z.py").write_text("z = 1\n", encoding="utf-8")
+    _run(repo, "add", "-A")
+    _run(repo, "commit", "-qm", "unrelated root")
+
+    revisions = resolve_revisions(repo, base="main", mode=MODE_MERGE_BASE)
+    assert revisions.failure
+    assert revisions.changed_files == ()
+
+
 def test_not_a_git_repository_is_a_failure(tmp_path: Path):
-    assert resolve_revisions(tmp_path).failure
+    revisions = resolve_revisions(tmp_path)
+    assert revisions.failure
+    assert revisions.changed_files == ()
 
 
 def test_clean_tree_on_main_with_no_base_is_not_a_failure(tmp_path: Path):

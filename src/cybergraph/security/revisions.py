@@ -66,10 +66,16 @@ def _default_base(repo_root: Path) -> str:
     return ""
 
 
-def _worktree_changes(repo_root: Path) -> tuple[str, ...]:
+def _worktree_changes(repo_root: Path) -> tuple[tuple[str, ...], str]:
+    """Return (changed_files, failure). ``failure`` is non-empty iff git could not
+    be read -- an unreadable worktree must never collapse into an empty diff."""
     ok_diff, diff = _git(repo_root, "diff", "--name-only", "HEAD")
+    if not ok_diff:
+        return (), diff
     ok_unt, untracked = _git(repo_root, "ls-files", "--others", "--exclude-standard")
-    return _names((diff if ok_diff else "") + "\n" + (untracked if ok_unt else ""))
+    if not ok_unt:
+        return (), untracked
+    return _names(diff + "\n" + untracked), ""
 
 
 def _merge_base_diff(repo_root: Path, ref: str, head: str) -> Revisions:
@@ -110,7 +116,10 @@ def resolve_revisions(repo_root, base: str | None = None,
         return _merge_base_diff(repo_root, ref, head)
 
     # Default: worktree when dirty, else merge base against the default branch.
-    changes = _worktree_changes(repo_root)
+    changes, worktree_failure = _worktree_changes(repo_root)
+    if worktree_failure:
+        return Revisions(MODE_WORKTREE, "HEAD", head, (),
+                         failure=f"could not read the working tree: {worktree_failure}")
     if changes:
         return Revisions(MODE_WORKTREE, "HEAD", head, changes)
 
