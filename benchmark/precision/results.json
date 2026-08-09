@@ -17,21 +17,21 @@
   "safe_abstention_rate": 0.0,
   "case_mismatch_rate": 0.0,
   "overall": {
-    "cases": 42,
-    "gated_cases": 40,
+    "cases": 44,
+    "gated_cases": 42,
     "known_gap_cases": [
       "alias_import",
       "from_import"
     ],
     "recovered_known_gap_cases": [],
-    "tp": 16,
+    "tp": 19,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "precision_n": 16,
-    "recall_n": 16,
-    "safe_cases": 21,
+    "precision_n": 19,
+    "recall_n": 19,
+    "safe_cases": 22,
     "safe_false_positives": 0,
     "safe_false_positive_cases": [],
     "safe_false_positive_rate": 0.0,
@@ -162,18 +162,18 @@
       "case_mismatch_rate": 0.0
     },
     "sql": {
-      "cases": 13,
-      "gated_cases": 13,
+      "cases": 15,
+      "gated_cases": 15,
       "known_gap_cases": [],
       "recovered_known_gap_cases": [],
-      "tp": 6,
+      "tp": 9,
       "fp": 0,
       "fn": 0,
       "precision": 1.0,
       "recall": 1.0,
-      "precision_n": 6,
-      "recall_n": 6,
-      "safe_cases": 6,
+      "precision_n": 9,
+      "recall_n": 9,
+      "safe_cases": 7,
       "safe_false_positives": 0,
       "safe_false_positive_cases": [],
       "safe_false_positive_rate": 0.0,
@@ -212,7 +212,7 @@
     {
       "name": "overall:precision",
       "value": 1.0,
-      "n": 16,
+      "n": 19,
       "threshold": 0.9,
       "direction": "min",
       "enforced": true,
@@ -222,7 +222,7 @@
     {
       "name": "overall:recall",
       "value": 1.0,
-      "n": 16,
+      "n": 19,
       "threshold": 0.95,
       "direction": "min",
       "enforced": true,
@@ -232,7 +232,7 @@
     {
       "name": "overall:safe_false_positive_rate",
       "value": 0.0,
-      "n": 21,
+      "n": 22,
       "threshold": 0.05,
       "direction": "max",
       "enforced": true,
@@ -242,7 +242,7 @@
     {
       "name": "overall:safe_abstention_rate",
       "value": 0.0,
-      "n": 21,
+      "n": 22,
       "threshold": 0.15,
       "direction": "max",
       "enforced": true,
@@ -252,7 +252,7 @@
     {
       "name": "overall:case_mismatch_rate",
       "value": 0.0,
-      "n": 40,
+      "n": 42,
       "threshold": 0.0,
       "direction": "max",
       "enforced": true,
@@ -512,7 +512,7 @@
     {
       "name": "sql:precision",
       "value": 1.0,
-      "n": 6,
+      "n": 9,
       "threshold": 0.9,
       "direction": "min",
       "enforced": true,
@@ -522,7 +522,7 @@
     {
       "name": "sql:recall",
       "value": 1.0,
-      "n": 6,
+      "n": 9,
       "threshold": 0.95,
       "direction": "min",
       "enforced": true,
@@ -532,7 +532,7 @@
     {
       "name": "sql:safe_false_positive_rate",
       "value": 0.0,
-      "n": 6,
+      "n": 7,
       "threshold": 0.05,
       "direction": "max",
       "enforced": true,
@@ -542,7 +542,7 @@
     {
       "name": "sql:safe_abstention_rate",
       "value": 0.0,
-      "n": 6,
+      "n": 7,
       "threshold": 0.15,
       "direction": "max",
       "enforced": true,
@@ -552,7 +552,7 @@
     {
       "name": "sql:case_mismatch_rate",
       "value": 0.0,
-      "n": 13,
+      "n": 15,
       "threshold": 0.0,
       "direction": "max",
       "enforced": true,
@@ -1266,6 +1266,46 @@
       ],
       "detected": [
         "('app.py', 20, 'CG-SQL-EXEC')"
+      ],
+      "sanitized_paths": [],
+      "sanitized_paths_expected": [],
+      "clean": true
+    },
+    {
+      "name": "sql_source_lookalikes",
+      "label": "safe",
+      "vuln_class": "sql",
+      "known_gap": false,
+      "scoring": "findings",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "abstentions": 0,
+      "expected": [],
+      "detected": [],
+      "sanitized_paths": [],
+      "sanitized_paths_expected": [],
+      "clean": true
+    },
+    {
+      "name": "sql_source_shapes",
+      "label": "unsafe",
+      "vuln_class": "sql",
+      "known_gap": false,
+      "scoring": "findings",
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "abstentions": 0,
+      "expected": [
+        "('app.py', 18, 'CG-SQL-EXEC')",
+        "('app.py', 25, 'CG-SQL-EXEC')",
+        "('app.py', 32, 'CG-SQL-EXEC')"
+      ],
+      "detected": [
+        "('app.py', 18, 'CG-SQL-EXEC')",
+        "('app.py', 25, 'CG-SQL-EXEC')",
+        "('app.py', 32, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
       "sanitized_paths_expected": [],

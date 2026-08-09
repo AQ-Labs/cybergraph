@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "The precision side of the same rule: an outbound `session.request(...).text`, a bare local helper called `query`, and an HTTP client's `self.request.timeout`. Each was a confirmed CG-SQL-EXEC at some point, and none was visible to the corpus. Zero abstentions as well as zero findings -- an abstention here would send a clean query to a human."
+}

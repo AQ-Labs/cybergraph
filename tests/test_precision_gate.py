@@ -42,6 +42,10 @@ REQUIRED_CASES = {
     "eval_tainted", "exec_tainted", "literal_eval", "eval_constant",
     "alias_import", "from_import",
     "cross_function", "sanitized_helper",
+    # Added after review, each closing a gate the corpus could not see:
+    "pickle_literal",         # deserialize's only safe case that runs its predicate
+    "sql_source_shapes",      # source-rule recall beyond the literal `request.` spelling
+    "sql_source_lookalikes",  # source-rule precision on the shapes that merely resemble one
 }
 
 # Expected to fail today: bare-name resolution cannot follow `import subprocess

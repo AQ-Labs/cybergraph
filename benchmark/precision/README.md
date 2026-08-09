@@ -86,28 +86,32 @@ numbers this work exists to correct.
 
 ## Current measurement
 
-41 cases, 39 gated, 2 known gaps. Regenerate with `python benchmark/run_precision.py`.
+44 cases, 42 gated, 2 known gaps. Regenerate with `python benchmark/run_precision.py`.
+The runner **exits 1** when the gate is red, so a CI step can shell out to it.
 
 ```text
-cases=41 gated=39 precision=1.0 (n=16) recall=1.0 (n=16) safe_fp_rate=0.0 safe_abstention_rate=0.0 (safe n=20)
+cases=44 gated=42 precision=1.0 (n=19) recall=1.0 (n=19) safe_fp_rate=0.0 safe_abstention_rate=0.0 (safe n=22) case_mismatch_rate=0.0 (gated n=42)
 known gaps: 2 (alias_import, from_import)
 
-class              prec    n  recall    n  safeFP    n    abst    n
--------------------------------------------------------------------
-code               1.00    2    1.00    2    0.00    2    0.00    2
-command            1.00    4    1.00    4    0.00    4    0.00    4 *
-deserialize        1.00    1    1.00    1    0.00    1    0.00    1
-interprocedural    1.00    1    1.00    1    0.00    1    0.00    1
-path               1.00    1    1.00    1    0.00    4    0.00    4
-sql                1.00    6    1.00    6    0.00    6    0.00    6
-template           1.00    1    1.00    1    0.00    2    0.00    2
+class              prec    n  recall    n  safeFP    n    abst    n    mism    n
+--------------------------------------------------------------------------------
+code               1.00    2    1.00    2    0.00    2    0.00    2    0.00    4
+command            1.00    4    1.00    4    0.00    4    0.00    4    0.00    9 *
+deserialize        1.00    1    1.00    1    0.00    2    0.00    2    0.00    3
+interprocedural    1.00    1    1.00    1    0.00    1    0.00    1    0.00    2
+path               1.00    1    1.00    1    0.00    4    0.00    4    0.00    6
+sql                1.00    9    1.00    9    0.00    7    0.00    7    0.00   15
+template           1.00    1    1.00    1    0.00    2    0.00    2    0.00    3
 * abstention measured but not gated for this class.
 ```
 
 `n` for precision is `tp + fp`; for recall `tp + fn`; for both safe-case rates
-it is the number of safe cases in that class. Only the two **overall** safe-case
-rates reach the resolution floor of 20; every per-class gate is still
-zero-tolerance, and so are overall precision and recall.
+it is the number of safe cases in that class; for the mismatch rate it is the
+gated cases in that class. Only the **overall** safe-case rates reach the
+resolution floor of 20; every per-class gate is still zero-tolerance, and so
+are overall precision and recall. Note that at `safe n = 22` a single overall
+safe false positive scores `0.045 ≤ 0.05` and passes the *overall* line — the
+per-class line is what actually catches it, which is why both exist.
 
 ## Known gaps
 
@@ -159,8 +163,8 @@ abstention-by-design case as a false negative against its own expectation:
 
 | Group | Cases |
 |---|---|
-| SQL unsafe | `sql_concat`, `sql_fstring`, `sql_percent`, `sql_format`, `sql_augassign`, `sql_request_attribute` |
-| SQL safe | `sql_param_qmark`, `sql_param_named`, `sql_constant`, `sql_hoisted_constant`, `sql_composed_clean`, `sql_reassigned_after_call` |
+| SQL unsafe | `sql_concat`, `sql_fstring`, `sql_percent`, `sql_format`, `sql_augassign`, `sql_request_attribute`, `sql_source_shapes` |
+| SQL safe | `sql_param_qmark`, `sql_param_named`, `sql_constant`, `sql_hoisted_constant`, `sql_composed_clean`, `sql_reassigned_after_call`, `sql_source_lookalikes` |
 | SQL unknown | `sql_via_builder` |
 | Command unsafe | `cmd_shell_true`, `cmd_fstring_shell_true`, `cmd_sh_dash_c`, `cmd_tainted_argv0` |
 | Command safe | `cmd_list_args`, `cmd_list_shell_false`, `cmd_constant`, `cmd_config_member` |
@@ -292,6 +296,24 @@ mismatch), and dropping request objects from the source rule fails
 — a source keyword set is consulted to prove **danger**, so an incomplete one
 fails silent while an over-broad one fails loud, and only the third case can see
 the silent half.
+
+### …and the two that cover it in both directions
+
+Those three all use the literal spelling `request.args.get` / `cfg.input_dir`,
+so the rule could be widened or narrowed a long way without the gate noticing.
+Two further cases measure the rule itself:
+
+| Case | Label | What it would catch |
+|---|---|---|
+| `sql_source_shapes` | unsafe / sql | a renamed request object (`http_request.args.get`), a distinctive inbound-API member on an unrecognisable receiver (`form.cleaned_data`), and the bare WSGI `environ["QUERY_STRING"]` — three ways of **narrowing** the rule into a silent miss |
+| `sql_source_lookalikes` | safe / sql | an outbound `session.request(...).text`, a local helper called `query(...)`, and an HTTP client's `self.request.timeout` — three ways of **widening** it into a critical false positive |
+
+Each is reddened by three independent single-point mutations of
+`provenance._is_source_chain`, measured: reverting the "a *called* segment is
+an outbound request" test, the client-member denylist, or the case-sensitive
+factory set each turns `sql_source_lookalikes` into a false positive; dropping
+word-level request-object matching, the distinctive-member set, or the
+protocol containers each turns `sql_source_shapes` into a miss. All six exit 1.
 
 ## Governing invariant
 
