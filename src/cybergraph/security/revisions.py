@@ -41,8 +41,23 @@ def _git(repo_root: Path, *args: str) -> tuple[bool, str]:
     return True, proc.stdout
 
 
+def _is_cybergraph_state(path: str) -> bool:
+    """CyberGraph's own state directory is never part of a code delta.
+
+    Fed back into ``changed_files`` it would make the tool analyze its own
+    cache -- a second ``check_change`` on the same repo would see the first
+    call's ``.cybergraph/graph.db`` (and base cache) as "changed" and flip
+    ACCEPT to REVIEW. This must not depend on the target repo's `.gitignore`:
+    a fresh repo, or one that simply never added the entry, must still be
+    correct. Mirrors ``analysis.collector.DEFAULT_EXCLUDES``, which excludes
+    ``.cybergraph`` from analysis for the same reason.
+    """
+    return path.split("/", 1)[0] == ".cybergraph"
+
+
 def _names(output: str) -> tuple[str, ...]:
-    return tuple(sorted({line.strip() for line in output.splitlines() if line.strip()}))
+    names = {line.strip() for line in output.splitlines() if line.strip()}
+    return tuple(sorted(n for n in names if not _is_cybergraph_state(n)))
 
 
 def _verify(repo_root: Path, ref: str) -> bool:

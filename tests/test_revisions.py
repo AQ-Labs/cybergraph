@@ -142,6 +142,25 @@ def test_not_a_git_repository_is_a_failure(tmp_path: Path):
     assert revisions.changed_files == ()
 
 
+def test_cybergraph_state_dir_is_never_a_changed_file(tmp_path: Path):
+    """The tool must never feed itself its own cache as the user's diff.
+
+    No `.gitignore` excludes `.cybergraph/` here -- the exclusion must be
+    unconditional, not dependent on the target repo's gitignore."""
+    repo = _repo(tmp_path)
+    (repo / "new_admin_endpoint.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / ".cybergraph").mkdir()
+    (repo / ".cybergraph" / "graph.db").write_text("", encoding="utf-8")
+    base_dir = repo / ".cybergraph" / "base" / "deadbeef"
+    base_dir.mkdir(parents=True)
+    (base_dir / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    revisions = resolve_revisions(repo)
+    assert revisions.changed_files == ("new_admin_endpoint.py",)
+    for path in revisions.changed_files:
+        assert not path.startswith(".cybergraph")
+
+
 def test_clean_tree_on_main_with_no_base_is_not_a_failure(tmp_path: Path):
     """On the default branch with a clean tree there is nothing to compare, but
     that is not a tool failure -- it is an empty, established comparison."""
