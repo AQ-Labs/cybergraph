@@ -5,6 +5,7 @@
     "min_recall": 0.95,
     "max_safe_false_positive_rate": 0.05,
     "max_safe_abstention_rate": 0.15,
+    "max_case_mismatch_rate": 0.0,
     "abstention_ungated_classes": [
       "command"
     ],
@@ -14,6 +15,7 @@
   "recall": 1.0,
   "safe_false_positive_rate": 0.0,
   "safe_abstention_rate": 0.0,
+  "case_mismatch_rate": 0.0,
   "overall": {
     "cases": 41,
     "gated_cases": 39,
@@ -34,7 +36,10 @@
     "safe_false_positive_rate": 0.0,
     "safe_abstained": 0,
     "safe_abstained_cases": [],
-    "safe_abstention_rate": 0.0
+    "safe_abstention_rate": 0.0,
+    "mismatched": 0,
+    "mismatched_cases": [],
+    "case_mismatch_rate": 0.0
   },
   "per_class": {
     "code": {
@@ -54,7 +59,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "command": {
       "cases": 11,
@@ -76,7 +84,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "deserialize": {
       "cases": 2,
@@ -95,7 +106,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "interprocedural": {
       "cases": 2,
@@ -114,7 +128,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "path": {
       "cases": 6,
@@ -133,7 +150,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "sql": {
       "cases": 13,
@@ -152,7 +172,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     },
     "template": {
       "cases": 3,
@@ -171,7 +194,10 @@
       "safe_false_positive_rate": 0.0,
       "safe_abstained": 0,
       "safe_abstained_cases": [],
-      "safe_abstention_rate": 0.0
+      "safe_abstention_rate": 0.0,
+      "mismatched": 0,
+      "mismatched_cases": [],
+      "case_mismatch_rate": 0.0
     }
   },
   "gates": [
@@ -210,6 +236,16 @@
       "value": 0.0,
       "n": 20,
       "threshold": 0.15,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": false,
+      "passed": true
+    },
+    {
+      "name": "overall:case_mismatch_rate",
+      "value": 0.0,
+      "n": 39,
+      "threshold": 0.0,
       "direction": "max",
       "enforced": true,
       "zero_tolerance": false,
@@ -256,6 +292,16 @@
       "passed": true
     },
     {
+      "name": "code:case_mismatch_rate",
+      "value": 0.0,
+      "n": 4,
+      "threshold": 0.0,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
       "name": "command:precision",
       "value": 1.0,
       "n": 4,
@@ -296,6 +342,16 @@
       "passed": true
     },
     {
+      "name": "command:case_mismatch_rate",
+      "value": 0.0,
+      "n": 9,
+      "threshold": 0.0,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
       "name": "deserialize:precision",
       "value": 1.0,
       "n": 1,
@@ -330,6 +386,16 @@
       "value": 0.0,
       "n": 1,
       "threshold": 0.15,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
+      "name": "deserialize:case_mismatch_rate",
+      "value": 0.0,
+      "n": 2,
+      "threshold": 0.0,
       "direction": "max",
       "enforced": true,
       "zero_tolerance": true,
@@ -376,6 +442,16 @@
       "passed": true
     },
     {
+      "name": "interprocedural:case_mismatch_rate",
+      "value": 0.0,
+      "n": 2,
+      "threshold": 0.0,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
       "name": "path:precision",
       "value": 1.0,
       "n": 1,
@@ -410,6 +486,16 @@
       "value": 0.0,
       "n": 4,
       "threshold": 0.15,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
+      "name": "path:case_mismatch_rate",
+      "value": 0.0,
+      "n": 6,
+      "threshold": 0.0,
       "direction": "max",
       "enforced": true,
       "zero_tolerance": true,
@@ -456,6 +542,16 @@
       "passed": true
     },
     {
+      "name": "sql:case_mismatch_rate",
+      "value": 0.0,
+      "n": 13,
+      "threshold": 0.0,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
       "name": "template:precision",
       "value": 1.0,
       "n": 1,
@@ -490,6 +586,16 @@
       "value": 0.0,
       "n": 2,
       "threshold": 0.15,
+      "direction": "max",
+      "enforced": true,
+      "zero_tolerance": true,
+      "passed": true
+    },
+    {
+      "name": "template:case_mismatch_rate",
+      "value": 0.0,
+      "n": 3,
+      "threshold": 0.0,
       "direction": "max",
       "enforced": true,
       "zero_tolerance": true,

@@ -9,7 +9,7 @@ not tell" as a false positive pushes the detector toward guessing. They are
 instead counted as abstentions, and abstaining on a *safe* case is gated,
 because operationally it sends a clean change to a human.
 
-Four metrics, and the last two are gated **per vulnerability class**:
+Five metrics, and the last three are gated **per vulnerability class**:
 
 ===========================  =========  ====================================
 metric                       threshold  scope
@@ -18,7 +18,20 @@ precision                    >= 0.90    gated cases
 recall                       >= 0.95    gated cases, excluding ``known_gap``
 safe-case false positives    <= 0.05    per class
 safe-case abstentions        <= 0.15    per class, except ``command``
+case mismatches              <= 0.00    per class, every gated case
 ===========================  =========  ====================================
+
+The fifth exists because the first four cannot see an ``unknown``-labelled
+case at all. An abstention-by-design case contributes nothing to tp/fp/fn --
+correctly, since penalising an honest "I could not tell" as a false positive
+pushes the detector toward guessing -- and the two safe-case rates select on
+``label == "safe"``. So an ``unknown`` row fed **no gated metric**, and three
+measured single-point mutations traded an abstention for a confirmed high, a
+confirmed critical, and for ``safe``, with all 32 gate lines still reading
+PASS. The last of those inverts the governing invariant of the whole system:
+*uncertainty never becomes safety*. ``case_mismatch_rate`` gates each row's
+``clean`` flag -- "this case came out exactly as its expectation says",
+whatever its label -- so every case in the corpus now reaches a gate line.
 
 Gating abstention alone is satisfiable by over-reporting: during Task 4 the
 aggregate abstention rate fell from 17.6% to 12.9% purely because 23 safe sites
@@ -60,6 +73,9 @@ MIN_PRECISION = 0.90
 MIN_RECALL = 0.95
 MAX_SAFE_FALSE_POSITIVE_RATE = 0.05
 MAX_SAFE_ABSTENTION_RATE = 0.15
+# A case either came out as its expectation says or it did not; there is no
+# tolerable fraction of "the corpus disagrees with the detector".
+MAX_CASE_MISMATCH_RATE = 0.0
 
 # Measured and printed, but not gated. See the module docstring.
 ABSTENTION_UNGATED_CLASSES = frozenset({"command"})
@@ -161,7 +177,7 @@ def _rate(numerator: int, denominator: int, *, empty: float) -> float:
 
 
 def _metrics(rows: list[dict]) -> dict:
-    """Precision/recall over gated rows, plus the two safe-case rates."""
+    """Precision/recall over gated rows, the two safe-case rates, and mismatches."""
     gated = [row for row in rows if not row["known_gap"]]
     tp = sum(row["tp"] for row in gated)
     fp = sum(row["fp"] for row in gated)
@@ -170,6 +186,11 @@ def _metrics(rows: list[dict]) -> dict:
     safe = [row for row in rows if row["label"] == "safe"]
     safe_fp = [row for row in safe if row["detected"]]
     safe_abstained = [row for row in safe if row["abstentions"]]
+
+    # Every gated row, whatever its label. This is the only metric an
+    # `unknown`-labelled case reaches: tp/fp/fn are zero for it by design and
+    # the two safe-case rates select on `label == "safe"`.
+    mismatched = [row for row in gated if not row["clean"]]
 
     return {
         "cases": len(rows),
@@ -189,6 +210,9 @@ def _metrics(rows: list[dict]) -> dict:
         "safe_abstained": len(safe_abstained),
         "safe_abstained_cases": sorted(row["name"] for row in safe_abstained),
         "safe_abstention_rate": _rate(len(safe_abstained), len(safe), empty=0.0),
+        "mismatched": len(mismatched),
+        "mismatched_cases": sorted(row["name"] for row in mismatched),
+        "case_mismatch_rate": _rate(len(mismatched), len(gated), empty=0.0),
     }
 
 
@@ -222,13 +246,15 @@ def _gates_for(scope: str, stats: dict, vuln_class: str | None) -> list[dict]:
         _gate(f"{scope}:safe_abstention_rate", stats["safe_abstention_rate"],
               MAX_SAFE_ABSTENTION_RATE, minimum=False, n=stats["safe_cases"],
               enforced=abstention_enforced),
+        _gate(f"{scope}:case_mismatch_rate", stats["case_mismatch_rate"],
+              MAX_CASE_MISMATCH_RATE, minimum=False, n=stats["gated_cases"]),
     ]
 
 
 def _print_class_table(per_class: dict[str, dict]) -> None:
     header = (
         f"{'class':16} {'prec':>6} {'n':>4}  {'recall':>6} {'n':>4}  "
-        f"{'safeFP':>6} {'n':>4}  {'abst':>6} {'n':>4}"
+        f"{'safeFP':>6} {'n':>4}  {'abst':>6} {'n':>4}  {'mism':>6} {'n':>4}"
     )
     print(header)
     print("-" * len(header))
@@ -238,7 +264,8 @@ def _print_class_table(per_class: dict[str, dict]) -> None:
             f"{name:16} {stats['precision']:>6.2f} {stats['precision_n']:>4} "
             f" {stats['recall']:>6.2f} {stats['recall_n']:>4} "
             f" {stats['safe_false_positive_rate']:>6.2f} {stats['safe_cases']:>4} "
-            f" {stats['safe_abstention_rate']:>6.2f} {stats['safe_cases']:>4}{flag}"
+            f" {stats['safe_abstention_rate']:>6.2f} {stats['safe_cases']:>4} "
+            f" {stats['case_mismatch_rate']:>6.2f} {stats['gated_cases']:>4}{flag}"
         )
     print("* abstention measured but not gated for this class.")
 
@@ -265,6 +292,7 @@ def main() -> int:
             "min_recall": MIN_RECALL,
             "max_safe_false_positive_rate": MAX_SAFE_FALSE_POSITIVE_RATE,
             "max_safe_abstention_rate": MAX_SAFE_ABSTENTION_RATE,
+            "max_case_mismatch_rate": MAX_CASE_MISMATCH_RATE,
             "abstention_ungated_classes": sorted(ABSTENTION_UNGATED_CLASSES),
             "resolution_floor": RESOLUTION_FLOOR,
         },
@@ -273,6 +301,7 @@ def main() -> int:
         "recall": overall["recall"],
         "safe_false_positive_rate": overall["safe_false_positive_rate"],
         "safe_abstention_rate": overall["safe_abstention_rate"],
+        "case_mismatch_rate": overall["case_mismatch_rate"],
         "overall": overall,
         "per_class": per_class,
         "gates": gates,
@@ -286,7 +315,9 @@ def main() -> int:
         f"recall={overall['recall']} (n={overall['recall_n']}) "
         f"safe_fp_rate={overall['safe_false_positive_rate']} "
         f"safe_abstention_rate={overall['safe_abstention_rate']} "
-        f"(safe n={overall['safe_cases']})"
+        f"(safe n={overall['safe_cases']}) "
+        f"case_mismatch_rate={overall['case_mismatch_rate']} "
+        f"(gated n={overall['gated_cases']})"
     )
     gaps = overall["known_gap_cases"]
     print(f"known gaps: {len(gaps)} ({', '.join(gaps) if gaps else 'none'})")

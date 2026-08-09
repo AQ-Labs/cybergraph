@@ -134,6 +134,39 @@ def test_abstentions_are_excluded_from_precision(results: dict) -> None:
         assert row["abstentions"] >= 1, row
 
 
+def test_every_unknown_case_reaches_a_gated_metric(results: dict) -> None:
+    # `unknown` rows contribute nothing to tp/fp/fn and the two safe-case rates
+    # select on `label == "safe"`, so before `case_mismatch_rate` existed an
+    # abstention could be traded for a confirmed finding -- or for `safe`,
+    # inverting "uncertainty never becomes safety" -- with every gate line
+    # still reading PASS. Each unknown case must now sit under an enforced
+    # mismatch gate for its own class.
+    unknown = [row for row in results["cases"] if row["label"] == "unknown"]
+    assert unknown, "the corpus must contain abstention-by-design cases"
+    gates = {gate["name"]: gate for gate in results["gates"]}
+    for row in unknown:
+        assert not row["known_gap"], row
+        gate = gates[f"{row['vuln_class']}:case_mismatch_rate"]
+        assert gate["enforced"], gate
+        assert gate["threshold"] == 0.0, gate
+
+
+def test_an_abstention_traded_for_a_verdict_fails_the_gate() -> None:
+    # Both directions of the trade, on the same synthetic unknown case: a
+    # confirmed finding, and a silent `safe`.
+    for row in (
+        _row("u", "unknown", "sql", abstentions=0, detected=["('app.py', 3, 'CG-SQL-EXEC')"]),
+        {**_row("u", "unknown", "sql"), "clean": False},  # abstention -> safe
+    ):
+        stats = run_precision._metrics([row])
+        assert stats["case_mismatch_rate"] == 1.0, row
+        gate = run_precision._gate(
+            "sql:case_mismatch_rate", stats["case_mismatch_rate"],
+            run_precision.MAX_CASE_MISMATCH_RATE, minimum=False, n=stats["gated_cases"],
+        )
+        assert not gate["passed"], row
+
+
 def test_command_abstention_is_measured_but_not_gated(results: dict) -> None:
     gate = next(
         item for item in results["gates"]
@@ -145,10 +178,16 @@ def test_command_abstention_is_measured_but_not_gated(results: dict) -> None:
 
 def _row(name: str, label: str, vuln_class: str, *, tp=0, fp=0, fn=0,
          abstentions=0, detected=(), known_gap=False) -> dict:
+    if label == "unknown":
+        clean = not detected
+    elif label == "safe":
+        clean = not detected and not abstentions
+    else:
+        clean = fp == 0 and fn == 0
     return {
         "name": name, "label": label, "vuln_class": vuln_class, "known_gap": known_gap,
         "tp": tp, "fp": fp, "fn": fn, "abstentions": abstentions,
-        "detected": list(detected),
+        "detected": list(detected), "clean": clean,
     }
 
 
