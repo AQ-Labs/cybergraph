@@ -116,6 +116,31 @@ def test_version_downgrade_is_flagged():
     assert "version_downgraded" in kinds
 
 
+def test_rule_that_became_unsupported_is_not_also_removed():
+    """A same-id kind change to an unsupported kind is a problem, not a removal."""
+    base = Policy(rules=(RULE,), exists=True)
+    current = Policy(
+        rules=(),
+        problems=(PolicyProblem("admin", "`require_role` is not yet supported"),),
+        exists=True,
+    )
+    entity = _entity("app.py::x", "/admin/x")
+    changes = diff_policies(
+        base, _set([entity], ["app.py::x"]), current, _set([entity])
+    )
+    kinds_for_admin = {change.kind for change in changes if change.subject == "admin"}
+    assert kinds_for_admin == {"policy_problem"}
+
+
+def test_genuinely_removed_rule_is_still_flagged():
+    """An id absent from both current rules and current problems is a real removal."""
+    base = Policy(rules=(RULE,), exists=True)
+    current = Policy(rules=(), exists=True)
+    entity = _entity("app.py::x", "/admin/x")
+    kinds = _kinds(base, _set([entity], ["app.py::x"]), current, _set([entity]))
+    assert "rule_removed" in kinds
+
+
 def test_policy_problems_get_their_own_kind():
     """An unsupported rule is not a removed rule."""
     current = Policy(

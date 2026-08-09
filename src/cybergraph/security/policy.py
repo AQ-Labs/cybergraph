@@ -291,7 +291,12 @@ def diff_policies(
 
     base_ids = {rule.id for rule in base.rules}
     current_ids = {rule.id for rule in current.rules}
-    for removed in sorted(base_ids - current_ids):
+    # An id that now surfaces as a problem did not vanish — it became invalid,
+    # which is already reported above as `policy_problem`. Only an id absent
+    # from *both* current rules and current problems is genuinely removed.
+    current_problem_ids = {problem.rule_id for problem in current.problems if problem.rule_id}
+    current_present_ids = current_ids | current_problem_ids
+    for removed in sorted(base_ids - current_present_ids):
         changes.append(PolicyChange("rule_removed", removed, "a declared promise was removed"))
     for added in sorted(current_ids - base_ids):
         changes.append(PolicyChange("promise_added", added, "a new promise was declared"))
