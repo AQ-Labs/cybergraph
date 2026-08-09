@@ -320,7 +320,10 @@ def main() -> int:
     print()
     print(f"Wrote {RESULTS}")
     print("GATE PASSED" if passed else "GATE FAILED")
-    return 0
+    # A red gate must exit non-zero. The README documents this file as *the*
+    # way to run the gate, so a CI step that shells out to it is green on red
+    # for as long as the exit status ignores the verdict it just printed.
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

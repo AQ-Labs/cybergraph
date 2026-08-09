@@ -57,14 +57,32 @@ REQUIRED_CLASSES = {
 
 
 @pytest.fixture(scope="module")
-def results() -> dict:
-    subprocess.run(
+def gate_run() -> tuple[int, dict]:
+    """The runner's exit status and the results file it wrote.
+
+    ``check=False`` on purpose: a red gate must exit non-zero, so raising here
+    would turn every assertion in this module into the same opaque
+    ``CalledProcessError`` instead of the specific gate line that failed.
+    """
+    completed = subprocess.run(
         [sys.executable, str(BENCHMARK_DIR / "run_precision.py")],
-        cwd=ROOT, check=True, capture_output=True,
+        cwd=ROOT, check=False, capture_output=True,
     )
-    return json.loads(
+    return completed.returncode, json.loads(
         (BENCHMARK_DIR / "precision" / "results.json").read_text(encoding="utf-8")
     )
+
+
+@pytest.fixture(scope="module")
+def results(gate_run: tuple[int, dict]) -> dict:
+    return gate_run[1]
+
+
+def test_the_exit_status_carries_the_gate_verdict(gate_run: tuple[int, dict]) -> None:
+    # `GATE FAILED` printed on stdout with exit 0 is green on red for any CI
+    # step that shells out to the runner, which is how the README documents it.
+    returncode, results = gate_run
+    assert returncode == (0 if results["passed"] else 1), (returncode, results["passed"])
 
 
 def test_every_required_case_exists() -> None:
