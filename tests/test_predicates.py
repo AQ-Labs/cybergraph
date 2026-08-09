@@ -119,6 +119,60 @@ def test_sql_no_locatable_argument_is_unknown():
     assert _assess("cursor.execute(**kwargs)", "execute", params="uid, **kwargs") == VERDICT_UNKNOWN
 
 
+# The same "an argument that cannot be located is unknown, never safe" invariant,
+# for the three classes that had it only for SQL. Each asserts the resolved
+# `sink.vuln_class` as well as the verdict, so the case cannot pass by
+# `lookup_sink` returning `None` (which would skip dispatch entirely).
+
+
+@pytest.mark.parametrize(
+    "body,params,callee,vuln_class",
+    [
+        ("subprocess.run(**opts)", "cmd, **opts", "run", "command"),
+        ("subprocess.run(cwd=d, shell=True)", "d", "run", "command"),
+        ("os.system(**opts)", "cmd, **opts", "system", "command"),
+        ("open(**opts)", "name, **opts", "open", "path"),
+        ("render_template_string(**ctx)", "u, **ctx", "render_template_string", "template"),
+    ],
+)
+def test_command_path_template_unlocatable_argument_is_unknown(body, params, callee, vuln_class):
+    src = f"def f({params}):\n    {body}\n"
+    fn = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)][0]
+    tainted = {a.arg: f"input:{a.arg}" for a in fn.args.args}
+    states = snapshot_call_sites(fn, tainted)
+    call = next(
+        n for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(callee)
+    )
+    sink = lookup_sink(ast.unparse(call.func), "python")
+    assert sink is not None, ast.unparse(call.func)
+    assert sink.vuln_class == vuln_class, sink.vuln_class
+    assert assess_call(sink, call, states[id(call)]) == VERDICT_UNKNOWN
+
+
+# The `_assess_path` origin/confinement guard: a producer confines a name only
+# if it had a carrier to confine and confined all of it. Dropping the
+# `origin_carriers and` guard makes `all(...)` over an empty set vacuously true,
+# so a bare request object bound to a local (`r = request; open(r)`) -- whose
+# origin has no *named* taint inside it -- reads as "everything confined" and
+# clears outright. Its own comment calls dropping the guard "the whole bug
+# inverted". `a = sys.argv` is the calibration case the mutation leaves unsafe
+# (its origin has a chain carrier), so it is deliberately not asserted here.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "r = request\n    open(r)",
+        'r = request\n    open("/data/" + r)',
+        "r = req\n    open(r)",
+        "a = argv\n    open(a)",
+    ],
+)
+def test_a_bare_request_bound_to_a_local_is_not_confined(body):
+    assert _assess(body, "open", params="unused") == VERDICT_UNSAFE
+
+
 # --- Correction B: starred, tainted argv elements are argument injection ---
 
 
@@ -1078,3 +1132,43 @@ def test_exec_executescript_and_raw(body, callee, expected):
 )
 def test_an_opaque_untainted_argument_abstains_rather_than_clearing(body, callee):
     assert _assess(body, callee, params="unused") == VERDICT_UNKNOWN
+
+
+# --- `_flags_all_known` polarity, the D6 matching machinery -------------------
+
+# `--` is end-of-options, not a flag: `_flags_all_known` skips it explicitly, so
+# a known runner whose only "unknown" token is `--` still clears. Deleting that
+# skip makes `--` read as an unrecognised flag and drags every `runner ... --
+# <arg>` argv from safe to an abstention -- the scope boundary moving in
+# silence.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        ('["node", "script.js", "--", userarg]', "userarg"),
+        ('["ruby", "app.rb", "--", arg]', "arg"),
+        ('["python", "app.py", "--", arg]', "arg"),
+    ],
+)
+def test_a_known_runner_with_double_dash_stays_safe(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_SAFE
+
+
+# The `known_letters` bundle rule is `all(...)`: a single-dash bundle clears only
+# when *every* letter in it is one the runner is known to accept and known not to
+# treat as code. Flipping it to `any(...)` lets one recognised letter carry an
+# unknown one to safety -- the exact polarity the design turns on, since the set
+# is consulted only to GRANT safety.
+
+
+@pytest.mark.parametrize(
+    "body,params",
+    [
+        # `-lZ`: `l` is known to bash, `Z` is not, so the bundle must abstain.
+        ('["bash", "-lZ", cmd]', "cmd"),
+        ('["sh", "-lY", cmd]', "cmd"),
+    ],
+)
+def test_an_unknown_letter_in_a_posix_bundle_abstains(body, params):
+    assert _assess(f"subprocess.run({body})", "run", params=params) == VERDICT_UNKNOWN

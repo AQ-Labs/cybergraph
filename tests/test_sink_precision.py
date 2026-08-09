@@ -116,7 +116,12 @@ def test_benign_names_produce_neither(tmp_path):
 def test_nested_function_sink_is_attributed_to_one_function_only(tmp_path):
     _, edges, findings = _analyze(tmp_path, NESTED)
     assert [f.rule_id for f in findings] == ["CG-CMD-EXEC"]
-    assert [e.kind for e in edges if e.kind == "REACHES_SINK"] == ["REACHES_SINK"]
+    # Pin the edge's endpoints, not the literal it is filtered against: the old
+    # `[e.kind ... if e.kind == "REACHES_SINK"] == ["REACHES_SINK"]` compared a
+    # list against the very value it filtered on, so it could only ever be a
+    # count of one and pinned nothing about source or target.
+    reaches = [(e.source, e.target) for e in edges if e.kind == "REACHES_SINK"]
+    assert reaches == [("app.py::run", "os.system")], reaches
     assert [e.source for e in edges if e.kind == "CALLS" and e.target == "os.system"] == [
         "app.py::run"
     ]
@@ -690,3 +695,108 @@ def test_req_url_bound_to_a_local_is_specifically_not_critical(tmp_path: Path) -
     _nodes, _edges, findings = _analyze(tmp_path, source)
     assert findings == [], [f.rule_id for f in findings]
     assert all(f.severity != "critical" for f in findings)
+
+
+# --- The source cross-product (M10) ------------------------------------------
+# `test_a_framework_read_is_still_a_source` writes every FRAMEWORK_READS shape
+# *inline* at the sink argument, where `_has_tainted_name` -> `user_input_nodes`
+# answers it. `test_taint_is_found_in_every_binding_form_not_only_assignment`
+# binds to a local, but every one of its shapes is `request.*`, answered by the
+# bare-`request` name. Neither exercises a *non-request-rooted* source bound to
+# a local, which is the only path through `reads_user_input`'s `_is_source_chain`
+# branch (provenance.py). Deleting that branch presents as a clean scan while
+# silently dropping the WSGI/ASGI/Lambda/cgi and framework-factory sources.
+
+FRAMEWORK_READS_BOUND_TO_LOCAL = [
+    # Protocol-level containers read by subscript at a request field.
+    ("wsgi-environ",
+     "def app(environ, start_response):\n"
+     "    q = environ['QUERY_STRING']\n"
+     "    return cursor.execute('select ' + q)\n"),
+    ("asgi-scope",
+     "async def app(scope, receive, send):\n"
+     "    q = scope['query_string']\n"
+     "    return cursor.execute('select ' + q)\n"),
+    ("lambda-event",
+     "def handler(event, context):\n"
+     "    q = event['body']\n"
+     "    return cursor.execute('select ' + q)\n"),
+    ("os-environ-http",
+     "import os\n"
+     "def go():\n"
+     "    q = os.environ['HTTP_USER_AGENT']\n"
+     "    return cursor.execute('select ' + q)\n"),
+    # A member distinctive enough to name an inbound API on its own.
+    ("query-params-member",
+     "def go(obj):\n"
+     "    q = obj.query_params.get('u')\n"
+     "    return cursor.execute('select ' + q)\n"),
+    ("cgi-getvalue",
+     "import cgi\n"
+     "def go(form):\n"
+     "    q = form.getvalue('u')\n"
+     "    return cursor.execute('select ' + q)\n"),
+    # A source factory spelled the way the framework spells it.
+    ("fastapi-query-factory",
+     "from fastapi import Query\n"
+     "def go():\n"
+     "    q = Query(None)\n"
+     "    return cursor.execute('select ' + q)\n"),
+]
+
+
+@pytest.mark.parametrize(
+    "name,source",
+    FRAMEWORK_READS_BOUND_TO_LOCAL,
+    ids=[n for n, _ in FRAMEWORK_READS_BOUND_TO_LOCAL],
+)
+def test_a_framework_read_bound_to_a_local_still_taints(tmp_path: Path, name: str, source: str):
+    """A genuine, non-request-rooted source bound to a local must still reach the sink."""
+    _nodes, edges, findings = _analyze(tmp_path, source)
+    assert [f.rule_id for f in findings] == ["CG-SQL-EXEC"], [f.rule_id for f in findings]
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+# --- A bare request bound to a local reaches a PATH sink (M2, end to end) -----
+# The unit form lives in `test_predicates.py`; here the whole pipeline is
+# exercised, so the rule id, its severity and the surviving REACHES_SINK edge
+# are pinned rather than a bare non-empty count. Dropping the `origin_carriers`
+# guard in `_assess_path` clears the finding.
+
+REQUEST_BOUND_PATH = (
+    "from flask import Flask, request\n"
+    "app = Flask(__name__)\n"
+    "\n"
+    "@app.get('/f')\n"
+    "def h():\n"
+    "    r = request\n"
+    "    return open(r).read()\n"
+)
+
+
+def test_a_bare_request_bound_to_a_local_reaches_a_path_sink(tmp_path: Path):
+    _nodes, edges, findings = _analyze(tmp_path, REQUEST_BOUND_PATH)
+    assert [f.rule_id for f in findings] == ["CG-PATH-TRAVERSAL"], [f.rule_id for f in findings]
+    assert findings[0].severity == "high"
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+def test_os_system_command_injection_is_critical(tmp_path: Path):
+    """Nothing else asserts the severity of a CG-CMD-EXEC finding.
+
+    `os.system` runs a shell inherently, so a tainted argument is a confirmed
+    critical command injection. A mutation downgrading the sink to `medium`
+    passed the whole suite.
+    """
+    source = (
+        "import os\n"
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/r')\n"
+        "def run(cmd: str):\n"
+        "    os.system('echo ' + cmd)\n"
+    )
+    _nodes, _edges, findings = _analyze(tmp_path, source)
+    assert [f.rule_id for f in findings] == ["CG-CMD-EXEC"], [f.rule_id for f in findings]
+    assert findings[0].severity == "critical", findings[0].severity
