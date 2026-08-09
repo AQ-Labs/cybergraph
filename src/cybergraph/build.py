@@ -19,9 +19,26 @@ from cybergraph.graph import Edge, Finding, GraphStore, Node
 from cybergraph.suppressions import filter_suppressed_findings
 
 
-def build_graph(repo_root: Path) -> dict[str, int]:
+def build_graph(repo_root: Path, config_root: Path | None = None) -> dict[str, int]:
+    """Build the graph for the tree at ``repo_root``.
+
+    ``config_root`` loads ``.cybergraph.toml`` from a *different* directory than
+    the tree being walked, mirroring ``find_attack_paths(suppression_root=...)``.
+    Every key the config carries decides what the analysis can *see*:
+    ``[ignore] paths`` removes files before they are read, ``[security] sinks``
+    and the marker lists decide which calls become ``REACHES_SINK`` edges, and
+    ``[suppressions] rules`` and severity overrides reshape findings.
+
+    A caller that materialises a tree from git (``security/review.py``) must
+    therefore pass the real repository root. Otherwise the two sides of a PR
+    delta are analysed under two different configurations, and a *configuration*
+    difference is rendered as a *code* change: a live sink inside a path the PR
+    added to ``[ignore] paths`` vanishes from the head scan alone and the review
+    reports it as a removed attack path -- a fixed vulnerability that was never
+    fixed. Configuration is not part of a code delta.
+    """
     repo_root = repo_root.resolve()
-    config = load_config(repo_root)
+    config = load_config(repo_root if config_root is None else config_root.resolve())
     store = GraphStore.open_for_repo(repo_root)
     # Preserve findings imported from external tools (Semgrep/SARIF/Gitleaks/Strix)
     # across rebuilds; only analyzer-generated findings are regenerated below.

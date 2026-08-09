@@ -1,6 +1,6 @@
 """Analysis package exports."""
 
-from .collector import iter_source_files
+from .collector import is_ignored_path, is_supported_source, iter_source_files
 from .csharp import analyze_csharp_file
 from .dependencies import analyze_dependency_manifest, is_dependency_manifest
 from .dockerfile import analyze_dockerfile_file
@@ -22,5 +22,7 @@ __all__ = [
     "analyze_source_file",
     "analyze_terraform_file",
     "is_dependency_manifest",
+    "is_ignored_path",
+    "is_supported_source",
     "iter_source_files",
 ]

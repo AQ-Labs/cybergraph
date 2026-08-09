@@ -36,6 +36,29 @@ SUPPORTED_SUFFIXES = {
 SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml", "Dockerfile"}
 
 
+def is_ignored_path(rel_path: str, ignored_paths: tuple[str, ...] = ()) -> bool:
+    """Whether a repo-relative path is excluded by ``[ignore] paths``.
+
+    Exported so callers that need to *describe* the exclusion -- a PR review
+    naming the changed files the analysis never read -- ask the same predicate
+    the collector applies, instead of reimplementing the glob semantics and
+    drifting from it.
+    """
+    rel = rel_path.replace("\\", "/")
+    for pattern in ignored_paths:
+        cleaned = pattern.replace("\\", "/").rstrip("/")
+        if not cleaned:
+            continue
+        if fnmatch(rel, cleaned) or rel.startswith(cleaned + "/"):
+            return True
+    return False
+
+
+def is_supported_source(path: Path) -> bool:
+    """Whether the analyzers would read this file at all, ignoring config."""
+    return path.suffix.lower() in SUPPORTED_SUFFIXES or path.name in SUPPORTED_FILENAMES
+
+
 def iter_source_files(repo_root: Path, ignored_paths: tuple[str, ...] = ()) -> list[Path]:
     files: list[Path] = []
     repo_root = repo_root.resolve()
@@ -44,12 +67,8 @@ def iter_source_files(repo_root: Path, ignored_paths: tuple[str, ...] = ()) -> l
         rel_parts = rel_path.parts
         if any(part in DEFAULT_EXCLUDES for part in rel_parts):
             continue
-        rel = rel_path.as_posix()
-        ignored = tuple(pattern.replace("\\", "/").rstrip("/") for pattern in ignored_paths)
-        if any(fnmatch(rel, pattern) or rel.startswith(pattern + "/") for pattern in ignored):
+        if is_ignored_path(rel_path.as_posix(), tuple(ignored_paths)):
             continue
-        if path.is_file() and (
-            path.suffix.lower() in SUPPORTED_SUFFIXES or path.name in SUPPORTED_FILENAMES
-        ):
+        if path.is_file() and is_supported_source(path):
             files.append(path)
     return sorted(files)
