@@ -40,6 +40,15 @@ jobs:
       - name: Build graph
         run: cybergraph build .
 
+      - name: Check the change
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=0 origin "$BASE_REF"
+          cybergraph check . --mode merge-base --base "origin/$BASE_REF" \
+            | tee cybergraph-check.txt
+
       - name: Review security delta
         if: github.event_name == 'pull_request'
         env:
@@ -87,6 +96,7 @@ jobs:
           path: |
             cybergraph.sarif
             cybergraph-report.html
+            cybergraph-check.txt
             cybergraph-review.txt
             cybergraph-pr-comment.md
             pr-number.txt
