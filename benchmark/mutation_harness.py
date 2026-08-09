@@ -358,6 +358,38 @@ MUTATIONS: list[Mutation] = [
         tests=("tests/test_capability.py::test_go_change_is_caught_by_general_source_support",),
         note="removing source_analysis_support makes a Go-only change match nothing",
     ),
+    # -- D1: an unrecognised policy kind must never vanish silently ----------
+    Mutation(
+        id="D1-policy-unknown-kind-silently-dropped",
+        disaster="D1",
+        file="cybergraph/security/policy.py",
+        old='    if kind != KIND_REQUIRE_AUTH:\n'
+        '        return None, PolicyProblem(rule_id, f"unrecognised rule type `{kind or \'(missing)\'}`")',
+        new="    if kind != KIND_REQUIRE_AUTH:\n"
+        "        return None, None",
+        tests=("tests/test_policy.py::test_unknown_kind_becomes_a_visible_problem",),
+        note="an unrecognised rule kind must become a PolicyProblem, never vanish silently",
+    ),
+    # -- D2: a renamed, unguarded route must still read as protection lost --
+    Mutation(
+        id="D2-policy-rename-escape-not-detected",
+        disaster="D2",
+        file="cybergraph/security/policy.py",
+        old="    for key in sorted((base_set.constrained & surviving) - current_set.constrained):\n"
+        "        before = base_set.entities[key]\n"
+        "        after = current_set.entities[key]\n"
+        '        kind = "protection_lost" if before.route != after.route else "coverage_shrunk"',
+        new="    for key in sorted((base_set.constrained & surviving) - current_set.constrained):\n"
+        "        before = base_set.entities[key]\n"
+        "        after = current_set.entities[key]\n"
+        "        if before.route != after.route:\n"
+        "            continue\n"
+        '        kind = "coverage_shrunk"',
+        tests=(
+            "tests/test_policy_delta.py::test_renaming_a_route_out_of_scope_is_caught",
+        ),
+        note="the C1 rename escape must be flagged as protection_lost, not silently skipped",
+    ),
 ]
 
 
