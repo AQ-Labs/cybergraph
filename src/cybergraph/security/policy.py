@@ -363,3 +363,41 @@ def diff_configs(
     for items, kind, detail in (*additions, *removals):
         changes.extend(PolicyChange(kind, subject, detail) for subject in sorted(items))
     return tuple(changes)
+
+
+_BASELINE_HEADER = """\
+# CyberGraph security policy — the promises this application keeps.
+#
+# CyberGraph found these login checks ALREADY IN PLACE and is asking whether you
+# want to keep them. It has not guessed at intent: every line below describes
+# something the code does today.
+#
+# Review each one. A check that is here by accident should be deleted, not kept.
+# Add promises CyberGraph could not see for itself.
+#
+# Commit this file. It is shared project memory and any coding agent can read it.
+
+version = 1
+"""
+
+_BASELINE_RULE = """
+[rule.{rule_id}]
+kind = "require_auth"
+patterns = [{patterns}]
+because = "These routes already require a login today."
+"""
+
+
+def extract_baseline(repo_root: Path) -> str:
+    """Propose a policy from routes that already have a guard. Never writes."""
+    protected = evaluate_policy(Path(repo_root).resolve(), Policy())
+    routes = sorted(
+        {entity.route for entity in protected.entities.values()
+         if entity.guarded and entity.route}
+    )
+    if not routes:
+        return _BASELINE_HEADER
+    rendered = ", ".join(f'"{route}"' for route in routes)
+    return _BASELINE_HEADER + _BASELINE_RULE.format(
+        rule_id="existing-login-checks", patterns=rendered
+    )

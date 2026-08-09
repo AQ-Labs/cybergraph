@@ -154,3 +154,51 @@ def test_empty_policy_constrains_nothing(tmp_path: Path):
     assert result.constrained == frozenset()
     assert result.unprotected == ()
     assert result.entities, "entities are recorded even with no policy"
+
+
+MIXED = '''
+from fastapi import FastAPI, Depends
+app = FastAPI()
+
+def require_login():
+    return True
+
+@app.get("/admin/export")
+def admin_export(user=Depends(require_login)):
+    return {"ok": True}
+
+@app.get("/public/ping")
+def ping():
+    return {"ok": True}
+'''
+
+
+def test_baseline_promises_only_what_is_already_guarded(tmp_path: Path):
+    from cybergraph.security.policy import extract_baseline
+
+    (tmp_path / "app.py").write_text(MIXED, encoding="utf-8")
+    build_graph(tmp_path)
+    draft = extract_baseline(tmp_path)
+    assert "/admin/export" in draft
+    assert "/public/ping" not in draft
+    assert 'kind = "require_auth"' in draft
+
+
+def test_baseline_is_loadable_and_problem_free(tmp_path: Path):
+    from cybergraph.security.policy import extract_baseline
+
+    (tmp_path / "app.py").write_text(MIXED, encoding="utf-8")
+    build_graph(tmp_path)
+    (tmp_path / POLICY_FILE).write_text(extract_baseline(tmp_path), encoding="utf-8")
+    policy = load_policy(tmp_path)
+    assert not policy.is_empty()
+    assert policy.problems == ()
+
+
+def test_baseline_with_no_guards_is_still_valid(tmp_path: Path):
+    from cybergraph.security.policy import extract_baseline
+
+    (tmp_path / "app.py").write_text(UNGUARDED, encoding="utf-8")
+    build_graph(tmp_path)
+    (tmp_path / POLICY_FILE).write_text(extract_baseline(tmp_path), encoding="utf-8")
+    assert load_policy(tmp_path).is_empty()
