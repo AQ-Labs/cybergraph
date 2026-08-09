@@ -27,6 +27,37 @@ def _make_repo(tmp_path: Path) -> Path:
     return repo
 
 
+SUPPRESSED_HEADER = "from fastapi import FastAPI\napp = FastAPI()\n"
+SUPPRESSED_ROUTE = (
+    '\n@app.get("/r")\n'
+    "def run(cmd: str):\n"
+    '    subprocess.run("echo " + cmd, shell=True)\n'
+)
+
+
+def test_strix_scope_applies_suppressions(tmp_path: Path) -> None:
+    """Pins ``strix_plan.py``'s ranked ``find_attack_paths`` call site.
+
+    The Strix scope is a prioritized brief; a wholly-suppressed path must not
+    appear in it. Flipping the call to ``apply_suppressions=False`` would ship
+    accepted fixture noise to the pentester as a priority target.
+    """
+    repo = tmp_path / "repo"
+    (repo / "fixtures").mkdir(parents=True)
+    (repo / "fixtures" / "app.py").write_text(
+        SUPPRESSED_HEADER + SUPPRESSED_ROUTE, encoding="utf-8"
+    )
+    (repo / ".cybergraph.toml").write_text(
+        '[suppressions]\npaths = ["fixtures/*"]\n', encoding="utf-8"
+    )
+    build_graph(repo)
+
+    brief = build_strix_instructions(repo)
+
+    assert "fixtures/app.py" not in brief, brief
+    assert "No entrypoint-to-sink paths were found statically" in brief, brief
+
+
 def test_strix_plan_lists_reachable_attack_paths(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
 

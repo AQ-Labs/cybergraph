@@ -226,6 +226,38 @@ def test_the_mcp_explain_tool_keeps_the_real_paths(tmp_path: Path):
     assert "fixtures/app.py" in answer
 
 
+# --- The five *ranked* call sites: suppression must stay ON -------------------
+# The exploration surfaces above pin ``apply_suppressions=False``. The ranked and
+# actionable surfaces the README enumerates -- ``cybergraph paths``, ``analyze``,
+# the PR review, the cloud scope and the Strix scope -- must keep suppression
+# *on*. Each was flippable to ``apply_suppressions=False`` with the whole suite
+# green. Here each reports **nothing** for a wholly-suppressed path; the PR
+# review and cloud/Strix scopes are pinned in their own test modules.
+
+
+def test_cli_paths_command_applies_suppressions(tmp_path: Path, capsys):
+    """Pins ``cli.py``'s ``cybergraph paths`` call site."""
+    from cybergraph.cli import main
+
+    repo = _suppressed_repo(tmp_path)
+    capsys.readouterr()
+    assert main(["paths", "--repo", str(repo)]) == 0
+    out = capsys.readouterr().out
+
+    assert "No entrypoint-to-sink paths found yet." in out, out
+    assert "fixtures/app.py" not in out
+
+
+def test_orchestrator_ranked_paths_apply_suppressions(tmp_path: Path):
+    """Pins ``orchestrator.py``'s ``analyze`` call site."""
+    from cybergraph.orchestrator import run_full_analysis
+
+    repo = _suppressed_repo(tmp_path)
+    result = run_full_analysis(repo)
+
+    assert result.attack_paths == [], result.attack_paths
+
+
 def test_a_path_crossing_out_of_suppressed_code_is_never_hidden(tmp_path: Path):
     """``path_is_suppressed`` suppresses only when *every* file is suppressed.
 
