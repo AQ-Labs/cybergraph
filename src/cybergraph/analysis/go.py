@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from cybergraph.analysis._source_text import strip_code
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -67,6 +68,10 @@ def analyze_go_file(
 ) -> tuple[list[Node], list[Edge], list[Finding]]:
     source = path.read_text(encoding="utf-8", errors="ignore")
     lines = source.splitlines()
+    # Code view with comments and string literals blanked, so an input marker in
+    # a comment or a string cannot fabricate a taint source. Aligned 1:1 with
+    # `lines`; a marker is only believed where it survives on real code.
+    code_lines = strip_code(source, "go")
     rel = path.relative_to(repo_root).as_posix()
     nodes: list[Node] = [Node("File", rel, rel, rel, 1, len(lines), {"language": "go"})]
     edges: list[Edge] = []
@@ -112,7 +117,8 @@ def analyze_go_file(
         sink_source = current_function or rel
         tainted = tainted_by_function.setdefault(sink_source, {})
         lowered_line = line.lower()
-        input_key = _line_input_source(sink_source, lowered_line, rel, line_no, nodes, edges)
+        code_line = code_lines[line_no - 1] if line_no - 1 < len(code_lines) else line
+        input_key = _line_input_source(sink_source, code_line.lower(), rel, line_no, nodes, edges)
         source_key = input_key or _tainted_source_for_line(line, tainted)
         if source_key:
             assigned = _assigned_name(line)
