@@ -154,7 +154,7 @@ def _traverse(
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
-                if patterns and _is_suppressed(path + (sink_name,), patterns):
+                if patterns and path_is_suppressed(path + (sink_name,), patterns):
                     continue
                 taint_sources = taints.get((node, sink_name), ())
                 risk = _score_attack_path(
@@ -201,7 +201,7 @@ def _traverse(
     return paths
 
 
-def _is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
+def path_is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
     """Suppress only when every file the path touches is suppressed.
 
     Conservative on purpose: a path crossing from suppressed fixture code into
@@ -210,6 +210,11 @@ def _is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
     path with no identifiable file is never suppressed -- an unknown file is
     treated as unsuppressed, so incomplete information abstains from hiding
     rather than hiding silently.
+
+    Public because a caller that wants to *count* what the config hides
+    (``security/review.py``) must ask the same predicate that does the hiding.
+    A second copy of this rule could disagree with it, and the direction it
+    would disagree in is the dangerous one.
     """
     files = {node.split("::", 1)[0] for node in nodes if "::" in node}
     if not files:

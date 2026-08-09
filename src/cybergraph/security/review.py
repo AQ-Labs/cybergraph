@@ -11,7 +11,15 @@ from cybergraph.analysis import is_ignored_path, is_supported_source
 from cybergraph.build import build_graph
 from cybergraph.config import CONFIG_FILE, CyberGraphConfig, load_config
 from cybergraph.graph import GraphStore
-from cybergraph.security.attack_paths import find_attack_paths
+from cybergraph.security.attack_paths import AttackPath, find_attack_paths, path_is_suppressed
+
+#: Traversal cap for the two scans whose difference *is* the delta. Both sides
+#: use it, so neither side is truncated relative to the other.
+_DELTA_PATH_LIMIT = 100
+#: Traversal cap for the accounting scan that measures what the config hides.
+#: Deliberately larger than the delta cap: this number is only ever used to
+#: state blast radius, and understating it understates the risk being accepted.
+_HIDDEN_PATH_LIMIT = 1000
 
 #: The config keys that decide what either scan can *see*. Each is reported on
 #: its own terms; none of them may reach the reviewer as a code delta.
@@ -38,6 +46,9 @@ class SecurityReview:
     #: Reachable risks in changed files that the current suppression config
     #: hides from the deltas above. They are hidden, not fixed.
     suppressed_risk_count: int = 0
+    #: ``True`` when the accounting scan hit ``_HIDDEN_PATH_LIMIT``, making
+    #: ``suppressed_risk_count`` a lower bound rather than the true count.
+    suppressed_risk_count_capped: bool = False
     #: Changed files that ``[ignore] paths`` removed from the analysis on both
     #: sides. Nothing was scanned there, so nothing there can be called fixed.
     ignored_changed_files: tuple[str, ...] = ()
@@ -119,12 +130,13 @@ def review_security_delta(repo_root: Path, base: str = "HEAD~1") -> SecurityRevi
 
     config_notes: tuple[str, ...] = ()
     suppressed_risk_count = 0
+    capped = False
     ignored_changed_files: tuple[str, ...] = ()
     if changed_files:
         config_notes = _config_notes(repo_root, current_config, base_config)
-        if current_config.suppressed_paths:
-            unsuppressed = _risk_items(repo_root, changed_set, apply_suppressions=False)
-            suppressed_risk_count = len(set(unsuppressed) - set(current_risks))
+        suppressed_risk_count, capped = _hidden_risk_count(
+            repo_root, changed_set, current_config.suppressed_paths
+        )
         ignored_changed_files = _ignored_changed_files(changed_files, current_config.ignored_paths)
 
     return SecurityReview(
@@ -137,6 +149,7 @@ def review_security_delta(repo_root: Path, base: str = "HEAD~1") -> SecurityRevi
         risk_deltas=risk_deltas,
         config_notes=config_notes,
         suppressed_risk_count=suppressed_risk_count,
+        suppressed_risk_count_capped=capped,
         ignored_changed_files=ignored_changed_files,
     )
 
@@ -164,10 +177,12 @@ def format_security_review(review: SecurityReview) -> str:
         f"Risk deltas: {len(review.risk_deltas)}",
     ]
     if review.suppressed_risk_count:
-        lines.append(
-            f"Reachable risks hidden by suppression config: {review.suppressed_risk_count} "
-            "(hidden, not fixed)"
+        count = (
+            f"at least {review.suppressed_risk_count} (scan capped at {_HIDDEN_PATH_LIMIT} paths)"
+            if review.suppressed_risk_count_capped
+            else str(review.suppressed_risk_count)
         )
+        lines.append(f"Reachable risks hidden by suppression config: {count} (hidden, not fixed)")
     if review.ignored_changed_files:
         lines.append(
             f"Changed files excluded from analysis by [ignore] paths: "
@@ -216,6 +231,7 @@ def _risk_items(
     changed_files: set[str],
     suppression_root: Path | None = None,
     apply_suppressions: bool = True,
+    limit: int = _DELTA_PATH_LIMIT,
 ) -> dict[str, RiskDelta]:
     """Reachable risks in ``repo_root`` that touch ``changed_files``.
 
@@ -226,13 +242,18 @@ def _risk_items(
     suppression that only exists on one side reads as a code change. Its
     counterpart for the graph build is ``build_graph(config_root=...)``.
     """
-    items: dict[str, RiskDelta] = {}
-    for path in find_attack_paths(
+    paths = find_attack_paths(
         repo_root,
-        limit=100,
+        limit=limit,
         apply_suppressions=apply_suppressions,
         suppression_root=suppression_root,
-    ):
+    )
+    return _items_for(paths, changed_files)
+
+
+def _items_for(paths: list[AttackPath], changed_files: set[str]) -> dict[str, RiskDelta]:
+    items: dict[str, RiskDelta] = {}
+    for path in paths:
         files = tuple(dict.fromkeys(node.split("::", 1)[0] for node in path.nodes if "::" in node))
         if changed_files and not any(file in changed_files for file in files):
             continue
@@ -318,6 +339,28 @@ def _config_notes(
             if value not in current_values
         ]
     return tuple(notes)
+
+
+def _hidden_risk_count(
+    repo_root: Path,
+    changed_files: set[str],
+    patterns: tuple[str, ...],
+) -> tuple[int, bool]:
+    """Count reachable risks in changed files that ``patterns`` hide.
+
+    Counted directly rather than by differencing two capped scans: with the old
+    set difference the number was bounded by the *delta* scan's limit and, worse,
+    a repo whose real risks already filled that limit reported zero hidden ones.
+    One unsuppressed scan is taken at a deliberately larger cap and each path is
+    put to :func:`path_is_suppressed` -- the same fail-closed predicate that does
+    the hiding. The bool says the cap was reached, so the caller states a lower
+    bound instead of a wrong exact number.
+    """
+    if not patterns:
+        return 0, False
+    paths = find_attack_paths(repo_root, limit=_HIDDEN_PATH_LIMIT, apply_suppressions=False)
+    hidden = [path for path in paths if path_is_suppressed(path.nodes, patterns)]
+    return len(_items_for(hidden, changed_files)), len(paths) >= _HIDDEN_PATH_LIMIT
 
 
 def _ignored_changed_files(

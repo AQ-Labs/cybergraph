@@ -1,7 +1,11 @@
 import subprocess
 from pathlib import Path
 
-from cybergraph.security.review import format_security_review, review_security_delta
+from cybergraph.security.review import (
+    SecurityReview,
+    format_security_review,
+    review_security_delta,
+)
 
 
 def test_review_reports_no_changes_for_non_git_repo(tmp_path: Path) -> None:
@@ -296,6 +300,61 @@ def test_dropping_an_ignore_path_invents_no_delta(tmp_path: Path) -> None:
     assert _risk_statuses(review) == {"unchanged"}, "the code did not change"
     assert "[ignore] paths dropped by this change: legacy/**" in review.config_notes
     assert review.ignored_changed_files == ()
+
+
+def test_suppressed_risk_count_does_not_saturate_at_the_delta_limit(tmp_path: Path) -> None:
+    """150 suppressed risks must not be reported as 100.
+
+    The count used to be the difference between two scans capped at 100 paths,
+    so it saturated there. It understates the blast radius of a suppression --
+    the reviewer is being asked to accept more risk than the number admits.
+    """
+    routes = 150
+    repo = tmp_path / "many"
+    (repo / "legacy").mkdir(parents=True)
+    _git(repo, "init")
+    (repo / ".gitignore").write_text(".cybergraph/\n", encoding="utf-8")
+    body = ["from fastapi import FastAPI", "import subprocess", "app = FastAPI()", ""]
+    for index in range(routes):
+        body += [
+            f'@app.get("/r{index}")',
+            f"def run{index}(cmd: str):",
+            f'    subprocess.run("echo {index} " + cmd, shell=True)',
+            "",
+        ]
+    (repo / "legacy" / "app.py").write_text("\n".join(body), encoding="utf-8")
+    (repo / ".cybergraph.toml").write_text(CONFIG, encoding="utf-8")
+    _commit(repo, "base")
+    (repo / "legacy" / "app.py").write_text(
+        "\n".join(body) + "\n# touched\n", encoding="utf-8"
+    )
+    _commit(repo, "pr")
+
+    review = review_security_delta(repo, base="HEAD~1")
+
+    assert review.suppressed_risk_count == routes
+    assert review.suppressed_risk_count_capped is False
+    assert f"hidden by suppression config: {routes}" in format_security_review(review)
+
+
+def test_a_capped_hidden_risk_scan_is_reported_as_a_lower_bound() -> None:
+    """When the accounting scan does hit its cap, the wording must say so."""
+    review = SecurityReview(
+        base="HEAD~1",
+        changed_files=("legacy/app.py",),
+        finding_count=0,
+        changed_entrypoints=(),
+        changed_sink_edges=(),
+        attack_path_count=0,
+        suppressed_risk_count=1000,
+        suppressed_risk_count_capped=True,
+    )
+
+    formatted = format_security_review(review)
+
+    assert "at least 1000" in formatted
+    assert "scan capped at" in formatted
+    assert "hidden, not fixed" in formatted
 
 
 def _commit(repo: Path, message: str) -> None:
