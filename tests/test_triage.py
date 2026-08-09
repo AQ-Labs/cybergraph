@@ -96,3 +96,36 @@ def test_recall_guard_keeps_findings_on_ungrounded_or_uncertain_verdicts(tmp_pat
     )
     assert not any(r.suppressed for r in unc)
     assert not any(r.suppressed for r in tp)
+
+
+def test_slice_shows_suppressed_paths_and_never_claims_verified_absence(tmp_path: Path):
+    """Attack paths are danger evidence in the prompt, so triage must fail open.
+
+    A suppressed path is still a real path. If suppression removed it from the
+    slice, the prompt would assert the finding is unreachable and invite a
+    false-positive verdict that ``should_suppress`` can act on.
+    """
+    repo = tmp_path / "app"
+    (repo / "legacy").mkdir(parents=True)
+    (repo / "legacy" / "app.py").write_text(
+        "@app.route('/users')\n"
+        "def list_users(request):\n"
+        "    return db.execute('select ' + request.query['q'])\n",
+        encoding="utf-8",
+    )
+    (repo / ".cybergraph.toml").write_text(
+        '[suppressions]\npaths = ["legacy/**"]\n', encoding="utf-8"
+    )
+    build_graph(repo)
+
+    finding = Finding(rule_id="CG-SQL-EXEC", severity="medium", message="reaches sink",
+                      file_path="legacy/app.py", line_start=3,
+                      evidence="db.execute('select '+q)")
+    text = tri.build_finding_slice(repo, finding)
+
+    assert "# Reachable attack paths through this file:" in text
+    assert "db.execute" in text
+    # And the empty branch must not make an affirmative safety claim either.
+    empty = tri.build_finding_slice(repo, finding, paths=[])
+    assert "absence of evidence" in empty
+    assert "No verified entrypoint" not in empty

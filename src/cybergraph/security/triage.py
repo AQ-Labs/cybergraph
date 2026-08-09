@@ -104,9 +104,13 @@ def build_finding_slice(
         window = "\n".join(lines[lo:hi])
         parts.append(f"# CONTEXT source {finding.file_path} (lines {lo + 1}-{hi}):\n{window}")
 
-    # Reachable attack paths that touch this file (the graph's reachability signal).
+    # Reachable attack paths that touch this file (the graph's reachability
+    # signal). This is an evidence set consulted to establish *danger*, and a
+    # false-positive verdict on it can drop the finding, so it must fail open:
+    # suppressions are not applied, and the empty case states only that nothing
+    # was found -- never that nothing exists.
     if paths is None:
-        paths = find_attack_paths(repo_root)
+        paths = find_attack_paths(repo_root, apply_suppressions=False)
     related = [
         p for p in paths
         if any(finding.file_path in node for node in p.nodes)
@@ -119,7 +123,12 @@ def build_finding_slice(
         ]
         parts.append("# Reachable attack paths through this file:\n" + "\n".join(path_lines))
     else:
-        parts.append("# No verified entrypoint->sink path reaches this finding's function.")
+        parts.append(
+            "# The graph found no entrypoint->sink path through this file. "
+            "The traversal is bounded (depth and result limits) and does not "
+            "resolve every call, so this is absence of evidence, not evidence "
+            "that the finding is unreachable. Do not treat it as proof of safety."
+        )
 
     return "\n\n".join(parts)[:max_chars]
 
@@ -168,7 +177,9 @@ def triage_findings(
             TriageResult(f, VERDICT_UNCERTAIN, "no LLM configured; kept", "", False)
             for f in findings
         ]
-    paths = find_attack_paths(repo_root)
+    # Evidence surface, shared by every slice below: fail open (see
+    # ``build_finding_slice``) rather than let a suppression read as safety.
+    paths = find_attack_paths(repo_root, apply_suppressions=False)
     results: list[TriageResult] = []
     for finding in findings:
         slice_text = build_finding_slice(repo_root, finding, paths)
