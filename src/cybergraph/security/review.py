@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cybergraph.build import build_graph
+from cybergraph.config import CONFIG_FILE, load_config
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
 
@@ -21,6 +22,12 @@ class SecurityReview:
     changed_sink_edges: tuple[str, ...]
     attack_path_count: int
     risk_deltas: tuple[RiskDelta, ...] = ()
+    #: Suppression-config differences between ``base`` and the working tree,
+    #: reported on their own terms because configuration is not code.
+    suppression_notes: tuple[str, ...] = ()
+    #: Reachable risks in changed files that the current suppression config
+    #: hides from the deltas above. They are hidden, not fixed.
+    suppressed_risk_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -85,9 +92,24 @@ def review_security_delta(repo_root: Path, base: str = "HEAD~1") -> SecurityRevi
         for path in paths
         if any(node.split("::", 1)[0] in changed_set for node in path.nodes)
     )
+    # Both sides of the delta are scanned under the *working tree's* suppression
+    # config. A PR delta compares code; a config difference between base and head
+    # is not a code change and must never be rendered as one.
+    current_patterns = load_config(repo_root).suppressed_paths
     current_risks = _risk_items(repo_root, changed_set)
-    base_risks = _base_risk_items(repo_root, base, changed_set) if changed_files else {}
+    base_risks: dict[str, RiskDelta] = {}
+    base_patterns: tuple[str, ...] | None = None
+    if changed_files:
+        base_risks, base_patterns = _base_scan(repo_root, base, changed_set)
     risk_deltas = tuple(_classify_risk_deltas(current_risks, base_risks))
+
+    suppression_notes: tuple[str, ...] = ()
+    suppressed_risk_count = 0
+    if changed_files:
+        suppression_notes = _suppression_notes(repo_root, current_patterns, base_patterns)
+        if current_patterns:
+            unsuppressed = _risk_items(repo_root, changed_set, apply_suppressions=False)
+            suppressed_risk_count = len(set(unsuppressed) - set(current_risks))
 
     return SecurityReview(
         base=base,
@@ -97,6 +119,8 @@ def review_security_delta(repo_root: Path, base: str = "HEAD~1") -> SecurityRevi
         changed_sink_edges=sinks,
         attack_path_count=changed_path_count,
         risk_deltas=risk_deltas,
+        suppression_notes=suppression_notes,
+        suppressed_risk_count=suppressed_risk_count,
     )
 
 
@@ -122,6 +146,15 @@ def format_security_review(review: SecurityReview) -> str:
         f"Changed attack paths: {review.attack_path_count}",
         f"Risk deltas: {len(review.risk_deltas)}",
     ]
+    if review.suppressed_risk_count:
+        lines.append(
+            f"Reachable risks hidden by suppression config: {review.suppressed_risk_count} "
+            "(hidden, not fixed)"
+        )
+    if review.suppression_notes:
+        lines.append("")
+        lines.append("Suppression config (configuration, not a code change):")
+        lines.extend(f"- {note}" for note in review.suppression_notes)
     if review.risk_deltas:
         lines.append("")
         lines.append("Reachable risk deltas:")
@@ -155,9 +188,27 @@ def _changed_files(repo_root: Path, base: str) -> list[str]:
     return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
 
 
-def _risk_items(repo_root: Path, changed_files: set[str]) -> dict[str, RiskDelta]:
+def _risk_items(
+    repo_root: Path,
+    changed_files: set[str],
+    suppression_root: Path | None = None,
+    apply_suppressions: bool = True,
+) -> dict[str, RiskDelta]:
+    """Reachable risks in ``repo_root`` that touch ``changed_files``.
+
+    ``suppression_root`` decouples *where the code lives* from *which config
+    governs it*. The base side of a review is a git tree materialised into a
+    temporary directory that has no config of its own (or, worse, a stale one),
+    so it must be scanned under the current repository's config -- otherwise a
+    suppression that only exists on one side reads as a code change.
+    """
     items: dict[str, RiskDelta] = {}
-    for path in find_attack_paths(repo_root, limit=100):
+    for path in find_attack_paths(
+        repo_root,
+        limit=100,
+        apply_suppressions=apply_suppressions,
+        suppression_root=suppression_root,
+    ):
         files = tuple(dict.fromkeys(node.split("::", 1)[0] for node in path.nodes if "::" in node))
         if changed_files and not any(file in changed_files for file in files):
             continue
@@ -177,13 +228,64 @@ def _risk_items(repo_root: Path, changed_files: set[str]) -> dict[str, RiskDelta
     return items
 
 
-def _base_risk_items(repo_root: Path, base: str, changed_files: set[str]) -> dict[str, RiskDelta]:
+def _base_scan(
+    repo_root: Path,
+    base: str,
+    changed_files: set[str],
+) -> tuple[dict[str, RiskDelta], tuple[str, ...] | None]:
+    """Scan the ``base`` tree and read the suppression config it carried.
+
+    The risks come back filtered by the *current* repository config
+    (``suppression_root=repo_root``); the returned patterns are the base tree's
+    own, used only to describe a config change, never to filter. ``None``
+    patterns mean the base tree could not be materialised, so nothing is known
+    and nothing is claimed.
+    """
     with tempfile.TemporaryDirectory(prefix="cybergraph-base-") as temp:
         temp_root = Path(temp)
         if not _materialize_git_ref(repo_root, base, temp_root):
-            return {}
+            return {}, None
+        base_patterns = load_config(temp_root).suppressed_paths
         build_graph(temp_root)
-        return _risk_items(temp_root, changed_files)
+        return _risk_items(temp_root, changed_files, suppression_root=repo_root), base_patterns
+
+
+def _suppression_notes(
+    repo_root: Path,
+    current: tuple[str, ...],
+    base: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Describe the suppression config on its own terms.
+
+    A PR that genuinely adds a suppression should say so: "added: legacy/**" is
+    useful, "removed: legacy/app.py::run0 -> subprocess.run" is a lie. An
+    untracked config is not part of the change at all and is labelled as the
+    local override it is.
+    """
+    if base is None:
+        return ()
+    if current and not _is_tracked(repo_root, CONFIG_FILE):
+        return (
+            f"local: {CONFIG_FILE} is untracked, so its suppressions are a local "
+            f"override rather than part of this change ({', '.join(current)})",
+        )
+    notes = [f"added: {pattern}" for pattern in current if pattern not in base]
+    notes += [f"removed: {pattern}" for pattern in base if pattern not in current]
+    return tuple(notes)
+
+
+def _is_tracked(repo_root: Path, rel_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", rel_path],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return bool(result.stdout.strip())
 
 
 def _classify_risk_deltas(

@@ -52,16 +52,35 @@ def find_attack_paths(
     limit: int = 20,
     interprocedural: bool = True,
     apply_suppressions: bool = True,
+    suppression_root: Path | None = None,
 ) -> list[AttackPath]:
     """Find entrypoint-to-sink attack paths for ``repo_root``.
 
+    **New behaviour.** Until this parameter existed, ``find_attack_paths``
+    applied no suppression at all on any surface -- every caller saw every
+    path. ``apply_suppressions`` now defaults to ``True``, so the ranked and
+    actionable surfaces (CLI ``attack-paths``, top risks, PR review, cloud,
+    Strix scope, ``analyze``) *hide* paths they previously showed. That is a
+    deliberate change of output, not a reordering of an existing filter.
+
     ``apply_suppressions`` drops paths whose every file is covered by
-    ``[suppressions] paths`` in ``.cybergraph.toml`` **before** ``limit`` is
-    applied, so accepted fixture noise cannot starve the real results behind it.
+    ``[suppressions] paths`` in ``.cybergraph.toml``, and it drops them
+    **before** ``limit`` is applied, so accepted fixture noise cannot starve
+    the real results behind it.
+
     Pass ``apply_suppressions=False`` on exploration and evidence surfaces
-    (graph export, visualisation, MCP, grounded RAG, investigate): suppressions
-    hide *findings*, but the graph still keeps the underlying edges so reviewers
-    can inspect the real code path.
+    (graph export, visualisation, MCP explain, grounded RAG, triage evidence):
+    suppressions hide *findings*, but the graph still keeps the underlying
+    edges so reviewers can inspect the real code path. Note that
+    ``security/investigate.py`` deliberately keeps the suppressing default --
+    the call site there feeds ``collect_top_risks``, which is a ranking.
+
+    ``suppression_root`` loads the suppression config from a *different*
+    directory than the graph being queried. Callers that materialise a tree
+    from git (``security/review.py``) must pass the real repository root, so
+    both sides of a diff are scanned under one configuration: configuration is
+    not part of a code delta, and a config-only difference must never render
+    as an added or removed attack path.
     """
     store = GraphStore.open_for_repo(repo_root)
     try:
@@ -96,7 +115,8 @@ def find_attack_paths(
 
         taints = _load_taints(store)
 
-        patterns = load_config(repo_root).suppressed_paths if apply_suppressions else ()
+        config_root = suppression_root if suppression_root is not None else repo_root
+        patterns = load_config(config_root).suppressed_paths if apply_suppressions else ()
         return _traverse(
             entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit, patterns
         )

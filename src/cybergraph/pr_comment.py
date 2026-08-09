@@ -87,6 +87,17 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
                 f"- `{delta.status}` `{delta.risk_label}` {delta.risk_score}/100 "
                 f"`{delta.entrypoint}` -> `{delta.sink}` ({data})"
             )
+    if review.suppression_notes or review.suppressed_risk_count:
+        # Configuration is not code. Both sides of the delta above were scanned
+        # under the same (current) config, so a suppression change is reported
+        # here rather than masquerading as a removed attack path.
+        lines.extend(["", "### Suppression Config", ""])
+        if review.suppressed_risk_count:
+            lines.append(
+                f"- {review.suppressed_risk_count} reachable risk(s) in changed files are "
+                "**hidden by suppression config, not fixed**"
+            )
+        lines.extend(f"- {note}" for note in review.suppression_notes)
     if top_findings:
         lines.extend(["", "### Top Findings", ""])
         for finding in top_findings:
