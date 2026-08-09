@@ -20,7 +20,7 @@
       "findings": 1,
       "nodes": 7,
       "edges": 8,
-      "build_seconds": 0.0419,
+      "build_seconds": 0.037,
       "db_bytes": 69632,
       "detected_paths": [
         "main.go::route:/ping:14 -> main.go::runPing -> exec.Command"
@@ -37,7 +37,7 @@
       "findings": 1,
       "nodes": 7,
       "edges": 8,
-      "build_seconds": 0.0428,
+      "build_seconds": 0.0444,
       "db_bytes": 69632,
       "detected_paths": [
         "main.go::route:/file:14 -> main.go::readFile -> os.Open"
@@ -54,7 +54,7 @@
       "findings": 0,
       "nodes": 5,
       "edges": 4,
-      "build_seconds": 0.049,
+      "build_seconds": 0.0424,
       "db_bytes": 69632,
       "detected_paths": []
     },
@@ -69,7 +69,7 @@
       "findings": 1,
       "nodes": 9,
       "edges": 10,
-      "build_seconds": 0.044,
+      "build_seconds": 0.0523,
       "db_bytes": 69632,
       "detected_paths": [
         "main.go::route:/users:16 -> main.go::listUsers -> db.Query"
@@ -86,7 +86,7 @@
       "findings": 1,
       "nodes": 6,
       "edges": 9,
-      "build_seconds": 0.0437,
+      "build_seconds": 0.047,
       "db_bytes": 69632,
       "detected_paths": [
         "UserController.java::route:/users:8 -> UserController.java::listUsers -> statement.executeQuery"
@@ -103,7 +103,7 @@
       "findings": 1,
       "nodes": 6,
       "edges": 9,
-      "build_seconds": 0.0499,
+      "build_seconds": 0.0416,
       "db_bytes": 69632,
       "detected_paths": [
         "urls.py::route:users/:6 -> views.py::list_users -> User.objects.raw"
@@ -120,7 +120,7 @@
       "findings": 0,
       "nodes": 4,
       "edges": 11,
-      "build_seconds": 0.041,
+      "build_seconds": 0.042,
       "db_bytes": 69632,
       "detected_paths": [
         "app.py::ping -> app.py::run_ping -> subprocess.run"
@@ -137,7 +137,7 @@
       "findings": 0,
       "nodes": 4,
       "edges": 11,
-      "build_seconds": 0.0438,
+      "build_seconds": 0.0351,
       "db_bytes": 69632,
       "detected_paths": [
         "app.py::get_file -> app.py::read_file -> open"
@@ -154,7 +154,7 @@
       "findings": 0,
       "nodes": 6,
       "edges": 12,
-      "build_seconds": 0.0536,
+      "build_seconds": 0.037,
       "db_bytes": 69632,
       "detected_paths": []
     },
@@ -169,7 +169,7 @@
       "findings": 0,
       "nodes": 5,
       "edges": 11,
-      "build_seconds": 0.0453,
+      "build_seconds": 0.0529,
       "db_bytes": 69632,
       "detected_paths": [
         "app.py::list_users -> app.py::raw_sql -> db.execute"
@@ -186,7 +186,7 @@
       "findings": 1,
       "nodes": 4,
       "edges": 8,
-      "build_seconds": 0.0461,
+      "build_seconds": 0.3446,
       "db_bytes": 69632,
       "detected_paths": [
         "app.py::search -> db.execute"

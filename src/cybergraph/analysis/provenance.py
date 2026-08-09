@@ -43,8 +43,6 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
-from cybergraph.security.ontology import SOURCE_KEYWORDS
-
 LITERAL = "literal"
 COMPOSED = "composed"
 OPAQUE = "opaque"
@@ -109,15 +107,93 @@ def classify_expr(node: ast.AST | None, bindings: dict[str, str]) -> str:
 
 # Objects that *hold* the user's data. Anything read out of one is a source,
 # whatever the member is called — ``request.args``, ``request.GET``,
-# ``req.query_params``, ``self.request.body``. A trailing segment is required:
-# the object itself, *called*, is an outbound HTTP request
-# (``session.request("GET", url)``), not an inbound one.
+# ``req.query_params``, ``self.request.body``. Matched against the *words* of an
+# identifier (split on ``_``), not against the whole identifier, so
+# ``http_request.args.get(q)`` and ``request_obj.form["x"]`` are recognised:
+# renaming the request variable used to defeat the detector outright, which
+# fails open — every renamed handler was a silent miss. Word-level matching is
+# still structural; ``requests.get(...)`` (plural) and ``query_builder`` do not
+# match, where a substring scan would take both.
 _INPUT_OBJECTS = frozenset({"request", "req", "webhook"})
+
+# Trailing words that make an identifier a *measurement of* a request rather
+# than the request itself: ``request_count``, ``request_id``, ``req_timestamp``.
+# Reading a member off one of those (``self.request_count.bit_length()``) is not
+# a read of user input, and word matching would otherwise take it.
+_SCALAR_TAILS = frozenset({
+    "id", "ids", "count", "counter", "total", "time", "timestamp", "duration",
+    "size", "length", "index", "num", "number", "uuid", "hash",
+})
 
 # Input that *is* the value rather than a container of it, recognised wherever
 # it appears in a chain: ``sys.argv``, and ``argv[1]`` after ``from sys import
 # argv``.
 _INPUT_VALUES = frozenset({"argv"})
+
+# Member names that identify an *inbound* request API on their own, whatever
+# the receiver is called. Each one is distinctive enough that no ordinary
+# object carries it by coincidence — which is the entire admission criterion,
+# because the receiver is exactly what this module cannot see.
+_REQUEST_API_MEMBERS = frozenset({
+    "query_params",        # Starlette / FastAPI / DRF
+    "get_json",            # Flask
+    "cleaned_data",        # Django forms
+    "getvalue",            # cgi.FieldStorage
+    "get_argument", "get_arguments",              # Tornado
+    "get_body_argument", "get_body_arguments",    # Tornado
+    "get_query_argument", "get_query_arguments",  # Tornado
+    "query_string", "raw_post_data", "form_data", "match_info", "path_params",
+})
+
+# Protocol-level request containers, recognised when *subscripted*: the bare
+# WSGI ``environ``, ASGI's ``scope`` and ``message``, and the webhook/Lambda
+# ``event``/``payload`` dict. Subscript-only on purpose — ``event.set()`` and
+# ``message.strip()`` are ordinary objects with these names.
+_INPUT_CONTAINERS = frozenset({"environ", "scope", "message", "payload", "event"})
+
+# ...and only for a constant key that names a request field. The root name
+# alone is not enough: ``os.environ`` is *also* the process environment, so
+# ``os.environ["QUERY_STRING"]`` is a CGI request read while
+# ``os.environ["GIT"]`` is a path to a binary. Any ``HTTP_``-prefixed key counts
+# too — that is the CGI spelling of an inbound header.
+_CONTAINER_KEYS = frozenset({
+    "query_string", "request_method", "request_uri", "path_info", "raw_path",
+    "content_type", "content_length", "remote_addr", "remote_user",
+    "script_name", "wsgi.input",
+    "body", "headers", "cookies", "form", "formdata",
+    "queryparams", "query_params", "querystringparameters",
+    "multivaluequerystringparameters", "pathparameters", "path_params",
+    "requestcontext",
+})
+
+# What a request *handler* carries on ``self``: ``http.server``'s
+# ``BaseHTTPRequestHandler.headers``, and the same family. Scoped to ``self``
+# because off any other receiver these are indistinguishable from a *response*
+# — ``resp.headers``, ``session.cookies`` — and that ambiguity is unresolvable
+# from the AST. See the residual note in the docstring below.
+_HANDLER_MEMBERS = frozenset({
+    "headers", "cookies", "rfile", "form", "files", "query_string",
+})
+
+# Members belonging to an HTTP *client*, a response, or a test double. A chain
+# ending in one of these is about the call, not about its payload:
+# ``self.request.timeout``, ``req.url``, ``mock.request.call_args``. This is
+# the one denylist here, and its polarity is deliberate — it only ever *removes*
+# a source, so a member missing from it costs precision and never detection.
+_CLIENT_MEMBERS = frozenset({
+    "url", "timeout", "status_code", "status", "ok", "reason", "elapsed",
+    "history", "encoding", "links", "raise_for_status", "call_args",
+    "call_count", "called", "return_value", "mock_calls", "side_effect",
+    "hooks", "auth", "cert", "verify", "proxies", "adapters", "stream",
+    "send", "prepare", "prepare_request", "close", "mount", "session",
+})
+
+# Framework declarations that *are* a read of user input, spelled the way the
+# frameworks spell them. Case-sensitive, and that is the whole point:
+# ``fastapi.Query(...)`` declares a query parameter, ``session.query(...)``
+# builds an ORM query, and lowercasing the two together is what made every bare
+# call named ``query``/``form``/``body``/``params`` a critical finding.
+_SOURCE_FACTORIES = frozenset({"Query", "Body", "Form", "Header", "Cookie", "File"})
 
 # Qualifiers a source *factory* may carry, so that ``fastapi.Query(...)`` reads
 # as a declaration of user input while ``session.query(...)`` — an ORM query
@@ -130,29 +206,88 @@ _SOURCE_MODULES = frozenset(
 )
 
 
-def _name_segments(node: ast.AST) -> tuple[str, ...] | None:
-    """The dotted path an expression is rooted in, lowercased, or ``None``.
+@dataclass(frozen=True)
+class _Segment:
+    """One member of a dotted chain, and whether the chain *calls* it.
 
-    ``("request", "args", "get")`` for a call to ``request.args.get``,
-    ``("request", "files")`` for a subscript of ``request.files``. Anything
-    that is not a name, attribute, call or subscript — a constant, an operator
-    — is rooted in no name and answers ``None``, which is what keeps the
-    literal text of ``"select * from t where body = 1"`` from reading as a
-    request.
+    ``called`` is what separates an inbound request from an outbound one.
+    ``session.request("GET", url)`` invokes a member named ``request``; nothing
+    is read *out of* a request object, so it is not a source. Recording that as
+    "there is no trailing segment" was almost right and was defeated by
+    ``session.request("GET", url).text`` — the way the call is actually used —
+    because the chain then has a trailing segment after all.
+    """
+
+    name: str
+    called: bool
+
+    @property
+    def lowered(self) -> str:
+        return self.name.lower()
+
+    @property
+    def words(self) -> tuple[str, ...]:
+        """The identifier's ``_``-separated words: ``http_request`` → (http, request)."""
+        return tuple(part for part in self.name.lower().split("_") if part)
+
+    def names_a(self, objects: frozenset[str]) -> bool:
+        """Is this identifier one of ``objects``, under any ordinary renaming?
+
+        Word-level, not substring: ``http_request`` and ``request_obj`` are the
+        request, ``requests`` and ``query_builder`` are not. A trailing
+        ``_SCALAR_TAILS`` word demotes it back — ``request_count`` measures
+        requests rather than being one.
+        """
+        words = self.words
+        if not words or not set(words) & objects:
+            return False
+        return len(words) == 1 or words[-1] not in _SCALAR_TAILS
+
+
+def _name_segments(node: ast.AST) -> tuple[_Segment, ...] | None:
+    """The dotted path an expression is rooted in, or ``None``.
+
+    ``(request, args, get*)`` for a call to ``request.args.get`` — the star
+    marking the segment the chain invokes — and ``(request, files)`` for a
+    subscript of ``request.files``. Anything that is not a name, attribute,
+    call or subscript — a constant, an operator — is rooted in no name and
+    answers ``None``, which is what keeps the literal text of
+    ``"select * from t where body = 1"`` from reading as a request.
 
     Segments, not one joined string: the join is what let a *substring* of a
-    member name pass for the member itself.
+    member name pass for the member itself. Names are kept **as written**;
+    callers lowercase where case is not meaningful, and ``_SOURCE_FACTORIES``
+    is the one place it is.
     """
     if isinstance(node, ast.Name):
-        return (node.id.lower(),)
+        return (_Segment(node.id, False),)
     if isinstance(node, ast.Attribute):
         base = _name_segments(node.value)
-        return (*base, node.attr.lower()) if base is not None else None
+        return (*base, _Segment(node.attr, False)) if base is not None else None
     if isinstance(node, ast.Call):
-        return _name_segments(node.func)
+        base = _name_segments(node.func)
+        if base is None:
+            return None
+        return (*base[:-1], _Segment(base[-1].name, True))
     if isinstance(node, ast.Subscript):
         return _name_segments(node.value)
     return None
+
+
+def _names_a_request_field(node: ast.AST) -> bool:
+    """Is this a subscript of a container at a key that names a request field?
+
+    Consulted to prove danger, and it answers ``False`` for a key it cannot
+    read: a non-constant key on ``environ`` costs detection rather than making
+    every process-environment lookup a source.
+    """
+    if not isinstance(node, ast.Subscript):
+        return False
+    key = node.slice
+    if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+        return False
+    lowered = key.value.lower()
+    return lowered in _CONTAINER_KEYS or lowered.startswith("http_")
 
 
 def _is_source_chain(node: ast.AST) -> bool:
@@ -162,38 +297,99 @@ def _is_source_chain(node: ast.AST) -> bool:
     member, never on whether a keyword occurs somewhere in the rendered text.
     Substring matching is why ``cfg.input_dir``, ``self.query`` and
     ``session.cookie_jar`` were user input: ordinary members whose names happen
-    to *contain* a source word. Three anchors replace it:
+    to *contain* a source word. Five anchors replace it:
 
-    * a member read out of a request-like object (``request.args.get(f)``,
-      ``flask.request.json``, ``self.request.body``, ``req.query_params``);
-    * an input value named exactly (``sys.argv``, ``argv[1]``);
-    * a call to a source factory — the builtin ``input()``, or a framework
-      declaration such as ``Query(...)`` / ``fastapi.Body(...)`` — where the
-      *callee's own last segment* is a source keyword and its qualifier is
-      absent or a web framework.
+    1. a member read out of a request-like object, where "request-like" is a
+       *word* of the identifier — ``request.args.get(f)``, ``flask.request.json``,
+       ``self.request.body``, ``req.query_params``, ``http_request.args.get(q)``,
+       ``request_obj.form["x"]``;
+    2. an input value named exactly (``sys.argv``, ``argv[1]``);
+    3. a member whose own name identifies an inbound API on any receiver
+       (``obj.query_params.get``, ``form.getvalue``, ``form.cleaned_data``,
+       ``self.get_body_argument``);
+    4. a subscript of a protocol-level container at a key that names a request
+       field (``environ["QUERY_STRING"]``, ``scope["query_string"]``,
+       ``event["body"]``, any ``HTTP_``-prefixed CGI key);
+    5. a call to a source factory — the builtin ``input()``, or a framework
+       declaration spelled as the framework spells it (``Query(...)``,
+       ``fastapi.Body(...)``), qualified by nothing or by a web framework.
 
-    The polarity is the inverse of the sink registry's. This set is consulted
-    to prove **danger**, so a source missing from it costs detection: a shape
-    nobody thought of fails silent, not loud. That argues for keeping the
-    anchors as wide as they can be without matching arbitrary member names —
-    hence "any member of a request object" rather than an allowlist of member
-    names, and hence ``req`` alongside ``request``. What is deliberately given
-    up is the member-name-only source: ``self.request_body``, ``cfg.query`` and
-    ``o.params`` no longer introduce taint on a receiver this module cannot
-    recognise, because there is nothing structural to tell them apart from the
-    false positives above.
+    **Polarity, and why the two directions are designed together.** This set is
+    consulted to prove **danger**, so a source missing from it costs detection:
+    a shape nobody thought of fails *silent*. An over-broad anchor fails *loud*,
+    as a false positive at critical severity. The two pull against each other,
+    and every rule above is placed where the structure actually settles it:
+
+    * ``called`` (anchor 1) rejects ``session.request("GET", url)`` **and**
+      ``session.request("GET", url).text``, which the previous
+      "needs a trailing segment" test let through.
+    * ``_CLIENT_MEMBERS`` rejects a chain that ends in a client/response/mock
+      member — ``self.request.timeout``, ``req.url``, ``webhook.url``,
+      ``mock.request.call_args`` — without needing an allowlist of the
+      request members it would otherwise have to enumerate.
+    * ``_SOURCE_FACTORIES`` is case-sensitive and closed, so a bare ``query(x)``,
+      ``form(x)``, ``body(x)``, ``params()``, ``headers()``, ``cookie()``,
+      ``request("GET", u)`` and ``flask.query(1)`` are no longer critical
+      findings, while ``Query(...)`` and ``fastapi.Body(...)`` still are.
+
+    **Residual, in both directions, stated rather than implied.** Still missed:
+    a request member read off a receiver this module cannot recognise —
+    ``obj.body``, ``obj.headers.get``, ``obj.cookies.get``, ``obj.params.get``,
+    ``obj.form[…]`` on a receiver with no request word in its name, and the
+    member-name-only sources ``self.request_body``, ``cfg.query``,
+    ``d.get("body")``. They are structurally identical to ``resp.body``,
+    ``response.headers.get``, ``session.cookies.get`` and ``cfg.params.get``,
+    which is why anchor 3 is a closed set of *distinctive* names rather than the
+    full request API. Also given up: ``request.url``, ``request.session`` and
+    anything else whose last segment is in ``_CLIENT_MEMBERS``; a container read
+    at a *computed* key (``environ[header_name]``), because the root name alone
+    cannot tell ``os.environ["QUERY_STRING"]`` from ``os.environ["GIT"]``; and
+    an identifier demoted by ``_SCALAR_TAILS`` that really was the request
+    (``request_id.value``). Still over-reported:
+    ``self.headers``/``self.cookies``/``self.form``/``self.files`` on a class
+    that is not a request handler, and a subscript at a request-field key of a
+    local named ``event``/``message``/``payload``/``scope`` that is not the
+    protocol object.
     """
     segments = _name_segments(node)
     if segments is None:
         return False
     last = len(segments) - 1
+    lowered = [segment.lowered for segment in segments]
+
+    # (2) an input value named exactly, anywhere in the chain.
+    if any(name in _INPUT_VALUES for name in lowered):
+        return True
+
+    # The chain is about the call or the response, not about a payload.
+    if lowered[last] in _CLIENT_MEMBERS:
+        return False
+
+    # (1) a member read out of a request-like object.
     for index, segment in enumerate(segments):
-        if segment in _INPUT_VALUES:
+        if index == last or segment.called:
+            continue
+        if segment.names_a(_INPUT_OBJECTS):
             return True
-        if segment in _INPUT_OBJECTS and index < last:
-            return True
-    if isinstance(node, ast.Call) and segments[last] in SOURCE_KEYWORDS:
-        return last == 0 or segments[last - 1] in _SOURCE_MODULES
+
+    # (3) a member that names an inbound API by itself.
+    if any(name in _REQUEST_API_MEMBERS for name in lowered):
+        return True
+
+    # (4) the protocol-level container, read by subscript at a request field.
+    if lowered[last] in _INPUT_CONTAINERS and _names_a_request_field(node):
+        return True
+
+    # (5) a request handler's own members, on `self`.
+    if lowered[0] == "self" and last >= 1 and lowered[1] in _HANDLER_MEMBERS:
+        return True
+
+    # (6) a source factory, spelled the way the framework spells it.
+    if isinstance(node, ast.Call) and segments[last].called:
+        name = segments[last].name
+        if last == 0:
+            return name == "input" or name in _SOURCE_FACTORIES
+        return name in _SOURCE_FACTORIES and lowered[last - 1] in _SOURCE_MODULES
     return False
 
 

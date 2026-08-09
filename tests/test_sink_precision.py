@@ -426,6 +426,45 @@ LOOKALIKE_MEMBERS = [
     ("import os\n"
      "def go(session, url):\n"
      "    return os.system('echo ' + session.request('GET', url))\n"),
+    # ...and the way that call is actually written. The pin above was defeated
+    # by appending `.text`, because the chain then *has* a trailing segment and
+    # the rule only required one to exist. What settles it is that `request` is
+    # the segment being called, which no suffix changes.
+    ("import os\n"
+     "def go(session, url):\n"
+     "    return os.system('echo ' + session.request('GET', url).text)\n"),
+    # An HTTP *client* wrapper, and a mock. `request` sits in a non-final
+    # position in all three, so position alone never separated them from
+    # `self.request.body`; the member the chain ends in does.
+    ("class C:\n"
+     "    def go(self):\n"
+     "        return cursor.execute('select ' + self.request.timeout)\n"),
+    ("def go(obj):\n"
+     "    return cursor.execute('select ' + obj.request.call_args)\n"),
+    ("def go(req):\n"
+     "    return cursor.execute('select ' + req.url)\n"),
+    ("def go(webhook):\n"
+     "    return cursor.execute('select ' + webhook.url)\n"),
+    # A bare call that merely shares a name with a source keyword. `query` is
+    # an ordinary helper name; so is `form`, `body` and `params`. Every one of
+    # these was a critical finding.
+    ("def go(name):\n"
+     "    return cursor.execute('select ' + query(name))\n"),
+    ("import os\n"
+     "def go(name):\n"
+     "    return os.system('echo ' + body(name))\n"),
+    ("import flask\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + flask.query(1))\n"),
+    # The process environment is not the CGI environment. Only a key that
+    # names a request field makes `environ` a request.
+    ("import os\n"
+     "def go(rev):\n"
+     "    return cursor.execute('select ' + os.environ['GIT_DIR'])\n"),
+    # Word matching must not take an identifier that *counts* requests.
+    ("class C:\n"
+     "    def go(self):\n"
+     "        return cursor.execute('select ' + self.request_count.render())\n"),
 ]
 
 FRAMEWORK_READS = [
@@ -456,6 +495,45 @@ FRAMEWORK_READS = [
     ("import os\n"
      "def go():\n"
      "    return os.system('echo ' + input('cmd: '))\n"),
+    # A request object under any name but `request`/`req`. Renaming it used to
+    # defeat the detector outright, which is a silent miss on every handler
+    # that spells the variable differently.
+    ("def go(http_request):\n"
+     "    return cursor.execute('select ' + http_request.args.get('u'))\n"),
+    ("def go(request_obj):\n"
+     "    return cursor.execute('select ' + request_obj.form['u'])\n"),
+    # Members distinctive enough to name an inbound API on their own, so the
+    # receiver's name does not have to be recognised: Starlette/DRF, Django
+    # forms, cgi.FieldStorage and Tornado.
+    ("def go(obj):\n"
+     "    return cursor.execute('select ' + obj.query_params.get('u'))\n"),
+    ("def go(form):\n"
+     "    return cursor.execute('select ' + form.cleaned_data['u'])\n"),
+    ("import cgi\n"
+     "def go(form):\n"
+     "    return cursor.execute('select ' + form.getvalue('u'))\n"),
+    ("class H:\n"
+     "    def post(self):\n"
+     "        return cursor.execute('select ' + self.get_body_argument('u'))\n"),
+    # `http.server.BaseHTTPRequestHandler`: the handler *is* the request.
+    ("class H:\n"
+     "    def do_GET(self):\n"
+     "        return cursor.execute('select ' + self.headers.get('X-Q'))\n"),
+    # The protocol-level containers: bare WSGI, ASGI, and a webhook payload.
+    ("def app(environ, start_response):\n"
+     "    return cursor.execute('select ' + environ['QUERY_STRING'])\n"),
+    ("import os\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + os.environ['HTTP_USER_AGENT'])\n"),
+    ("async def app(scope, receive, send):\n"
+     "    return cursor.execute('select ' + scope['query_string'])\n"),
+    ("def handler(event, context):\n"
+     "    return cursor.execute('select ' + event['body'])\n"),
+    # A framework source *factory*, which is spelled with a capital and is the
+    # only reason a bare call can be a source at all.
+    ("from fastapi import Query\n"
+     "def go():\n"
+     "    return cursor.execute('select ' + Query(None))\n"),
 ]
 
 
