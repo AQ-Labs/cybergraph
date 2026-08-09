@@ -1134,6 +1134,59 @@ def test_an_opaque_untainted_argument_abstains_rather_than_clearing(body, callee
     assert _assess(body, callee, params="unused") == VERDICT_UNKNOWN
 
 
+# --- Fix round 8 ---
+
+# A composed argument built from opaque-but-untainted operands (`eval(a + b)`,
+# `pickle.loads(a + b)`, `eval(f"{a}{b}")`) classifies as COMPOSED, not OPAQUE,
+# so the old `== OPAQUE` abstention guard cleared it to `safe` outright — a
+# silent no-finding in `eval`/`pickle.loads`, the classes with no safe mechanism
+# to look for. The guard must abstain on anything that is not provably LITERAL,
+# so a composition of unresolved parts surfaces as `-UNVERIFIED`, never `safe`.
+#
+# The operands here are left *untainted* on purpose: this is precisely the
+# operands-opaque-not-tracked case, distinct both from a provable literal
+# (`eval("1 + 1")`, which stays safe) and from a tracked-tainted argument
+# (`eval(request.args.get("c"))`, which is a confirmed critical). `_assess`
+# seeds every parameter as tainted, so these use a taint-free state instead.
+
+
+def _assess_untainted(body, callee, params):
+    src = f"def f({params}):\n    {body}\n"
+    fn = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)][0]
+    states = snapshot_call_sites(fn)
+    call = next(
+        n for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and ast.unparse(n.func).endswith(callee)
+    )
+    sink = lookup_sink(ast.unparse(call.func), "python")
+    assert sink is not None, ast.unparse(call.func)
+    return assess_call(sink, call, states[id(call)])
+
+
+@pytest.mark.parametrize(
+    "body,callee",
+    [
+        ("eval(a + b)", "eval"),
+        ("pickle.loads(a + b)", "pickle.loads"),
+        ('eval(f"{a}{b}")', "eval"),
+    ],
+)
+def test_a_composed_opaque_argument_abstains_rather_than_clearing(body, callee):
+    """COMPOSED-of-opaque is not provably LITERAL, so it must not read as safe."""
+    assert _assess_untainted(body, callee, "a, b") == VERDICT_UNKNOWN
+
+
+def test_eval_of_added_opaque_operands_is_never_a_silent_no_finding():
+    """`eval(a + b)` specifically: the exact shape that leaked to `safe`."""
+    assert _assess_untainted("eval(a + b)", "eval", "a, b") != VERDICT_SAFE
+
+
+def test_a_provable_literal_stays_safe_and_a_tracked_tainted_arg_is_critical():
+    """The two ends of the lattice the composed-opaque fix must not disturb."""
+    assert _assess_untainted('eval("1 + 1")', "eval", "a, b") == VERDICT_SAFE
+    assert _assess("eval(a + b)", "eval", params="a, b") == VERDICT_UNSAFE
+
+
 # --- `_flags_all_known` polarity, the D6 matching machinery -------------------
 
 # `--` is end-of-options, not a flag: `_flags_all_known` skips it explicitly, so

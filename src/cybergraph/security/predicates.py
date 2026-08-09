@@ -46,7 +46,6 @@ from dataclasses import dataclass
 from cybergraph.analysis.provenance import (
     COMPOSED,
     LITERAL,
-    OPAQUE,
     CallState,
     classify_expr,
     user_input_nodes,
@@ -721,12 +720,40 @@ def _assess_template(call: ast.Call, state: CallState) -> str:
 
 
 def _assess_any_tainted_argument(call: ast.Call, state: CallState) -> str:
-    """Code execution, deserialization and templates: any user data is unsafe."""
+    """Code execution and deserialization: the strongest fail-closed reading.
+
+    These are the sinks with no safe mechanism to look for — ``eval``, ``exec``,
+    ``pickle.loads``, ``yaml.load`` — so an argument is cleared only when it can
+    be *proven* harmless, and every other outcome abstains rather than clearing.
+    Three verdicts, decided per argument against the ``classify_expr`` lattice:
+
+    * **tracked-tainted** — the user's data reaches the argument through a name
+      the flow analysis followed, or an inline read written out in place
+      (``_has_tainted_name``) -> ``VERDICT_UNSAFE``. A confirmed critical.
+    * **provably LITERAL** — a constant, or an expression that constant-folds
+      with no unresolved part (``eval("1 + 1")``, ``pickle.loads(b"...")``) ->
+      contributes nothing, so a call whose every argument is LITERAL is
+      ``VERDICT_SAFE``.
+    * **anything else** — COMPOSED *or* OPAQUE: an argument built from or equal
+      to a component whose value cannot be seen (``eval(a + b)``,
+      ``eval(f"{a}{b}")``, ``pickle.loads(a)``, ``eval(EXPR[k])``) ->
+      ``VERDICT_UNKNOWN``, surfacing as ``-UNVERIFIED``.
+
+    The load-bearing case is the last one, and it is why the guard tests *not
+    LITERAL* rather than *is OPAQUE*. A ``BinOp``/``JoinedStr``/``%``-format of
+    opaque operands classifies as COMPOSED, not OPAQUE, so an ``== OPAQUE`` guard
+    cleared ``eval(a + b)`` to ``safe`` outright — a silent miss in the single
+    most dangerous sink. COMPOSED means "assembled here from parts", and a part
+    that is not itself LITERAL is unresolved: the composition cannot be proven
+    harmless, so it cannot reach ``safe``. Only LITERAL — where classification
+    has already folded away every part and left a constant — is proof of safety,
+    and only it clears. Uncertainty never becomes safety.
+    """
     unknown = False
     for arg in [*call.args, *(kw.value for kw in call.keywords)]:
         if _has_tainted_name(arg, state):
             return VERDICT_UNSAFE
-        if not isinstance(arg, ast.Constant) and classify_expr(arg, state.bindings) == OPAQUE:
+        if classify_expr(arg, state.bindings) != LITERAL:
             unknown = True
     return VERDICT_UNKNOWN if unknown else VERDICT_SAFE
 
