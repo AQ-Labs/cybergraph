@@ -60,13 +60,22 @@ def analyze_python_file(
     rel = path.relative_to(repo_root).as_posix()
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
+        # `SyntaxError` is not the only way `ast.parse` refuses a string.
+        # CPython raises a bare `ValueError` -- "source code string cannot
+        # contain null bytes" -- and `read_text(errors="ignore")` produces
+        # exactly such a string from a UTF-16-encoded `.py`, from a binary blob
+        # renamed `.py`, and from anything carrying a stray NUL. Measured before
+        # this widened: each of those three aborted `build_graph` for the whole
+        # repository, so one unreadable file silenced every other file's
+        # findings. `UnicodeDecodeError` is a `ValueError` too and is covered
+        # here for the same reason.
         finding = Finding(
             rule_id="PY-SYNTAX",
             severity="info",
             message="Python file could not be parsed",
             file_path=rel,
-            line_start=exc.lineno or 0,
+            line_start=getattr(exc, "lineno", 0) or 0,
             evidence=str(exc),
         )
         return [Node("File", rel, rel, rel, 1, len(lines))], [], [finding]

@@ -54,8 +54,77 @@ ANALYZED_SUFFIXES = (
 )
 
 
+#: Failures that belong to *one file* and must never end the walk over the rest.
+#: Each is attributable to the file, bounded by it, and recoverable: the file is
+#: reported as unreadable and the scan continues.
+#:
+#: * ``OSError`` -- an unreadable file, a dangling symlink, ``PermissionError``.
+#: * ``ValueError`` -- ``ast.parse`` on a NUL-bearing string, and ``UnicodeDecodeError``,
+#:   which is a ``ValueError`` subclass, when an analyzer decodes strictly.
+#: * ``RecursionError`` -- nesting deeper than the interpreter's stack. The stack
+#:   unwinds, so the next file starts from a clean state.
+#:
+#: Deliberately *not* contained, and deliberately not ``except Exception``:
+#:
+#: * ``MemoryError`` -- a condition of the process, not a property of this file.
+#:   After it, what a later file's silence means is unknown, and a scan whose
+#:   silence means nothing is worse than a scan that stopped.
+#: * ``KeyboardInterrupt`` / ``SystemExit`` -- the operator asked to stop.
+#: * everything else -- an analyzer bug. Turning ``AttributeError`` into a
+#:   per-file "unreadable" note would render a detector regression across every
+#:   file in the repository as routine housekeeping, which is the same
+#:   silent-miss shape this containment exists to prevent. A crash is the honest
+#:   report for a defect in the analyzer itself.
+_CONTAINED_PER_FILE = (OSError, RecursionError, ValueError)
+
+#: Emitted when a file defeated its analyzer. ``info`` because it is not a
+#: vulnerability; present because "we could not read this" must be *stated*.
+#: A file the scan silently skipped is indistinguishable from a clean one.
+RULE_FILE_UNREADABLE = "CG-FILE-UNREADABLE"
+
+
 def analyze_source_file(path: Path, repo_root: Path, config: CyberGraphConfig) -> AnalyzerResult:
-    """Dispatch a source file to its language analyzer, or fall back to a File node."""
+    """Dispatch a source file to its language analyzer, or fall back to a File node.
+
+    One malformed file must not abort a repository scan. Measured before this
+    guard existed: a stray NUL byte, a ``.py`` saved as UTF-16 and a binary blob
+    renamed ``.py`` each raised ``ValueError`` out of ``ast.parse``, through
+    ``build_graph``, and took every other file's findings with them. The failure
+    is contained here rather than in each analyzer so every language gets it,
+    and so an analyzer that grows a new failure mode is covered by default.
+    """
+    try:
+        return _dispatch(path, repo_root, config)
+    except _CONTAINED_PER_FILE as exc:
+        return _unreadable_file(path, repo_root, exc)
+
+
+def _unreadable_file(path: Path, repo_root: Path, exc: BaseException) -> AnalyzerResult:
+    rel = _relative(path, repo_root)
+    return (
+        [Node("File", rel, rel, rel, 1, 0)],
+        [],
+        [
+            Finding(
+                rule_id=RULE_FILE_UNREADABLE,
+                severity="info",
+                message="Source file could not be analyzed",
+                file_path=rel,
+                line_start=0,
+                evidence=f"{type(exc).__name__}: {exc}",
+            )
+        ],
+    )
+
+
+def _relative(path: Path, repo_root: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _dispatch(path: Path, repo_root: Path, config: CyberGraphConfig) -> AnalyzerResult:
     suffix = path.suffix.lower()
     if suffix in PYTHON_SUFFIXES:
         return analyze_python_file(
