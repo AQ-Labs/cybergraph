@@ -53,7 +53,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 def _load_simple_toml(path: Path) -> dict[str, Any]:
     data: dict[str, Any] = {}
-    current: dict[str, Any] | None = None
+    current: dict[str, Any] = data
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -62,7 +62,7 @@ def _load_simple_toml(path: Path) -> dict[str, Any]:
             section = line.strip("[]").strip()
             current = data.setdefault(section, {})
             continue
-        if current is None or "=" not in line:
+        if "=" not in line:
             continue
         key, value = [part.strip() for part in line.split("=", 1)]
         current[key] = _parse_simple_value(value)

@@ -110,13 +110,12 @@ def analyze_python_file(
             if route:
                 edges.append(Edge(EDGE_EXPOSES_ENTRYPOINT, rel, key, rel, item.lineno))
             tainted_values = _route_inputs(item, key, rel, route, nodes, edges)
-            for decorator in decorators:
-                lowered_decorator = decorator.lower()
+            for decorator_node, decorator_text in zip(item.decorator_list, decorators):
+                guard_name = _decorator_guard_name(decorator_node).lower()
                 if any(
-                    kw in lowered_decorator
-                    for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)
+                    kw in guard_name for kw in AUTH_KEYWORDS | AUTHZ_KEYWORDS | set(auth_markers)
                 ):
-                    edges.append(Edge(EDGE_GUARDS, key, decorator, rel, item.lineno))
+                    edges.append(Edge(EDGE_GUARDS, key, decorator_text, rel, item.lineno))
             for dependency in _fastapi_depends_guards(item, auth_markers):
                 edges.append(
                     Edge(EDGE_GUARDS, key, dependency, rel, item.lineno, {"framework": "fastapi"})
@@ -533,6 +532,23 @@ def classify_name(
 
 def _decorator_texts(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     return [ast.unparse(decorator) for decorator in node.decorator_list if hasattr(ast, "unparse")]
+
+
+def _decorator_guard_name(decorator: ast.AST) -> str:
+    """The identifier an auth/authz keyword match is judged against.
+
+    Structural, like the source/sink classification: a decorator's *callable*
+    (``require_role``, ``app.get``, ``login_required``) is a naming convention
+    a developer chose. A call's string/bytes literal arguments (``"admin"`` in
+    ``require_role("admin")``, or a route path in ``app.get("/admin/export")``)
+    are data, not a naming convention -- ``/admin/export`` must never make its
+    own route decorator read as its own login guard. For a call, match only
+    the callable; for a bare name or attribute decorator, match the decorator
+    itself.
+    """
+    if isinstance(decorator, ast.Call):
+        return _callable_name(decorator.func)
+    return _callable_name(decorator)
 
 
 def _route_metadata(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, str]:
