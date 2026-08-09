@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "code",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "Written as a literal on purpose. `_assess_any_tainted_argument` abstains on any non-Constant OPAQUE argument, so `eval(EXPRESSION)` against a module-level constant would be an abstention and would fail this gate on case authoring rather than on detector behaviour."
+}

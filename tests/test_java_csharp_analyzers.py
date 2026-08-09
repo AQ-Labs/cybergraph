@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cybergraph.analysis.csharp import analyze_csharp_file
+from cybergraph.analysis.java import analyze_java_file
 from cybergraph.build import build_graph
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
+
+
+def _input_nodes(nodes: list) -> list:
+    return [n for n in nodes if n.kind == "Input"]
 
 
 def _edge_kinds(repo: Path) -> dict[str, int]:
@@ -111,3 +117,131 @@ def test_csharp_secret_access(tmp_path: Path) -> None:
     )
     build_graph(repo)
     assert _edge_kinds(repo).get("USES_SECRET", 0) >= 1
+
+
+def test_java_marker_in_comment_string_or_textblock_is_not_a_source(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String host = "see getParameter docs";  // @RequestParam note\n'
+        '        String block = """\n'
+        "            request.getHeader inside block\n"
+        '            """;\n'
+        "        return host + block;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes) == []
+    assert not any(e.kind == "READS_INPUT" for e in edges)
+
+
+def test_java_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String name = request.getParameter("name");\n'
+        '        return statement.executeQuery("select * from t where n=\'" + name + "\'");\n'
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes), "genuine getParameter must create an Input source"
+    assert any(e.kind == "READS_INPUT" for e in edges)
+    assert any(e.kind == "TAINTS" for e in edges)
+    assert any(f.rule_id == "CG-JAVA-SINK-CALL" for f in findings)
+
+
+def test_java_genuine_source_beside_string_marker_still_detected(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.java").write_text(
+        "public class C {\n"
+        "    public String h() {\n"
+        '        String name = request.getParameter("see getParameter docs");\n'
+        '        return statement.executeQuery("select * from t where n=\'" + name + "\'");\n'
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_java_file(repo / "C.java", repo)
+    assert _input_nodes(nodes)
+    assert any(e.kind == "TAINTS" for e in edges)
+
+
+def test_csharp_marker_in_comment_string_or_verbatim_is_not_a_source(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.cs").write_text(
+        "public class C {\n"
+        "    public string H() {\n"
+        '        var host = "Request.Query text";  // Request.Form note\n'
+        '        var v = @"see Request.Headers here";\n'
+        "        return host + v;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_csharp_file(repo / "C.cs", repo)
+    assert _input_nodes(nodes) == []
+    assert not any(e.kind == "READS_INPUT" for e in edges)
+
+
+def test_csharp_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.cs").write_text(
+        "public class C {\n"
+        "    public string H() {\n"
+        '        var name = Request.Query["name"];\n'
+        '        var cmd = new SqlCommand("select * from t where n=\'" + name + "\'");\n'
+        "        return Ok(cmd.ExecuteReader());\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, findings = analyze_csharp_file(repo / "C.cs", repo)
+    assert _input_nodes(nodes), "genuine Request.Query must create an Input source"
+    assert any(e.kind == "READS_INPUT" for e in edges)
+    assert any(e.kind == "TAINTS" for e in edges)
+    assert any(f.rule_id == "CG-CSHARP-SINK-CALL" for f in findings)
+
+
+def test_csharp_interpolation_hole_source_is_detected(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.cs").write_text(
+        "public class C {\n"
+        "    public string H() {\n"
+        '        var u = $"id={Request.Query}";\n'
+        "        return u;\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, _edges, _findings = analyze_csharp_file(repo / "C.cs", repo)
+    assert _input_nodes(nodes)
+
+
+def test_csharp_genuine_source_beside_string_marker_still_detected(tmp_path: Path) -> None:
+    repo = tmp_path / "app"
+    repo.mkdir()
+    (repo / "C.cs").write_text(
+        "public class C {\n"
+        "    public string H() {\n"
+        '        var name = Request.Query["see Request.Form here"];\n'
+        '        var cmd = new SqlCommand("select * from t where n=\'" + name + "\'");\n'
+        "        return Ok(cmd.ExecuteReader());\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_csharp_file(repo / "C.cs", repo)
+    assert _input_nodes(nodes)
+    assert any(e.kind == "TAINTS" for e in edges)

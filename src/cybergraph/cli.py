@@ -629,8 +629,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         if not args.json and hist is not None and not hist.is_first:
             # ASCII only: a non-cp1252 char here crashes real Windows consoles.
-            print(f"Changes since last scan: +{len(hist.new)} new, -{len(hist.fixed)} fixed, "
-                  f"{len(hist.regressed)} regressed")
+            line = (f"Changes since last scan: +{len(hist.new)} new, "
+                    f"-{len(hist.fixed)} fixed, {len(hist.regressed)} regressed")
+            if hist.hidden_by_config:
+                # Configuration, not a code change; none of it is a fix.
+                line += (f", {len(hist.hidden_by_config)} hidden by config "
+                         "(hidden, not fixed)")
+            print(line)
     elif args.command == "config":
         from .config import load_config
         from .llm import load_llm_config_from_env

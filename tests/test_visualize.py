@@ -9,8 +9,8 @@ def test_generate_html_report_writes_security_sections(tmp_path: Path) -> None:
     repo.mkdir()
     (repo / "app.py").write_text(
         "@app.get('/users')\n"
-        "def users():\n"
-        "    return db.execute('select 1')\n",
+        "def users(request):\n"
+        "    return db.execute('select ' + request.query['q'])\n",
         encoding="utf-8",
     )
     build_graph(repo)

@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "path",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "cfg.input_dir is a config member, not a read of user input. Guards the source side against substring matching."
+}

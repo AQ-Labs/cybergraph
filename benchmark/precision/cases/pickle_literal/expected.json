@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "deserialize",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "`pickle.loads` *is* in the sink registry, so this reaches `_assess_any_tainted_argument` with a constant argument it has to clear itself. It is the only safe deserialize case that exercises the class's own predicate rather than the registry."
+}

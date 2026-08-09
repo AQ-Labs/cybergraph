@@ -1,0 +1,15 @@
+{
+  "label": "unsafe",
+  "vuln_class": "command",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 12,
+      "rule": "CG-CMD-EXEC"
+    }
+  ],
+  "abstentions": 0,
+  "note": "`sh -c <tainted>` runs a shell whatever the shell= keyword says."
+}

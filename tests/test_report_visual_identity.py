@@ -25,7 +25,16 @@ def _report_html(tmp_path: Path) -> str:
     build_graph(repo)
     output = tmp_path / "report.html"
     generate_html_report(repo, output)
-    return output.read_text(encoding="utf-8")
+    html = output.read_text(encoding="utf-8")
+    # The fixture has a real SQL-injection finding and a real attack path. Pin
+    # that the report actually *renders* them, so every identity test below
+    # depends on finding-derived content rather than passing on an empty repo:
+    # `CG-SQL-EXEC`, the route handler `get_items` and the finding-group markup
+    # are all absent when there is nothing to report (measured), unlike the
+    # static CSS/JS scaffolding the tokens used to rest on.
+    assert "CG-SQL-EXEC" in html, "fixture must render its real finding"
+    assert "get_items" in html, "fixture must render its real entrypoint"
+    return html
 
 
 def _style_block(html: str) -> str:
@@ -82,6 +91,9 @@ def test_guided_first_view_highlights_top_risk(tmp_path: Path) -> None:
     assert "highlightPath('0')" in html
     assert "pathNarrative" in html
     assert "Start here: the #1 risk" in html
+    # The guided view must reference the *real* top risk, not just the static
+    # scaffolding: the #1 risk here is the SQL sink reached from the route.
+    assert "app.py::get_items -&gt; db.execute" in html
 
 
 def test_plain_language_labels_prefer_routes(tmp_path: Path) -> None:
@@ -124,7 +136,15 @@ def test_zones_view_present_in_report(tmp_path: Path) -> None:
     assert "View: security zones" in html
     assert "buildZoneElements" in html
     assert "'zone:' + zone" in html  # compound parents
-    assert "Attack Surface → Guards" in html or "Attack Surface \u2192 Guards" in html
+    # Both operands parse to the identical string (`→` and the escape
+    # spelling are one glyph), so the `or` was a no-op. One assertion, once.
+    assert "Attack Surface → Guards" in html
+    # ...and the exported graph really carries the zones the view renders.
+    from cybergraph.graph_export import build_graph_data
+
+    repo = tmp_path / "repo"
+    zones = {node.get("zone") for node in build_graph_data(repo)["nodes"]}
+    assert "attack-surface" in zones and "sinks" in zones, zones
 
 
 def test_findings_grouped_by_rule(tmp_path: Path) -> None:
@@ -133,17 +153,26 @@ def test_findings_grouped_by_rule(tmp_path: Path) -> None:
     assert "class='finding-group" in html
     assert "data-finding-row" in html  # rows survive inside groups
     assert "fg-count" in html
+    # The group markup (not just the CSS class) must name the real rule and its
+    # count. Measured absent on an empty repo, unlike the scaffolding above.
+    assert "<strong>CG-SQL-EXEC</strong>" in html
+    assert "1 finding" in html
 
 
 def test_top_risks_render_as_clickable_cards(tmp_path: Path) -> None:
     html = _report_html(tmp_path)
     assert "data-risk-jump" in html
     assert "cg-risk-strip" not in html  # duplicated JS strip removed
+    # A rendered card must carry the real risk title, not just the JS hook.
+    assert "data-title='app.py::get_items -&gt; db.execute'" in html
 
 
 def test_stat_tiles_show_severity_accents(tmp_path: Path) -> None:
     html = _report_html(tmp_path)
     assert "stat-crit" in html or "stat-high" in html
+    # `stat-crit`/`stat-high` are static <style> rules; the load-bearing check
+    # is that a tile shows the real severity count for the fixture's finding.
+    assert "<span class='stat-high'>1 high</span>" in html
 
 
 def test_motion_is_present_and_reduced_motion_safe(tmp_path: Path) -> None:

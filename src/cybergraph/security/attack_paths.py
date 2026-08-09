@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 from collections import deque
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from cybergraph.analysis.resolve import EDGE_CALLS_RESOLVED
+from cybergraph.config import load_config
 from cybergraph.graph import GraphStore
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -49,7 +51,50 @@ def find_attack_paths(
     max_depth: int = 8,
     limit: int = 20,
     interprocedural: bool = True,
+    apply_suppressions: bool = True,
+    suppression_root: Path | None = None,
 ) -> list[AttackPath]:
+    """Find entrypoint-to-sink attack paths for ``repo_root``.
+
+    **New behaviour.** Until this parameter existed, ``find_attack_paths``
+    applied no suppression at all on any surface -- every caller saw every
+    path. ``apply_suppressions`` now defaults to ``True``, so the ranked and
+    actionable surfaces (CLI ``attack-paths``, top risks, PR review, cloud,
+    Strix scope, ``analyze``) *hide* paths they previously showed. That is a
+    deliberate change of output, not a reordering of an existing filter.
+
+    ``apply_suppressions`` drops paths whose every file is covered by
+    ``[suppressions] paths`` in ``.cybergraph.toml``, and it drops them
+    **before** ``limit`` is applied, so accepted fixture noise cannot starve
+    the real results behind it.
+
+    Pass ``apply_suppressions=False`` on exploration and evidence surfaces
+    (graph export, visualisation, MCP explain, grounded RAG, triage evidence):
+    suppressions hide *findings*, but the graph still keeps the underlying
+    edges so reviewers can inspect the real code path. Note that
+    ``security/investigate.py`` deliberately keeps the suppressing default --
+    the call site there feeds ``collect_top_risks``, which is a ranking.
+
+    A suppressed path never consumes ``limit`` on **either** kind of surface.
+    Dropping them before the cap fixed the ranked surface; the exploration
+    surfaces kept the starvation, because ``apply_suppressions=False`` combined
+    with a hard cap and an ``ORDER BY target`` traversal lets a ``fixtures/``
+    prefix win every slot. Measured with 80 suppressed routes beside 3 real
+    ones: the HTML report showed 25 cards and 0 real paths, and the graph export
+    and the grounded evidence 50 each, also 0 real -- the genuine attack paths
+    were invisible in the human-facing report, in the exported JSON and in what
+    an LLM was grounded on. Suppressed paths are now collected separately and
+    fill only the slots the real ones leave, so they stay *visible*, which is
+    the entire point of ``apply_suppressions=False``, without displacing
+    anything.
+
+    ``suppression_root`` loads the suppression config from a *different*
+    directory than the graph being queried. Callers that materialise a tree
+    from git (``security/review.py``) must pass the real repository root, so
+    both sides of a diff are scanned under one configuration: configuration is
+    not part of a code delta, and a config-only difference must never render
+    as an added or removed attack path.
+    """
     store = GraphStore.open_for_repo(repo_root)
     try:
         entrypoints = [
@@ -83,7 +128,17 @@ def find_attack_paths(
 
         taints = _load_taints(store)
 
-        return _traverse(entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit)
+        config_root = suppression_root if suppression_root is not None else repo_root
+        patterns = load_config(config_root).suppressed_paths
+        # The patterns are loaded either way now: an exploration surface still
+        # has to recognise a suppressed path in order to stop it consuming a
+        # slot. With no patterns configured nothing can be suppressed, so the
+        # traversal keeps its original single-bucket behaviour exactly.
+        include_suppressed = bool(patterns) and not apply_suppressions
+        return _traverse(
+            entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit, patterns,
+            include_suppressed=include_suppressed,
+        )
     finally:
         store.close()
 
@@ -96,12 +151,26 @@ def _traverse(
     taints: dict[tuple[str, str], tuple[str, ...]],
     max_depth: int,
     limit: int,
+    patterns: tuple[str, ...] = (),
+    include_suppressed: bool = False,
 ) -> list[AttackPath]:
-    paths: list[AttackPath] = []
+    """Traverse to at most ``limit`` paths, of which suppressed ones take no slot.
+
+    ``reported`` holds the paths the caller asked about and is what ``limit``
+    counts. ``hidden`` holds suppressed ones: dropped entirely on a ranked
+    surface, and on an exploration surface kept aside and used only to fill
+    slots ``reported`` did not need. Either way a suppressed path cannot push a
+    real one off the end, and the caller's cap on the total is unchanged.
+    """
+    reported: list[AttackPath] = []
+    hidden: list[AttackPath] = []
     seen_paths: set[tuple[str, str, tuple[str, ...]]] = set()
 
+    def _full() -> bool:
+        return len(reported) >= limit and (not include_suppressed or len(hidden) >= limit)
+
     for entry in entrypoints:
-        if len(paths) >= limit:
+        if _full():
             break
         # queue items: (node, path, confidence_rank, sanitized)
         start_sanitized = entry in sanitizers
@@ -109,7 +178,7 @@ def _traverse(
             [(entry, (entry,), 3, start_sanitized)]
         )
         visited: set[str] = {entry}
-        while queue and len(paths) < limit:
+        while queue and not _full():
             node, path, conf_rank, sanitized = queue.popleft()
 
             for sink_name in sinks.get(node, []):
@@ -117,6 +186,12 @@ def _traverse(
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
+                suppressed = bool(patterns) and path_is_suppressed(path + (sink_name,), patterns)
+                if suppressed and not include_suppressed:
+                    continue
+                bucket = hidden if suppressed else reported
+                if len(bucket) >= limit:
+                    continue
                 taint_sources = taints.get((node, sink_name), ())
                 risk = _score_attack_path(
                     sink_name, bool(taint_sources), sanitized, _RANK_CONF[conf_rank]
@@ -129,7 +204,7 @@ def _traverse(
                     taint_sources=taint_sources,
                     interprocedural=bool(callgraph),
                 )
-                paths.append(
+                bucket.append(
                     AttackPath(
                         entrypoint=entry,
                         sink=sink_name,
@@ -142,7 +217,7 @@ def _traverse(
                         risk=risk,
                     )
                 )
-                if len(paths) >= limit:
+                if _full():
                     break
 
             if len(path) > max_depth:
@@ -159,7 +234,30 @@ def _traverse(
                         sanitized or nxt in sanitizers,
                     )
                 )
-    return paths
+    # Suppressed paths fill only what the real ones left, so the caller's cap on
+    # the total holds and the real ones are never the ones that fall off.
+    return reported + hidden[: max(0, limit - len(reported))]
+
+
+def path_is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
+    """Suppress only when every file the path touches is suppressed.
+
+    Conservative on purpose: a path crossing from suppressed fixture code into
+    real application code is still reported. Node keys that carry no file
+    component (bare sink names such as ``subprocess.run``) are ignored, and a
+    path with no identifiable file is never suppressed -- an unknown file is
+    treated as unsuppressed, so incomplete information abstains from hiding
+    rather than hiding silently.
+
+    Public because a caller that wants to *count* what the config hides
+    (``security/review.py``) must ask the same predicate that does the hiding.
+    A second copy of this rule could disagree with it, and the direction it
+    would disagree in is the dangerous one.
+    """
+    files = {node.split("::", 1)[0] for node in nodes if "::" in node}
+    if not files:
+        return False
+    return all(any(fnmatch(file, pattern) for pattern in patterns) for file in files)
 
 
 def format_attack_paths(paths: list[AttackPath]) -> str:

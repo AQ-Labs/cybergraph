@@ -26,5 +26,7 @@ dist/
 build/
 *.egg-info/
 
-# Benchmark run output (regenerate with python benchmark/run_eval.py)
-benchmark/results.json
+# Benchmark results are COMMITTED, not ignored: a published number that cannot
+# be checked against a committed artifact is the failure this project exists to
+# avoid. Regenerate with `python benchmark/run_eval.py` and
+# `python benchmark/run_precision.py`.

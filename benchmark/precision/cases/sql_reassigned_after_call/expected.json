@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "Flow-sensitivity regression from Task 3: a whole-function binding map would let the later assignment reach back into the earlier call."
+}

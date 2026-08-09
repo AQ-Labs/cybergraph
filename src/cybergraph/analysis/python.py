@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import ast
+from collections import deque
+from collections.abc import Iterator
 from pathlib import Path
 
-from cybergraph.graph import Edge, Finding, Node
+from cybergraph.analysis.provenance import reads_user_input, snapshot_call_sites
+from cybergraph.graph import UNVERIFIED_SUFFIX, Edge, Finding, Node
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
     AUTHZ_KEYWORDS,
@@ -22,9 +25,10 @@ from cybergraph.security.ontology import (
     EDGE_USES_SECRET,
     SECRET_KEYWORDS,
     SINK_KEYWORDS,
-    SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
+from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE, assess_call
+from cybergraph.security.sinks import SEVERITY_MEDIUM, Sink, lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
 SECRET_EXPOSURE_SINKS = {
@@ -56,13 +60,22 @@ def analyze_python_file(
     rel = path.relative_to(repo_root).as_posix()
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
+        # `SyntaxError` is not the only way `ast.parse` refuses a string.
+        # CPython raises a bare `ValueError` -- "source code string cannot
+        # contain null bytes" -- and `read_text(errors="ignore")` produces
+        # exactly such a string from a UTF-16-encoded `.py`, from a binary blob
+        # renamed `.py`, and from anything carrying a stray NUL. Measured before
+        # this widened: each of those three aborted `build_graph` for the whole
+        # repository, so one unreadable file silenced every other file's
+        # findings. `UnicodeDecodeError` is a `ValueError` too and is covered
+        # here for the same reason.
         finding = Finding(
             rule_id="PY-SYNTAX",
             severity="info",
             message="Python file could not be parsed",
             file_path=rel,
-            line_start=exc.lineno or 0,
+            line_start=getattr(exc, "lineno", 0) or 0,
             evidence=str(exc),
         )
         return [Node("File", rel, rel, rel, 1, len(lines))], [], [finding]
@@ -110,37 +123,33 @@ def analyze_python_file(
                 )
 
             _add_python_dataflows(item, key, rel, tainted_values, nodes, edges)
+            # Seeded with route parameters only. Taint the *body* introduces is
+            # discovered by the snapshot walk itself, in source order — seeding
+            # a whole-function accumulation here instead would assert every
+            # name's final taint at call sites that run before the read.
+            call_states = snapshot_call_sites(item, tainted_values)
 
-            for call in [n for n in ast.walk(item) if isinstance(n, ast.Call)]:
+            for call in [n for n in _scoped_walk(item) if isinstance(n, ast.Call)]:
                 call_name = _call_name(call)
                 if not call_name:
                     continue
-                edges.append(
-                    Edge("CALLS", key, call_name, rel, getattr(call, "lineno", item.lineno))
-                )
+                line_no = getattr(call, "lineno", item.lineno)
+                edges.append(Edge("CALLS", key, call_name, rel, line_no))
                 lowered = call_name.lower()
-                if any(kw in lowered for kw in SINK_KEYWORDS | set(custom_sinks)):
-                    line_no = getattr(call, "lineno", item.lineno)
+
+                sink = lookup_sink(call_name, "python") or _custom_sink(call_name, custom_sinks)
+                if sink is not None:
+                    # Inventory is always recorded, whether or not this call site
+                    # is an unsafe use of the sink.
                     edges.append(Edge(EDGE_REACHES_SINK, key, call_name, rel, line_no))
-                    if not is_inline_suppressed(lines, line_no, "CG-SINK-CALL"):
-                        findings.append(
-                            Finding(
-                                rule_id="CG-SINK-CALL",
-                                severity="medium",
-                                message=f"Function reaches sensitive sink `{call_name}`",
-                                file_path=rel,
-                                line_start=line_no,
-                                cwe="CWE-20",
-                                evidence=call_name,
-                            )
-                    )
+                    assessment = assess_call(sink, call, call_states.get(id(call)))
+                    finding = _finding_for(sink, assessment, call_name, rel, line_no)
+                    if finding is not None and not is_inline_suppressed(
+                        lines, line_no, finding.rule_id
+                    ):
+                        findings.append(finding)
                 if any(kw in lowered for kw in SECRET_KEYWORDS | set(secret_markers)):
-                    edges.append(
-                        Edge(
-                            EDGE_USES_SECRET, key, call_name, rel,
-                            getattr(call, "lineno", item.lineno),
-                        )
-                    )
+                    edges.append(Edge(EDGE_USES_SECRET, key, call_name, rel, line_no))
                 call_text = ast.unparse(call).lower() if hasattr(ast, "unparse") else lowered
                 if _is_secret_exposure(call_name, call_text, secret_markers):
                     edges.append(
@@ -149,21 +158,48 @@ def analyze_python_file(
                             key,
                             call_name,
                             rel,
-                            getattr(call, "lineno", item.lineno),
+                            line_no,
                             {"reason": "secret passed to exposure sink"},
                         )
                     )
                 if any(kw in lowered for kw in VALIDATION_KEYWORDS | set(validation_markers)):
-                    edges.append(
-                        Edge(
-                            EDGE_SANITIZES, key, call_name, rel,
-                            getattr(call, "lineno", item.lineno),
-                        )
-                    )
+                    edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, line_no))
 
     _add_django_url_routes(tree, rel, nodes, edges)
     _add_imports(tree, rel, edges)
     return nodes, edges, findings
+
+
+def _scoped_walk(item: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    """``ast.walk`` over one function, stopping at every nested ``def``.
+
+    Each call site belongs to exactly one function: the nearest enclosing one.
+    ``analyze_python_file`` finds functions with ``ast.walk(tree)``, which yields
+    a nested ``def`` as an item in its own right, so walking the outer
+    function's whole subtree would attribute the inner function's calls to the
+    outer one as well — duplicate ``CALLS`` and ``REACHES_SINK`` edges,
+    duplicate dataflow edges, and two findings for one call site. Worse once
+    verdicts are involved: the outer pass holds none of the inner function's
+    local bindings, so it abstains and emits a spurious ``-UNVERIFIED`` finding
+    beside the inner pass's correct verdict.
+
+    A function's own ``decorator_list`` stays inside its scope here, which keeps
+    the ``CALLS`` edge for route decorators. Those calls have no snapshot —
+    ``snapshot_call_sites`` walks body statements — so a sink reached from a
+    decorator abstains rather than being cleared.
+
+    Yields the same nodes as ``ast.walk`` in the same breadth-first order, minus
+    the nested-function subtrees; ``Lambda`` and ``ClassDef`` bodies are left in
+    place because nothing else claims them.
+    """
+    queue: deque[ast.AST] = deque([item])
+    while queue:
+        node = queue.popleft()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            queue.append(child)
 
 
 def _add_imports(tree: ast.AST, rel: str, edges: list[Edge]) -> None:
@@ -236,9 +272,15 @@ def _add_python_dataflows(
     nodes: list[Node],
     edges: list[Edge],
 ) -> None:
-    """Track simple local propagation from request inputs into sink arguments."""
+    """Emit the graph's dataflow nodes and edges for this function.
+
+    Taint here is name-keyed and accumulated over the whole body, which is the
+    right shape for ``FLOWS_TO``/``TAINTS`` edges and the wrong shape for a
+    verdict: it says a name was tainted *somewhere in this function*, not that
+    it was tainted at a given call. ``snapshot_call_sites`` answers the second
+    question and is not seeded from this map — see ``analyze_python_file``."""
     tainted = dict(tainted_values)
-    for node in ast.walk(item):
+    for node in _scoped_walk(item):
         if isinstance(node, ast.Assign):
             source_key = _tainted_source_key(node.value, tainted)
             if not source_key and _is_user_input_expr(node.value):
@@ -358,8 +400,84 @@ def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
 
 
 def _is_user_input_expr(node: ast.AST) -> bool:
-    text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
-    return any(keyword in text for keyword in SOURCE_KEYWORDS)
+    """Does this expression introduce user data — the *same* question as everywhere else.
+
+    This was a substring scan of the unparsed text, and it was left in place on
+    the claim that it feeds only ``TAINTS``/``FLOWS_TO`` graph edges with no
+    verdict path. That claim was false. ``_ensure_input_node`` seeds
+    ``tainted[name]``, the ``ast.Call`` branch above turns that into an
+    ``EDGE_TAINTS`` edge, ``attack_paths._load_taints`` reads it back as
+    ``AttackPath.taint_sources``, and ``data_reachable`` then drives
+    ``_score_attack_path`` to ``reachability=1.0, exploitability=0.85``.
+    Measured on the previous revision: ``v = "body.txt"`` followed by
+    ``os.system("cat " + v)`` produced ``data=tainted``, ``user input: v`` and
+    **risk critical/92** — a pure string literal indistinguishable in the
+    rendered output from a real ``request.args.get``, on eleven reporting
+    surfaces that phrase it as "user-controlled data reaches `os.system`".
+
+    So it now asks :func:`provenance.reads_user_input`, which is the structural
+    rule the verdict path already uses. One question, one answer: the graph
+    edges and the findings can no longer disagree about what a source is.
+    """
+    return reads_user_input(node)
+
+
+def _finding_for(
+    sink: Sink, assessment: str, call_name: str, rel: str, line_no: int
+) -> Finding | None:
+    """Build the finding for an assessment, or None when the call site is safe.
+
+    An ``unknown`` assessment gets its own rule id at reduced severity. Not being
+    able to see how a value was built is a different fact from knowing it is
+    dangerous, and a different fact again from knowing it is safe.
+    """
+    if assessment == VERDICT_SAFE:
+        return None
+    unsafe = assessment == VERDICT_UNSAFE
+    return Finding(
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}{UNVERIFIED_SUFFIX}",
+        severity=sink.severity if unsafe else SEVERITY_MEDIUM,
+        message=(
+            f"`{call_name}` {sink.plain}"
+            if unsafe
+            else f"`{call_name}` {sink.plain}, and CyberGraph could not confirm "
+                 f"the value is safe"
+        ),
+        file_path=rel,
+        line_start=line_no,
+        cwe=sink.cwe,
+        evidence=call_name,
+    )
+
+
+def _custom_sink(call_name: str, custom_sinks: tuple[str, ...]) -> Sink | None:
+    """Wrap a user-configured sink so it flows through the same predicate path.
+
+    Matched on the full dotted name, then on the bare final segment — the same
+    two-step ``lookup_sink`` applies to a registry entry marked ``bare``. A
+    configured ``audit_write`` has to match ``auditor.audit_write`` as well as
+    the unqualified call, because a receiver cannot be resolved without type
+    inference and the user naming a method has no other spelling available.
+    Without the fallback the call loses its ``REACHES_SINK`` edge too, so the
+    inventory a reviewer inspects goes quiet along with the finding.
+
+    This is not the narrowing ``sinks.py`` applied to ``open``. There, ``bare``
+    was wrong because the builtin's spellings are enumerable and matching any
+    receiver made ``webbrowser.open`` a path-traversal finding. Here the name
+    came from the project's own configuration, so a tail match is what was
+    asked for.
+    """
+    tail = call_name.rsplit(".", 1)[-1]
+    if call_name not in custom_sinks and tail not in custom_sinks:
+        return None
+    return Sink(
+        name=call_name,
+        rule_id="CG-CUSTOM-SINK",
+        cwe="CWE-20",
+        severity=SEVERITY_MEDIUM,
+        plain="receives this value, and your project marked it sensitive",
+        vuln_class="custom",
+    )
 
 
 def _is_secret_exposure(call_name: str, call_text: str, secret_markers: tuple[str, ...]) -> bool:

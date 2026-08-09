@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi import Depends, FastAPI, Request
 
 app = FastAPI()
@@ -13,7 +15,9 @@ def validate_name(name: str) -> str:
 
 
 def raw_sql(query: str) -> list[dict]:
-    return [{"query": query}]
+    # A real sink, so the example demonstrates something. It used to be a stub
+    # that only got reported because the old matcher saw "raw" in "raw_sql".
+    return sqlite3.connect("app.db").execute(query).fetchall()
 
 
 @app.get("/users")

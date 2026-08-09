@@ -1,0 +1,9 @@
+{
+  "label": "unknown",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 1,
+  "note": "Tainted but OPAQUE construction: an abstention, not a verdict either way."
+}

@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cybergraph.config import load_config
 from cybergraph.graph import GraphStore
+from cybergraph.suppressions import config_conceals
 
 
 def fingerprint(rule_id: str, tool: str, file_path: str, message: str) -> str:
@@ -26,6 +28,10 @@ class ScanResult:
     fixed: list[str] = field(default_factory=list)
     regressed: list[str] = field(default_factory=list)
     persisting: list[str] = field(default_factory=list)
+    #: Findings that vanished from this scan because ``.cybergraph.toml`` now
+    #: hides them. Configuration, not a code change; none of it is a fix, so
+    #: they are held out of ``fixed`` and their history rows stay ``open``.
+    hidden_by_config: list[str] = field(default_factory=list)
 
 
 def _git_head(repo_root: Path) -> tuple[str, str]:
@@ -82,10 +88,12 @@ def record_scan(
                               persisting=sorted(current_set))
 
         counts = store.counts()
+        config = load_config(repo_root)
         new: list[str] = []
         regressed: list[str] = []
         persisting: list[str] = []
         fixed: list[str] = []
+        hidden_by_config: list[str] = []
         with conn:
             cur = conn.execute(
                 "INSERT INTO scans(ts, git_sha, git_branch, node_count, edge_count, "
@@ -127,17 +135,37 @@ def record_scan(
                         "last_seen_scan = ?, last_seen_ts = ? WHERE fingerprint = ?",
                         (r["severity"], r["line_start"], scan_id, ts, fp))
                     persisting.append(fp)
+            # A finding is absent from this scan for one of two reasons, and
+            # they are not interchangeable. `build_graph` applies
+            # `filter_suppressed_findings`, so adding `[suppressions] rules`,
+            # `[suppressions] paths` or `[ignore] paths` empties this table of
+            # findings whose code never changed. Measured before this check: a
+            # vulnerable file byte-identical across two scans, with only
+            # `.cybergraph.toml` added between them, came back as
+            # `fixed=[...]` and printed `-1 fixed` -- a live vulnerability
+            # reported as repaired, which is the one error that makes a human
+            # approve a bad change. `config_conceals` is the same helper the
+            # PR review asks, so the two surfaces cannot drift apart.
             for row in conn.execute(
-                "SELECT fingerprint FROM finding_history WHERE status = 'open'").fetchall():
+                "SELECT fingerprint, rule_id, file_path FROM finding_history "
+                "WHERE status = 'open'").fetchall():
                 fp = row["fingerprint"]
-                if fp not in current_set:
-                    conn.execute(
-                        "UPDATE finding_history SET status='fixed', fixed_ts = ? "
-                        "WHERE fingerprint = ?", (ts, fp))
-                    fixed.append(fp)
+                if fp in current_set:
+                    continue
+                if config_conceals(row["rule_id"], row["file_path"], config) is not None:
+                    # Still open: it is hidden, not fixed. Left `open` so that
+                    # dropping the suppression later reads as persisting rather
+                    # than as a regression it never was.
+                    hidden_by_config.append(fp)
+                    continue
+                conn.execute(
+                    "UPDATE finding_history SET status='fixed', fixed_ts = ? "
+                    "WHERE fingerprint = ?", (ts, fp))
+                fixed.append(fp)
         return ScanResult(scan_id, no_change=False, is_first=is_first,
                           new=sorted(new), fixed=sorted(fixed),
-                          regressed=sorted(regressed), persisting=sorted(persisting))
+                          regressed=sorted(regressed), persisting=sorted(persisting),
+                          hidden_by_config=sorted(hidden_by_config))
     finally:
         store.close()
 
@@ -149,11 +177,23 @@ class Delta:
     fixed: list[str] = field(default_factory=list)
     regressed: list[str] = field(default_factory=list)
     persisting: list[str] = field(default_factory=list)
+    #: Findings the newer scan lost to ``.cybergraph.toml`` rather than to a
+    #: code change. Held out of ``fixed`` for the same reason `ScanResult` holds
+    #: them out: hidden is not fixed.
+    hidden_by_config: list[str] = field(default_factory=list)
 
 
 def scan_delta(repo_root: Path) -> Delta:
-    """Change between the two most recent scans (from stored membership)."""
-    store = GraphStore.open_for_repo(Path(repo_root).resolve())
+    """Change between the two most recent scans (from stored membership).
+
+    ``fixed`` is derived from set membership alone, so it inherits the same
+    hazard ``record_scan`` has: a suppression added between the two scans makes
+    the finding vanish from the newer one without a line of code changing. The
+    disappearance is put to ``config_conceals`` before it is allowed to count as
+    a fix.
+    """
+    repo_root = Path(repo_root).resolve()
+    store = GraphStore.open_for_repo(repo_root)
     conn = store.conn
     try:
         scans = conn.execute("SELECT id FROM scans ORDER BY id DESC LIMIT 2").fetchall()
@@ -168,7 +208,17 @@ def scan_delta(repo_root: Path) -> Delta:
         prev_set = {r["fingerprint"] for r in conn.execute(
             "SELECT fingerprint FROM scan_findings WHERE scan_id = ?", (prev,))}
         appeared = curr_set - prev_set
-        fixed = sorted(prev_set - curr_set)
+        config = load_config(repo_root)
+        fixed: list[str] = []
+        hidden_by_config: list[str] = []
+        for fp in sorted(prev_set - curr_set):
+            row = conn.execute(
+                "SELECT rule_id, file_path FROM finding_history WHERE fingerprint = ?", (fp,)
+            ).fetchone()
+            concealed = row is not None and config_conceals(
+                row["rule_id"], row["file_path"], config
+            ) is not None
+            (hidden_by_config if concealed else fixed).append(fp)
         persisting = sorted(curr_set & prev_set)
         # appeared before this scan's predecessor -> regression; else genuinely new.
         regressed, new = [], []
@@ -181,7 +231,8 @@ def scan_delta(repo_root: Path) -> Delta:
             else:
                 new.append(fp)
         return Delta(
-            is_first=False, new=new, fixed=fixed, regressed=regressed, persisting=persisting
+            is_first=False, new=new, fixed=fixed, regressed=regressed, persisting=persisting,
+            hidden_by_config=hidden_by_config,
         )
     finally:
         store.close()
@@ -198,7 +249,12 @@ def list_scans(repo_root: Path, limit: int = 20) -> list[dict]:
 
 
 def format_delta_line(d: Delta) -> str:
-    return f"+{len(d.new)} new, -{len(d.fixed)} fixed, {len(d.regressed)} regressed"
+    line = f"+{len(d.new)} new, -{len(d.fixed)} fixed, {len(d.regressed)} regressed"
+    if d.hidden_by_config:
+        # Stated on its own terms, and never folded into the fixed count: the
+        # code is unchanged and the vulnerability is still there.
+        line += f", {len(d.hidden_by_config)} hidden by config (hidden, not fixed)"
+    return line
 
 
 def format_history(rows: list[dict], delta: Delta) -> str:

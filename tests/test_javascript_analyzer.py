@@ -118,3 +118,74 @@ def test_javascript_analyzer_emits_calls_for_named_express_handlers(tmp_path: Pa
         and edge.target == "app.js::serviceQuery"
         for edge in resolved
     )
+
+
+def _input_nodes(nodes: list) -> list:
+    return [n for n in nodes if n.kind == "Input"]
+
+
+def test_javascript_marker_in_comment_or_string_is_not_a_source(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.js"
+    app.write_text(
+        "function h() {\n"
+        "  const note = 'see req.body docs';  // req.query note\n"
+        "  const t = `plain req.params text`;\n"
+        "  return note + t;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_javascript_file(app, repo)
+    assert _input_nodes(nodes) == []
+    assert not any(edge.kind == "READS_INPUT" for edge in edges)
+
+
+def test_javascript_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.js"
+    app.write_text(
+        "function handler(req) {\n"
+        "  const name = req.query.name;\n"
+        "  return db.query(name);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, findings = analyze_javascript_file(app, repo)
+    assert _input_nodes(nodes), "genuine req.query must create an Input source"
+    assert any(edge.kind == "READS_INPUT" for edge in edges)
+    assert any(edge.kind == "TAINTS" for edge in edges)
+    assert any(f.rule_id == "CG-JS-SINK-CALL" for f in findings)
+
+
+def test_javascript_template_interpolation_source_is_detected(tmp_path: Path) -> None:
+    # A real source inside a `${...}` hole must survive stripping.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.js"
+    app.write_text(
+        "function handler(req) {\n"
+        "  const q = `name=${req.query.name}`;\n"
+        "  return q;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, _edges, _findings = analyze_javascript_file(app, repo)
+    assert _input_nodes(nodes)
+
+
+def test_javascript_genuine_source_beside_string_marker_still_detected(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    app = repo / "app.js"
+    app.write_text(
+        "function handler(req) {\n"
+        "  const name = req.query.name + ' see req.body here';\n"
+        "  return db.query(name);\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    nodes, edges, _findings = analyze_javascript_file(app, repo)
+    assert _input_nodes(nodes)
+    assert any(edge.kind == "TAINTS" for edge in edges)

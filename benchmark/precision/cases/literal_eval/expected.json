@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "code",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "ast.literal_eval is not in the sink registry, so no predicate runs here: this case guards the registry against a substring match on `eval`."
+}

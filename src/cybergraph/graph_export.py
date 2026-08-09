@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from cybergraph.config import load_config
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.investigate import collect_top_risks
@@ -138,10 +139,21 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
                 "rationale": path.risk.rationale,
             } if path.risk else None,
         }
-        for path in find_attack_paths(repo_root, limit=50)
+        # Exploration surface: the exported document is a graph artifact, so it
+        # keeps suppressed paths for reviewers who need the real code path.
+        for path in find_attack_paths(repo_root, limit=50, apply_suppressions=False)
     ]
     layers = [asdict(layer) for layer in summarize_layers(repo_root)]
     top_risks = [asdict(risk) for risk in collect_top_risks(repo_root, limit=10)]
+    # This document deliberately carries two suppression policies: ``attack_paths``
+    # is the raw graph artifact and keeps everything, ``top_risks`` is a ranking
+    # and hides suppressed entries. Record that, so a consumer diffing the two
+    # keys can tell suppression from a scoring threshold.
+    suppression = {
+        "paths": list(load_config(repo_root).suppressed_paths),
+        "attack_paths_suppressed": False,
+        "top_risks_suppressed": True,
+    }
 
     node_list = _cap_nodes(list(nodes.values()), edges, max_nodes)
     kept = {node["id"] for node in node_list}
@@ -154,6 +166,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
         "layers": layers,
         "attack_paths": attack_paths,
         "top_risks": top_risks,
+        "suppression": suppression,
         "truncated": len(node_list) < len(nodes),
         # Pre-cap size of the exported graph. This is larger than
         # ``counts["nodes"]`` because the export synthesises nodes for edge

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from cybergraph.analysis._source_text import strip_code
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -85,6 +86,10 @@ def analyze_javascript_file(
     source = path.read_text(encoding="utf-8", errors="ignore")
     rel = path.relative_to(repo_root).as_posix()
     lines = source.splitlines()
+    # Code view with comments and string literals blanked (template interpolation
+    # holes kept as code), aligned 1:1 with `lines`, so an input marker in a
+    # comment or a string cannot fabricate a taint source.
+    code_lines = strip_code(source, "javascript")
     nodes: list[Node] = [Node("File", rel, rel, rel, 1, len(lines), {"language": _language(path)})]
     edges: list[Edge] = []
     findings: list[Finding] = []
@@ -141,7 +146,8 @@ def analyze_javascript_file(
 
         sink_source = current_function or rel
         tainted = tainted_by_function.setdefault(sink_source, {})
-        input_key = _line_input_source(sink_source, line, rel, line_no, nodes, edges)
+        code_line = code_lines[line_no - 1] if line_no - 1 < len(code_lines) else line
+        input_key = _line_input_source(sink_source, code_line, rel, line_no, nodes, edges)
         source_key = input_key or _tainted_source_for_line(line, tainted)
         if source_key:
             assigned = _assigned_name(line)

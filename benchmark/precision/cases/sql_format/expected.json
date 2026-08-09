@@ -1,0 +1,15 @@
+{
+  "label": "unsafe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 13,
+      "rule": "CG-SQL-EXEC"
+    }
+  ],
+  "abstentions": 0,
+  "note": "str.format is string building, not parameter binding."
+}

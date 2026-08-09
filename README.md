@@ -151,20 +151,24 @@ unchanged.
 Suppress accepted findings:
 
 ```python
-def test_fixture():
-    # cybergraph: ignore CG-SINK-CALL accepted test-only query
-    return db.execute("select 1")
+def test_fixture(name):
+    # cybergraph: ignore CG-SQL-EXEC accepted test-only query
+    return db.execute("select * from users where name = '" + name + "'")
 ```
 
 Or configure repository-level suppressions:
 
 ```toml
 [suppressions]
-rules = ["CG-SINK-CALL"]
+rules = ["CG-SQL-EXEC"]
 paths = ["legacy/**"]
 ```
 
+Naming a rule also covers the `-UNVERIFIED` variant CyberGraph reports when it can see a value reach a sink but cannot confirm how the value was built — accepting `CG-SQL-EXEC` accepts `CG-SQL-EXEC-UNVERIFIED` on the same line or in the same repository. The reverse is deliberately not true: naming `CG-SQL-EXEC-UNVERIFIED` accepts only the unconfirmed case, and a confirmed `CG-SQL-EXEC` is still reported.
+
 Suppressions hide findings, but the graph still keeps edges such as `REACHES_SINK` so reviewers can inspect the real code path.
+
+**New:** `paths` now also hides matching entrypoint-to-sink *attack paths* from the ranked, actionable surfaces — `cybergraph attack-paths`, top risks, `analyze`, the PR review, the cloud and Strix scopes. Attack paths were previously never suppressed anywhere, so this is a change in what those commands print. A path is hidden only when **every** file it touches is suppressed, so a route crossing from suppressed code into live code is still reported. The exploration and evidence surfaces still show suppressed paths — the JSON graph export (which records the policy under its `suppression` key), the HTML report, the MCP `explain_attack_path_tool`, grounded answers, and LLM triage slices — and a suppressed path never consumes a slot a real one needs on any of them. Each surface caps how many paths it traverses; suppressed paths are collected separately and fill only what the real ones leave, so accepted fixture noise cannot push the genuine attack paths off the end of the report, the exported graph or the evidence an LLM is grounded on. A PR review scans both sides of the diff under the *current* configuration — `[suppressions] paths`, `[ignore] paths` and `[security] sinks` alike — so changing any of them can never appear as an added or removed attack path. It is reported as a configuration change instead, alongside a count of the reachable risks the suppressions hide (hidden, not fixed) and the changed files `[ignore] paths` kept out of the analysis entirely (not analysed, not fixed). A PR that genuinely removes a vulnerable line is still reported as `removed`, and one that genuinely introduces a sink is still reported as `added`. Scan history holds the same line: a finding that disappears because `[suppressions] rules`, `[suppressions] paths` or `[ignore] paths` now covers it is counted as *hidden by config (hidden, not fixed)* rather than as fixed, on `cybergraph history`, on the `analyze` delta line and in the HTML report's delta strip. Its history row stays open, so dropping the suppression later reads as persisting rather than as a regression. A finding that disappears because the code changed is still fixed.
 
 ## Example questions
 

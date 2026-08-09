@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "command",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "The same lookalike at critical severity: a config member reaching shell=True."
+}

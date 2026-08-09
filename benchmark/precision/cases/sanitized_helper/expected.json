@@ -1,0 +1,17 @@
+{
+  "label": "safe",
+  "vuln_class": "interprocedural",
+  "known_gap": false,
+  "scoring": "attack_paths",
+  "findings": [],
+  "abstentions": 0,
+  "note": "The entrypoint-to-sink path exists as inventory but crosses a sanitiser, so no *unsanitized* path is reported. Scored on attack paths, per the same reasoning as `cross_function`. The sanitised inventory is scored too -- through `clean`, not through tp/fp/fn, since counting inventory as a detection would make this safe case a false positive by construction -- so fabricating taint on it is visible to `interprocedural:case_mismatch_rate`.",
+  "paths": [],
+  "sanitized_paths": [
+    {
+      "sink": "open",
+      "data_reachable": false,
+      "risk": "medium"
+    }
+  ]
+}

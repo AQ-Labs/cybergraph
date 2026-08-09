@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "The construction of a module-level name is OPAQUE to a per-function walk; the absence of taint is what makes it safe, not the absence of a literal."
+}

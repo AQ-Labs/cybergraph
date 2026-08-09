@@ -1,0 +1,11 @@
+{
+  "label": "unsafe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {"file": "app.py", "line": 20, "rule": "CG-SQL-EXEC"}
+  ],
+  "abstentions": 0,
+  "note": "An attribute-chain source with no local to bind it: the recall side of the anchored source rule."
+}

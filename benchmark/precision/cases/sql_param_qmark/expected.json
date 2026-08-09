@@ -1,0 +1,9 @@
+{
+  "label": "safe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [],
+  "abstentions": 0,
+  "note": "Only the query *text* is the injection vector; bound values are the safe mechanism."
+}

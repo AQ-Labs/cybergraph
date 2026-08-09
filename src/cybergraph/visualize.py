@@ -66,7 +66,9 @@ def generate_html_report(
         store.close()
 
     layers = summarize_layers(repo_root)
-    attack_paths = find_attack_paths(repo_root, limit=25)
+    # Exploration surface: the HTML report embeds paths as a graph artifact, so
+    # suppressed paths stay visible for reviewers inspecting the real code path.
+    attack_paths = find_attack_paths(repo_root, limit=25, apply_suppressions=False)
     graph_data = build_graph_data(repo_root, max_nodes=max_nodes)
     if with_source:
         from cybergraph.report_source import attach_source_snippets
@@ -426,12 +428,20 @@ def _delta_strip(delta, prev_ts: str | None) -> str:
         return ""
     when = (prev_ts or "")[:19]
     since = f"Since scan on {html.escape(when)}" if when else "Since last scan"
+    # `hidden by config` is rendered beside `fixed`, never inside it. A banner
+    # that folds a suppressed vulnerability into the fixed count is the most
+    # widely-read surface on which a live risk reads as repaired.
+    hidden = len(getattr(delta, "hidden_by_config", ()) or ())
+    hidden_html = (
+        f" · <strong>{hidden} hidden by config</strong> (hidden, not fixed)" if hidden else ""
+    )
     return (
         "<div class='delta-strip'>"
         f"{since}: <strong>{len(delta.new)} new</strong> · "
         f"<strong>{len(delta.regressed)} regressed</strong> · "
         f"<strong>{len(delta.fixed)} fixed</strong> · "
         f"<strong>{len(delta.persisting)} persisting</strong>"
+        f"{hidden_html}"
         "</div>"
     )
 

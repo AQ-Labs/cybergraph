@@ -1,0 +1,13 @@
+{
+  "label": "unsafe",
+  "vuln_class": "sql",
+  "known_gap": false,
+  "scoring": "findings",
+  "findings": [
+    {"file": "app.py", "line": 18, "rule": "CG-SQL-EXEC"},
+    {"file": "app.py", "line": 25, "rule": "CG-SQL-EXEC"},
+    {"file": "app.py", "line": 32, "rule": "CG-SQL-EXEC"}
+  ],
+  "abstentions": 0,
+  "note": "The recall side of the source rule, in three shapes `sql_request_attribute` cannot see: a renamed request object, a distinctive inbound-API member on an unrecognisable receiver, and the bare WSGI environ. Narrowing the rule fails open, so each of these is a silent miss rather than an abstention."
+}

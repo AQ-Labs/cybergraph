@@ -54,5 +54,8 @@ def test_mcp_server_registers_grounded_tool() -> None:
     from cybergraph import mcp_server
 
     assert mcp_server.mcp is not None
-    # The grounded answer tool function is defined at module import.
-    assert hasattr(mcp_server, "grounded_security_answer_tool") or mcp_server.mcp is not None
+    # The grounded answer tool function is defined at module import. The old
+    # right-hand disjunct restated the line above, so the whole assertion held
+    # even if the tool were never registered; pin the tool itself.
+    assert hasattr(mcp_server, "grounded_security_answer_tool")
+    assert callable(mcp_server.grounded_security_answer_tool)
