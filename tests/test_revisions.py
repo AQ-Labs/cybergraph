@@ -146,9 +146,20 @@ def test_cybergraph_state_dir_is_never_a_changed_file(tmp_path: Path):
     """The tool must never feed itself its own cache as the user's diff.
 
     No `.gitignore` excludes `.cybergraph/` here -- the exclusion must be
-    unconditional, not dependent on the target repo's gitignore."""
+    unconditional, not dependent on the target repo's gitignore.
+
+    The exclusion must match by path *component*, not by substring: a real
+    changed file that merely starts with or contains ``cybergraph`` in its
+    name -- ``cybergraph_utils.py``, ``.cybergraphrc`` -- is not under the
+    `.cybergraph/` directory and must still be kept. A substring match
+    (``"cybergraph" in path``) would drop these -- a fail-open that stops
+    checking a real change, including any `src/cybergraph/*.py` change on
+    this tool's own repo -- while still passing a check that only looks for
+    the `.cybergraph/` paths being absent."""
     repo = _repo(tmp_path)
     (repo / "new_admin_endpoint.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "cybergraph_utils.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / ".cybergraphrc").write_text("x = 1\n", encoding="utf-8")
     (repo / ".cybergraph").mkdir()
     (repo / ".cybergraph" / "graph.db").write_text("", encoding="utf-8")
     base_dir = repo / ".cybergraph" / "base" / "deadbeef"
@@ -156,9 +167,14 @@ def test_cybergraph_state_dir_is_never_a_changed_file(tmp_path: Path):
     (base_dir / "app.py").write_text("x = 1\n", encoding="utf-8")
 
     revisions = resolve_revisions(repo)
-    assert revisions.changed_files == ("new_admin_endpoint.py",)
+    assert revisions.changed_files == (
+        ".cybergraphrc",
+        "cybergraph_utils.py",
+        "new_admin_endpoint.py",
+    )
     for path in revisions.changed_files:
-        assert not path.startswith(".cybergraph")
+        assert not path.startswith(".cybergraph/")
+        assert path != ".cybergraph"
 
 
 def test_clean_tree_on_main_with_no_base_is_not_a_failure(tmp_path: Path):
