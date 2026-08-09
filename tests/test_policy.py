@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from cybergraph.build import build_graph
 from cybergraph.security.policy import KIND_REQUIRE_AUTH, POLICY_FILE, load_policy
 
 GOOD = """
@@ -80,3 +81,76 @@ def test_flat_parser_shape_is_normalised():
     nested = {"rule": {"a": {"kind": "require_auth", "patterns": ["/x"]}}}
     flat = {"rule.a": {"kind": "require_auth", "patterns": ["/x"]}}
     assert _rule_sections(nested) == _rule_sections(flat)
+
+
+UNGUARDED = '''
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/admin/export")
+def admin_export():
+    return {"ok": True}
+'''
+
+GUARDED = '''
+from fastapi import FastAPI, Depends
+app = FastAPI()
+
+def require_login():
+    return True
+
+@app.get("/admin/export")
+def admin_export(user=Depends(require_login)):
+    return {"ok": True}
+'''
+
+AUTH_POLICY = (
+    'version = 1\n\n[rule.admin]\nkind = "require_auth"\n'
+    'patterns = ["/admin/*"]\nbecause = "Admin pages are not public."\n'
+)
+
+
+def _setup(tmp_path: Path, source: str, policy_text: str = AUTH_POLICY):
+    (tmp_path / "app.py").write_text(source, encoding="utf-8")
+    (tmp_path / POLICY_FILE).write_text(policy_text, encoding="utf-8")
+    build_graph(tmp_path)
+    return load_policy(tmp_path)
+
+
+def test_unguarded_route_is_unprotected(tmp_path: Path):
+    from cybergraph.security.policy import evaluate_policy
+
+    result = evaluate_policy(tmp_path, _setup(tmp_path, UNGUARDED))
+    assert len(result.unprotected) == 1
+    assert result.unprotected[0].rule_id == "admin"
+    assert result.unprotected[0].because == "Admin pages are not public."
+
+
+def test_guarded_route_is_constrained_but_protected(tmp_path: Path):
+    from cybergraph.security.policy import evaluate_policy
+
+    result = evaluate_policy(tmp_path, _setup(tmp_path, GUARDED))
+    assert result.unprotected == ()
+    assert len(result.constrained) == 1
+
+
+def test_entities_are_keyed_by_function_not_route(tmp_path: Path):
+    """Function keys survive a route rename; route strings do not."""
+    from cybergraph.security.policy import evaluate_policy
+
+    result = evaluate_policy(tmp_path, _setup(tmp_path, GUARDED))
+    key = next(iter(result.entities))
+    assert "admin_export" in key
+    assert result.entities[key].route == "/admin/export"
+    assert result.entities[key].guarded is True
+
+
+def test_empty_policy_constrains_nothing(tmp_path: Path):
+    from cybergraph.security.policy import Policy, evaluate_policy
+
+    (tmp_path / "app.py").write_text(UNGUARDED, encoding="utf-8")
+    build_graph(tmp_path)
+    result = evaluate_policy(tmp_path, Policy())
+    assert result.constrained == frozenset()
+    assert result.unprotected == ()
+    assert result.entities, "entities are recorded even with no policy"

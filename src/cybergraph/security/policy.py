@@ -17,11 +17,14 @@ evaluating it as authentication would be a lie inside the user's own file.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
 from cybergraph.config import _load_toml
+from cybergraph.graph import GraphStore
 
 POLICY_FILE = "cybergraph.policy.toml"
 SUPPORTED_VERSION = 1
@@ -136,3 +139,110 @@ def _as_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+@dataclass(frozen=True)
+class ProtectedEntity:
+    key: str
+    route: str
+    file_path: str
+    line: int
+    guarded: bool
+
+
+@dataclass(frozen=True)
+class PolicyViolation:
+    rule_id: str
+    subject: str
+    entity_key: str
+    file_path: str
+    line: int
+    because: str = ""
+
+
+@dataclass(frozen=True)
+class ProtectedSet:
+    """What a policy constrains, keyed by function rather than by route string.
+
+    Route strings are not stable identity: renaming ``/admin/export`` to
+    ``/export`` while dropping the guard would look like a deletion plus an
+    unrelated new route. The function key survives the rename, so Task 3 can
+    tell the difference.
+    """
+
+    entities: dict[str, ProtectedEntity] = field(default_factory=dict)
+    constrained: frozenset[str] = frozenset()
+    unprotected: tuple[PolicyViolation, ...] = ()
+
+
+def evaluate_policy(repo_root: Path, policy: Policy) -> ProtectedSet:
+    """Resolve a policy against a graph into the set of entities it protects."""
+    repo_root = Path(repo_root).resolve()
+    store = GraphStore.open_for_repo(repo_root)
+    try:
+        rows = store.conn.execute(
+            """
+            SELECT e.target AS key, n.name AS name, n.file_path AS file_path,
+                   n.line_start AS line, n.properties AS properties
+            FROM edges e JOIN nodes n ON n.key = e.target
+            WHERE e.kind = 'EXPOSES_ENTRYPOINT'
+            """
+        ).fetchall()
+        guarded = {
+            row["source"]
+            for row in store.conn.execute("SELECT source FROM edges WHERE kind = 'GUARDS'")
+        }
+    finally:
+        store.close()
+
+    entities = {
+        row["key"]: ProtectedEntity(
+            key=row["key"],
+            route=_route_path(row["properties"]) or row["name"],
+            file_path=row["file_path"] or "",
+            line=row["line"] or 0,
+            guarded=row["key"] in guarded,
+        )
+        for row in rows
+    }
+
+    constrained: set[str] = set()
+    violations: list[PolicyViolation] = []
+    for rule in policy.rules:
+        for entity in entities.values():
+            if not entity.route:
+                continue
+            if not any(fnmatch(entity.route, pattern) for pattern in rule.patterns):
+                continue
+            constrained.add(entity.key)
+            if entity.guarded:
+                continue
+            violations.append(
+                PolicyViolation(
+                    rule_id=rule.id,
+                    subject=entity.route,
+                    entity_key=entity.key,
+                    file_path=entity.file_path,
+                    line=entity.line,
+                    because=rule.because,
+                )
+            )
+
+    return ProtectedSet(
+        entities=entities,
+        constrained=frozenset(constrained),
+        unprotected=tuple(sorted(violations, key=lambda v: (v.rule_id, v.subject))),
+    )
+
+
+def _route_path(raw: str | None) -> str:
+    if not raw:
+        return ""
+    try:
+        props = json.loads(raw)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(props, dict):
+        return ""
+    route = props.get("route")
+    return str(route.get("path", "")) if isinstance(route, dict) else ""
