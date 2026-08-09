@@ -23,7 +23,10 @@ def test_print_media_block_present_and_overrides_dark(tmp_path):
     idx = text.find("@media print")
     assert idx != -1
     block = text[idx:text.find("</style>", idx)]
-    assert "#cg-nav" in block or "#cg-theme-toggle" in block
+    # Both chrome selectors must be hidden in print; the `or` let either one
+    # go missing silently.
+    assert "#cg-nav" in block
+    assert "#cg-theme-toggle" in block
     assert "display: none" in block
     # Must override the persisted dark theme, not just bare :root:
     assert ':root[data-theme="dark"]' in block

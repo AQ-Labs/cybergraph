@@ -48,7 +48,11 @@ def test_posture_section_present():
     )
     assert 'id="posture"' in out
     assert "SQL injection" not in out  # posture links to the risk strip, doesn't duplicate cards
-    assert ">B<" in out or "badge-grade" in out  # grade badge present
+    # The old assertion's left disjunct (">B<") is false on this fixture (a
+    # risk score of 88 grades E, not B), and the right (`badge-grade`) is a
+    # static CSS class present for any grade, so `_grade` could return any
+    # letter. Pin the actual computed grade badge.
+    assert ">E<" in out, out
 
 
 def test_delta_hidden_first_scan():

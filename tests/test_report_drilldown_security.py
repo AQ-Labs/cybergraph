@@ -88,4 +88,7 @@ def test_dockerfile_secret_absent_from_generated_report(tmp_path: Path):
         encoding="utf-8"
     )
     assert "AKIAtotallyrealsecret123" not in html   # the whole point
-    assert "redacted" in html                        # redaction actually fired
+    # `"redacted": false` is emitted as a JSON key on *every* snippet line, so
+    # the bare token "redacted" was present even when nothing was redacted. The
+    # load-bearing check is that a line's redaction flag is actually `true`.
+    assert '"redacted": true' in html                # a redaction actually fired
