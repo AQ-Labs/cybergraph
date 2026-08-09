@@ -129,3 +129,45 @@ def test_import_vulnerabilities_tool_imports_records(tmp_path):
     result = mcp_server.import_vulnerabilities_tool(str(report), str(repo))
     assert result["vulnerabilities"] == 1
     assert "matched_dependencies" in result
+
+
+def test_check_change_tool_is_exposed():
+    pytest.importorskip("fastmcp")
+    from cybergraph import mcp_server
+
+    assert hasattr(mcp_server, "check_change_tool")
+
+
+def test_check_change_tool_and_cli_agree(tmp_path):
+    """Two surfaces over one orchestrator must never disagree."""
+    pytest.importorskip("fastmcp")
+    import contextlib
+    import io
+    import json as _json
+    import subprocess
+
+    from cybergraph import mcp_server
+    from cybergraph.cli import main
+
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "b"],
+        cwd=tmp_path, check=True,
+    )
+
+    tool_result = mcp_server.check_change_tool(str(tmp_path))
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        main(["check", str(tmp_path), "--json"])
+    assert tool_result == _json.loads(buffer.getvalue())
+
+
+def test_mcp_server_does_not_import_from_the_cli():
+    """C6: the MCP surface must not reach into CLI internals."""
+    from pathlib import Path
+
+    source = Path("src/cybergraph/mcp_server.py").read_text(encoding="utf-8")
+    assert "from .cli import" not in source
+    assert "from cybergraph.cli import" not in source
