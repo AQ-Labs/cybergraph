@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 
-from cybergraph.analysis.provenance import snapshot_call_sites
+from cybergraph.analysis.provenance import reads_user_input, snapshot_call_sites
 from cybergraph.graph import UNVERIFIED_SUFFIX, Edge, Finding, Node
 from cybergraph.security.ontology import (
     AUTH_KEYWORDS,
@@ -25,7 +25,6 @@ from cybergraph.security.ontology import (
     EDGE_USES_SECRET,
     SECRET_KEYWORDS,
     SINK_KEYWORDS,
-    SOURCE_KEYWORDS,
     VALIDATION_KEYWORDS,
 )
 from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE, assess_call
@@ -392,8 +391,26 @@ def _tainted_source_key(node: ast.AST | None, tainted: dict[str, str]) -> str:
 
 
 def _is_user_input_expr(node: ast.AST) -> bool:
-    text = ast.unparse(node).lower() if hasattr(ast, "unparse") else ""
-    return any(keyword in text for keyword in SOURCE_KEYWORDS)
+    """Does this expression introduce user data — the *same* question as everywhere else.
+
+    This was a substring scan of the unparsed text, and it was left in place on
+    the claim that it feeds only ``TAINTS``/``FLOWS_TO`` graph edges with no
+    verdict path. That claim was false. ``_ensure_input_node`` seeds
+    ``tainted[name]``, the ``ast.Call`` branch above turns that into an
+    ``EDGE_TAINTS`` edge, ``attack_paths._load_taints`` reads it back as
+    ``AttackPath.taint_sources``, and ``data_reachable`` then drives
+    ``_score_attack_path`` to ``reachability=1.0, exploitability=0.85``.
+    Measured on the previous revision: ``v = "body.txt"`` followed by
+    ``os.system("cat " + v)`` produced ``data=tainted``, ``user input: v`` and
+    **risk critical/92** — a pure string literal indistinguishable in the
+    rendered output from a real ``request.args.get``, on eleven reporting
+    surfaces that phrase it as "user-controlled data reaches `os.system`".
+
+    So it now asks :func:`provenance.reads_user_input`, which is the structural
+    rule the verdict path already uses. One question, one answer: the graph
+    edges and the findings can no longer disagree about what a source is.
+    """
+    return reads_user_input(node)
 
 
 def _finding_for(
