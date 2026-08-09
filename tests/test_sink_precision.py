@@ -623,3 +623,70 @@ def test_a_request_bound_to_a_local_still_introduces_taint(tmp_path: Path) -> No
     )
     _nodes, _edges, findings = _analyze(tmp_path, source)
     assert [f.rule_id for f in findings] == ["CG-SQL-EXEC"]
+
+
+# The lookalikes above are read *inline* at the sink, where `user_input_nodes`
+# governs and already rejects them. The regression lived one step earlier: a
+# lookalike bound to a *local* first, where `reads_user_input` introduces taint.
+# That path walked every descendant name, so the bare `req`/`webhook`/`request`
+# inside a chain `_is_source_chain` had already rejected re-tainted the local,
+# and the local then carried a critical finding to the sink. Each of these is a
+# chain the structural rule rejects — a client member, or a call to a
+# non-factory — so binding it must introduce no taint and reach the sink clean.
+LOOKALIKE_BOUND_TO_LOCAL = [
+    ("req.url",
+     "import os\n"
+     "def go(req):\n"
+     "    v = req.url\n"
+     '    os.system("curl " + v)\n'),
+    ("webhook.url",
+     "import os\n"
+     "def go(webhook):\n"
+     "    v = webhook.url\n"
+     '    os.system("curl " + v)\n'),
+    ("req.timeout",
+     "import os\n"
+     "def go(req):\n"
+     "    v = req.timeout\n"
+     '    os.system("curl " + str(v))\n'),
+    ("request-called",
+     "import os\n"
+     "def go(request):\n"
+     '    v = request("GET", "u")\n'
+     '    os.system("curl " + str(v))\n'),
+]
+
+
+@pytest.mark.parametrize("name,source", LOOKALIKE_BOUND_TO_LOCAL)
+def test_a_lookalike_bound_to_a_local_introduces_no_taint(
+    tmp_path: Path, name: str, source: str
+) -> None:
+    """A chain the structural rule rejects must not taint through a local.
+
+    `reads_user_input` scanned descendant names, so `req.url` bound to `v`
+    re-admitted `req` by its name and made `v` a critical `CG-CMD-EXEC` finding
+    at the sink — a strict regression on `v = req.url`, which reported at all
+    only after the name scan replaced the substring era. The introduction rule
+    now asks `_is_source_chain` of the expression, so the binding is clean.
+    """
+    _nodes, edges, findings = _analyze(tmp_path, source)
+    assert [f.rule_id for f in findings] == [], [f.rule_id for f in findings]
+    assert any(e.kind == "REACHES_SINK" for e in edges)
+
+
+def test_req_url_bound_to_a_local_is_specifically_not_critical(tmp_path: Path) -> None:
+    """The named regression, pinned at its severity.
+
+    `v = req.url` reported `high` before the fix round and `critical` after it,
+    a strict escalation on a false positive. It must now report nothing; in no
+    case may it be `critical`.
+    """
+    source = (
+        "import os\n"
+        "def go(req):\n"
+        "    v = req.url\n"
+        '    os.system("curl " + v)\n'
+    )
+    _nodes, _edges, findings = _analyze(tmp_path, source)
+    assert findings == [], [f.rule_id for f in findings]
+    assert all(f.severity != "critical" for f in findings)

@@ -156,6 +156,16 @@ _INPUT_CONTAINERS = frozenset({"environ", "scope", "message", "payload", "event"
 # ``os.environ["QUERY_STRING"]`` is a CGI request read while
 # ``os.environ["GIT"]`` is a path to a binary. Any ``HTTP_``-prefixed key counts
 # too — that is the CGI spelling of an inbound header.
+#
+# ``scope["path"]`` (NEW-5) is a genuine ASGI source — the request path, exactly
+# as inbound as the ``raw_path`` beside it — but ``"path"`` is deliberately
+# *excluded* here and left in the residual. This one set is shared across every
+# ``_INPUT_CONTAINERS`` name, ``environ`` included, and ``os.environ["PATH"]`` is
+# the ubiquitous process executable-search path, not a request field. Admitting
+# ``"path"`` would turn that lookup into a critical finding on a huge fraction of
+# real code — a loud false positive — to recover one ASGI spelling already
+# reachable through ``raw_path``. The collision is the same one that keeps the
+# key list to request-distinctive names; ``path`` fails that test, so it stays out.
 _CONTAINER_KEYS = frozenset({
     "query_string", "request_method", "request_uri", "path_info", "raw_path",
     "content_type", "content_length", "remote_addr", "remote_user",
@@ -393,32 +403,71 @@ def _is_source_chain(node: ast.AST) -> bool:
     return False
 
 
+def _chain_base_names(node: ast.AST) -> set[int]:
+    """``id()`` of every ``ast.Name`` that is the *base* of a larger chain.
+
+    A name that is the receiver of an attribute (``req`` in ``req.url``), the
+    value of a subscript (``argv`` in ``argv[1]``) or the callee of a call
+    (``request`` in ``request("GET", u)``) is not a value in its own right: the
+    whole chain it roots is what :func:`_is_source_chain` judges, as one
+    expression. Reading such a base name on its own — as the substring era did
+    — re-admits ``req.url`` and ``request("GET", u)`` by their base after the
+    structural rule already rejected the chain, which is exactly the regression
+    the bare-name rule below must not reintroduce.
+    """
+    bases: set[int] = set()
+    for parent in ast.walk(node):
+        if isinstance(parent, ast.Attribute | ast.Subscript):
+            if isinstance(parent.value, ast.Name):
+                bases.add(id(parent.value))
+        elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name):
+            bases.add(id(parent.func))
+    return bases
+
+
 def reads_user_input(node: ast.AST | None) -> bool:
     """Does this expression read anything the user controls?
 
     Consulted to **introduce** taint at a binding, in every binding form this
     module understands — assignment, ``for`` target, walrus, ``+=``,
     comprehension generator, ``with ... as``. It asks the same structural
-    question as :func:`user_input_nodes` of every sub-expression, so widening
-    *where* taint is introduced still cannot quietly narrow *what* introduces
-    it.
+    question as :func:`user_input_nodes`, on the expressions themselves rather
+    than on the names buried inside them, so widening *where* taint is
+    introduced still cannot quietly narrow *what* introduces it.
 
     It was a substring scan of the unparsed text, which read
     ``for v in ["body.txt"]`` as a request because the string literal contains
     ``body``. Text carries no structure, so the scan could not tell a member
     named ``input_path`` from a read of user input, nor a constant from either.
+    A later revision replaced the scan but kept its shape — walk the subtree and
+    ask each descendant ``ast.Name`` whether it *spells* a request object — and
+    that is a false positive in the opposite direction: ``req.url``,
+    ``webhook.url``, ``req.timeout`` and ``request("GET", u)`` are chains
+    :func:`_is_source_chain` deliberately rejects (a client member, or a call to
+    a non-factory), yet each buries a bare ``req``/``webhook``/``request`` the
+    name scan then accepted, tainting the whole expression anyway. Introduction
+    and rejection contradicted each other on the same chain.
 
-    One deliberate difference from :func:`user_input_nodes`: a bare ``ast.Name``
-    counts here when it is *exactly* a request object. ``r = request`` binds
-    user data, and the flow-sensitive map cannot say so because ``request`` is
-    a module global it never bound. At a sink argument that case is already
-    answered by the map, which is why the exclusion holds there.
+    So the question is asked structurally, of each expression: a non-name node
+    counts exactly when :func:`_is_source_chain` says it names a read, the same
+    rule and the same verdict :func:`user_input_nodes` reaches.
+
+    One deliberate difference from :func:`user_input_nodes` remains: a bare
+    ``ast.Name`` counts here when it is *exactly* a request object or input
+    value. ``r = request`` binds user data, and the flow-sensitive map cannot
+    say so because ``request`` is a module global it never bound; at a sink
+    argument that case is already answered by the map, which is why the
+    exclusion holds there. That admission is confined to a name standing as a
+    value in its own right — a name serving as the *base* of a chain
+    (:func:`_chain_base_names`) is judged only as part of that chain, never on
+    its own, so the four lookalikes above stay rejected.
     """
     if node is None:
         return False
+    bases = _chain_base_names(node)
     for child in ast.walk(node):
         if isinstance(child, ast.Name):
-            if child.id.lower() in _INPUT_OBJECTS | _INPUT_VALUES:
+            if id(child) not in bases and child.id.lower() in _INPUT_OBJECTS | _INPUT_VALUES:
                 return True
             continue
         if _is_source_chain(child):
