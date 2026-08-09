@@ -321,6 +321,43 @@ MUTATIONS: list[Mutation] = [
             "tests/test_review.py::test_a_structural_path_becoming_data_reachable_is_worsened",
         ),
     ),
+    # -- D2: "I could not look" must never read as "nothing to see" ----------
+    Mutation(
+        id="D2-revisions-failure-empty-not-flagged",
+        disaster="D2",
+        file="cybergraph/security/revisions.py",
+        old='    ok, _ = _git(repo_root, "rev-parse", "--git-dir")\n'
+        "    if not ok:\n"
+        '        return Revisions(MODE_WORKTREE, "", "", (), failure="not a git repository")',
+        new='    ok, _ = _git(repo_root, "rev-parse", "--git-dir")\n'
+        "    if not ok:\n"
+        '        return Revisions(MODE_WORKTREE, "", "", ())',
+        tests=("tests/test_revisions.py::test_not_a_git_repository_is_a_failure",),
+        note="a git failure must produce a failure string, never a silent empty diff",
+    ),
+    # -- D1: a file that never parsed must not read as clean -----------------
+    Mutation(
+        id="D1-coverage-failed-as-analyzed",
+        disaster="D1",
+        file="cybergraph/security/coverage.py",
+        old='            results.append(FileCoverage(file, STATUS_FAILED, '
+        '"the file could not be read"))',
+        new='            results.append(FileCoverage(file, STATUS_ANALYZED, '
+        '"the file could not be read"))',
+        tests=("tests/test_coverage.py::test_unparseable_file_is_failed_not_clean",),
+        note="a parse failure must be `failed`, not `analyzed`",
+    ),
+    # -- D1: general language blindness must stay represented ----------------
+    Mutation(
+        id="D1-capability-drops-source-support",
+        disaster="D1",
+        file="cybergraph/security/capability.py",
+        old='    Capability("source_analysis_support",\n'
+        '               "Languages CyberGraph can read", SOURCE_GLOBS, True),\n',
+        new="",
+        tests=("tests/test_capability.py::test_go_change_is_caught_by_general_source_support",),
+        note="removing source_analysis_support makes a Go-only change match nothing",
+    ),
 ]
 
 

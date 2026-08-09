@@ -308,6 +308,17 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("repo", nargs="?", default=".", help="Repository root")
     history.add_argument("--limit", type=int, default=20, help="Maximum scans to list")
 
+    coverage = sub.add_parser(
+        "coverage",
+        help="Report which changed files were analyzed and which checks are blind",
+    )
+    coverage.add_argument("--base", default=None, help="Git base ref for comparison")
+    coverage.add_argument(
+        "--mode", default=None, choices=["worktree", "merge_base", "range"],
+        help="Comparison mode; inferred when omitted",
+    )
+    coverage.add_argument("--repo", default=".", help="Repository root")
+
     quickstart = sub.add_parser(
         "quickstart", help="Zero-to-report: init, build, analyze, and open the HTML report"
     )
@@ -653,6 +664,15 @@ def main(argv: list[str] | None = None) -> int:
 
         rows = list_scans(repo, limit=args.limit)
         print(format_history(rows, scan_delta(repo)))
+    elif args.command == "coverage":
+        from .security.coverage_report import build_coverage_report, format_coverage_report
+
+        report = build_coverage_report(
+            Path(args.repo).resolve(), base=args.base, mode=args.mode
+        )
+        print(format_coverage_report(report))
+        if not report.established:
+            return 1
     elif args.command == "quickstart":
         import os
         import sys
