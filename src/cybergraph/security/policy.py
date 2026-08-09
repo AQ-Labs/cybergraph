@@ -23,7 +23,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
-from cybergraph.config import _load_toml
+from cybergraph.config import CyberGraphConfig, _load_toml
 from cybergraph.graph import GraphStore
 
 POLICY_FILE = "cybergraph.policy.toml"
@@ -246,3 +246,115 @@ def _route_path(raw: str | None) -> str:
         return ""
     route = props.get("route")
     return str(route.get("path", "")) if isinstance(route, dict) else ""
+
+
+@dataclass(frozen=True)
+class PolicyChange:
+    kind: str
+    subject: str = ""
+    detail: str = ""
+
+
+def diff_policies(
+    base: Policy,
+    base_set: ProtectedSet,
+    current: Policy,
+    current_set: ProtectedSet,
+) -> tuple[PolicyChange, ...]:
+    """Classify how the security promises changed between two revisions.
+
+    Weakening is measured over the *resolved* constrained set, never the rule
+    text: narrowing ``/admin/*`` to ``/admin/legacy/*`` reads as a tightening to
+    any string comparison and protects strictly less.
+
+    Entities are keyed by function, and only those present in both graphs are
+    compared. A route deleted outright is not a weakening; a route *renamed* out
+    of a rule's scope is, because the function survived.
+    """
+    changes: list[PolicyChange] = []
+
+    if base.exists and not current.exists:
+        return (
+            PolicyChange("policy_deleted", POLICY_FILE, "the security policy file was removed"),
+        )
+
+    for problem in current.problems:
+        changes.append(
+            PolicyChange("policy_problem", problem.rule_id or POLICY_FILE, problem.message)
+        )
+
+    if base.exists and current.version < base.version:
+        changes.append(
+            PolicyChange("version_downgraded", "",
+                         f"policy version {base.version} -> {current.version}")
+        )
+
+    base_ids = {rule.id for rule in base.rules}
+    current_ids = {rule.id for rule in current.rules}
+    for removed in sorted(base_ids - current_ids):
+        changes.append(PolicyChange("rule_removed", removed, "a declared promise was removed"))
+    for added in sorted(current_ids - base_ids):
+        changes.append(PolicyChange("promise_added", added, "a new promise was declared"))
+
+    surviving = set(base_set.entities) & set(current_set.entities)
+
+    # A function that was constrained and is no longer — the rename escape.
+    for key in sorted((base_set.constrained & surviving) - current_set.constrained):
+        before = base_set.entities[key]
+        after = current_set.entities[key]
+        kind = "protection_lost" if before.route != after.route else "coverage_shrunk"
+        detail = (
+            f"it moved from `{before.route}` to `{after.route}`"
+            if before.route != after.route
+            else "no rule covers it any more"
+        )
+        changes.append(PolicyChange(kind, before.route or key, detail))
+
+    # A function that stayed constrained but lost its guard.
+    base_broken = {v.entity_key for v in base_set.unprotected}
+    for violation in current_set.unprotected:
+        if violation.entity_key in base_broken:
+            continue  # pre-existing debt; not caused by this change
+        kind = (
+            "promise_unmet" if violation.rule_id in (current_ids - base_ids)
+            else "promise_broken"
+        )
+        changes.append(
+            PolicyChange(kind, violation.subject,
+                         violation.because or "this route has no login check")
+        )
+
+    return tuple(changes)
+
+
+def diff_configs(
+    base: CyberGraphConfig, current: CyberGraphConfig
+) -> tuple[PolicyChange, ...]:
+    """Flag project-config edits that weaken what CyberGraph checks.
+
+    The policy file is not the only referee: removing an auth marker silently
+    un-guards routes, and adding an ignored path hides a directory. Additions
+    that *strengthen* checking are not flagged.
+    """
+    changes: list[PolicyChange] = []
+    additions = (
+        (set(current.suppressed_rules) - set(base.suppressed_rules),
+         "suppression_added", "findings for this rule are now hidden"),
+        (set(current.suppressed_paths) - set(base.suppressed_paths),
+         "suppression_added", "findings under this path are now hidden"),
+        (set(current.ignored_paths) - set(base.ignored_paths),
+         "ignored_path_added", "this path is no longer analyzed"),
+    )
+    removals = (
+        (set(base.auth_markers) - set(current.auth_markers),
+         "auth_marker_removed",
+         "routes guarded by this are no longer recognised as protected"),
+        (set(base.validation_markers) - set(current.validation_markers),
+         "validation_marker_removed",
+         "this is no longer recognised as an input check"),
+        (set(base.custom_sinks) - set(current.custom_sinks),
+         "custom_sink_removed", "this call is no longer treated as sensitive"),
+    )
+    for items, kind, detail in (*additions, *removals):
+        changes.extend(PolicyChange(kind, subject, detail) for subject in sorted(items))
+    return tuple(changes)
