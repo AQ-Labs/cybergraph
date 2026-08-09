@@ -98,6 +98,59 @@ def test_recall_guard_keeps_findings_on_ungrounded_or_uncertain_verdicts(tmp_pat
     assert not any(r.suppressed for r in tp)
 
 
+class _RecordingClient(_Client):
+    """A ``_Client`` that keeps the prompt it was handed."""
+
+    def __init__(self, verdict, evidence=""):
+        super().__init__(verdict, evidence)
+        self.prompts: list[str] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.prompts.append(user)
+        return super().complete(system, user)
+
+
+def _suppressed_path_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "app"
+    (repo / "legacy").mkdir(parents=True)
+    (repo / "legacy" / "app.py").write_text(
+        "@app.route('/users')\n"
+        "def list_users(request):\n"
+        "    return db.execute('select ' + request.query['q'])\n",
+        encoding="utf-8",
+    )
+    (repo / ".cybergraph.toml").write_text(
+        '[suppressions]\npaths = ["legacy/**"]\n', encoding="utf-8"
+    )
+    build_graph(repo)
+    return repo
+
+
+def test_triage_keeps_a_finding_whose_only_attack_path_is_suppressed(tmp_path: Path):
+    """``triage_findings`` must gather its evidence with suppressions off.
+
+    Pins the call site itself, not just ``build_finding_slice``. Flip
+    ``apply_suppressions`` to ``True`` there and the suppressed path drops out
+    of the shared evidence set; the slice then falls back to its "absence of
+    evidence" sentence, a model quoting that sentence is *grounded* by the
+    faithfulness guard, and the finding is dropped. A suppression would have
+    become a verdict of safety -- for a sink that is still live.
+    """
+    repo = _suppressed_path_repo(tmp_path)
+    finding = Finding(rule_id="CG-SQL-EXEC", severity="medium", message="reaches sink",
+                      file_path="legacy/app.py", line_start=3,
+                      evidence="db.execute('select '+q)")
+    client = _RecordingClient(tri.VERDICT_FALSE_POSITIVE, "absence of evidence")
+
+    results = tri.triage_findings(repo, findings=[finding], client=client)
+
+    assert len(results) == 1
+    assert results[0].suppressed is False, "a suppressed path is still a real path"
+    # The mechanism: the model saw the path, so it never got the absence sentence.
+    assert "# Reachable attack paths through this file:" in client.prompts[0]
+    assert "absence of evidence" not in client.prompts[0]
+
+
 def test_slice_shows_suppressed_paths_and_never_claims_verified_absence(tmp_path: Path):
     """Attack paths are danger evidence in the prompt, so triage must fail open.
 
