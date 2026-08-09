@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from cybergraph.build import build_graph
-from cybergraph.config import load_config
+from cybergraph.config import _load_simple_toml, load_config
 from cybergraph.graph import GraphStore
 
 
@@ -102,6 +102,22 @@ def test_build_graph_suppresses_configured_finding_rules(tmp_path: Path) -> None
         store.close()
     assert finding_count == 0
     assert sink_edges == 1
+
+
+def test_flat_toml_fallback_keeps_top_level_keys(tmp_path: Path) -> None:
+    """A key written before any `[section]` header must not be dropped.
+
+    The Python < 3.11 fallback parser used to only start recording once it saw
+    a `[section]` line, silently discarding any top-level key that preceded
+    it (or a file with no sections at all).
+    """
+    toml_path = tmp_path / "sample.toml"
+    toml_path.write_text('version = 3\n[section]\nk = "v"\n', encoding="utf-8")
+
+    data = _load_simple_toml(toml_path)
+
+    assert data["version"] == "3"
+    assert data["section"] == {"k": "v"}
 
 
 def test_configured_rule_suppression_covers_the_unverified_variant(tmp_path: Path) -> None:
