@@ -71,9 +71,18 @@ def test_suppression_hides_the_finding_but_keeps_the_code_path(tmp_path: Path):
     assert find_attack_paths(tmp_path) == []
 
     # Exploration surface: the graph export still carries it.
-    exported = build_graph_data(tmp_path)["attack_paths"]
+    data = build_graph_data(tmp_path)
+    exported = data["attack_paths"]
     assert exported, "graph export must keep suppressed paths for reviewers"
     assert any("fixtures/app.py" in node for path in exported for node in path["nodes"])
+
+    # The document ships two suppression policies, so it must say so.
+    assert data["top_risks"] == []
+    assert data["suppression"] == {
+        "paths": ["fixtures/*"],
+        "attack_paths_suppressed": False,
+        "top_risks_suppressed": True,
+    }
 
     # And the underlying edge is untouched, exactly as the README promises.
     store = GraphStore.open_for_repo(tmp_path)
