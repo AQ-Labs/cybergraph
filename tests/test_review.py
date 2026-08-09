@@ -357,6 +357,65 @@ def test_a_capped_hidden_risk_scan_is_reported_as_a_lower_bound() -> None:
     assert "hidden, not fixed" in formatted
 
 
+def test_ranked_attack_path_count_applies_suppressions(tmp_path: Path) -> None:
+    """Pins ``review.py``'s ranked ``find_attack_paths(repo_root)`` call site.
+
+    The only attack path is in a suppressed directory and its file is changed by
+    the PR, so the ranked count must be zero. Flipping the call to
+    ``apply_suppressions=False`` resurrects it and reports a suppressed risk as a
+    changed attack path.
+    """
+    repo = _suppression_repo(tmp_path, tracked_config=True)
+
+    review = review_security_delta(repo, base="HEAD~1")
+
+    assert "shell=True" in (repo / "legacy" / "app.py").read_text(encoding="utf-8")
+    assert review.attack_path_count == 0, review.attack_path_count
+
+
+STRUCTURAL = (
+    "from fastapi import FastAPI\n"
+    "import subprocess\n"
+    "app = FastAPI()\n"
+    "\n"
+    '@app.get("/r0")\n'
+    "def run0(cmd: str):\n"
+    '    subprocess.run("echo hello", shell=True)\n'
+)
+
+
+def test_a_structural_path_becoming_data_reachable_is_worsened(tmp_path: Path) -> None:
+    """A structural path that becomes data-reachable is `worsened`, not unchanged.
+
+    Same entrypoint, same sink, same nodes -- so the signature is identical and
+    the delta is neither `added` nor `removed`. The base call passes a literal
+    argument (structural only); the head passes the route parameter (tainted).
+    `worsened` was asserted nowhere: dropping the classification made a risk
+    escalation read as `unchanged`, and the PR comment stopped flagging it.
+    """
+    repo = tmp_path / "worsened"
+    (repo / "legacy").mkdir(parents=True)
+    _git(repo, "init")
+    (repo / ".gitignore").write_text(".cybergraph/\n", encoding="utf-8")
+    (repo / "legacy" / "app.py").write_text(STRUCTURAL, encoding="utf-8")
+    _commit(repo, "base")
+    (repo / "legacy" / "app.py").write_text(VULNERABLE, encoding="utf-8")
+    _commit(repo, "pr")
+
+    review = review_security_delta(repo, base="HEAD~1")
+
+    worsened = [d for d in review.risk_deltas if d.status == "worsened"]
+    assert [d.sink for d in worsened] == ["subprocess.run"], review.risk_deltas
+    assert worsened[0].data_reachable is True
+    # No spurious add/remove: the path is the same one, escalated.
+    assert {d.status for d in review.risk_deltas} == {"worsened"}, review.risk_deltas
+
+    from cybergraph.pr_comment import generate_pr_comment
+
+    comment = generate_pr_comment(repo, base="HEAD~1")
+    assert "worsened" in comment, comment
+
+
 def _commit(repo: Path, message: str) -> None:
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", message)
