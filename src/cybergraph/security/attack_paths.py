@@ -75,6 +75,19 @@ def find_attack_paths(
     ``security/investigate.py`` deliberately keeps the suppressing default --
     the call site there feeds ``collect_top_risks``, which is a ranking.
 
+    A suppressed path never consumes ``limit`` on **either** kind of surface.
+    Dropping them before the cap fixed the ranked surface; the exploration
+    surfaces kept the starvation, because ``apply_suppressions=False`` combined
+    with a hard cap and an ``ORDER BY target`` traversal lets a ``fixtures/``
+    prefix win every slot. Measured with 80 suppressed routes beside 3 real
+    ones: the HTML report showed 25 cards and 0 real paths, and the graph export
+    and the grounded evidence 50 each, also 0 real -- the genuine attack paths
+    were invisible in the human-facing report, in the exported JSON and in what
+    an LLM was grounded on. Suppressed paths are now collected separately and
+    fill only the slots the real ones leave, so they stay *visible*, which is
+    the entire point of ``apply_suppressions=False``, without displacing
+    anything.
+
     ``suppression_root`` loads the suppression config from a *different*
     directory than the graph being queried. Callers that materialise a tree
     from git (``security/review.py``) must pass the real repository root, so
@@ -116,9 +129,15 @@ def find_attack_paths(
         taints = _load_taints(store)
 
         config_root = suppression_root if suppression_root is not None else repo_root
-        patterns = load_config(config_root).suppressed_paths if apply_suppressions else ()
+        patterns = load_config(config_root).suppressed_paths
+        # The patterns are loaded either way now: an exploration surface still
+        # has to recognise a suppressed path in order to stop it consuming a
+        # slot. With no patterns configured nothing can be suppressed, so the
+        # traversal keeps its original single-bucket behaviour exactly.
+        include_suppressed = bool(patterns) and not apply_suppressions
         return _traverse(
-            entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit, patterns
+            entrypoints, sinks, sanitizers, callgraph, taints, max_depth, limit, patterns,
+            include_suppressed=include_suppressed,
         )
     finally:
         store.close()
@@ -133,12 +152,25 @@ def _traverse(
     max_depth: int,
     limit: int,
     patterns: tuple[str, ...] = (),
+    include_suppressed: bool = False,
 ) -> list[AttackPath]:
-    paths: list[AttackPath] = []
+    """Traverse to at most ``limit`` paths, of which suppressed ones take no slot.
+
+    ``reported`` holds the paths the caller asked about and is what ``limit``
+    counts. ``hidden`` holds suppressed ones: dropped entirely on a ranked
+    surface, and on an exploration surface kept aside and used only to fill
+    slots ``reported`` did not need. Either way a suppressed path cannot push a
+    real one off the end, and the caller's cap on the total is unchanged.
+    """
+    reported: list[AttackPath] = []
+    hidden: list[AttackPath] = []
     seen_paths: set[tuple[str, str, tuple[str, ...]]] = set()
 
+    def _full() -> bool:
+        return len(reported) >= limit and (not include_suppressed or len(hidden) >= limit)
+
     for entry in entrypoints:
-        if len(paths) >= limit:
+        if _full():
             break
         # queue items: (node, path, confidence_rank, sanitized)
         start_sanitized = entry in sanitizers
@@ -146,7 +178,7 @@ def _traverse(
             [(entry, (entry,), 3, start_sanitized)]
         )
         visited: set[str] = {entry}
-        while queue and len(paths) < limit:
+        while queue and not _full():
             node, path, conf_rank, sanitized = queue.popleft()
 
             for sink_name in sinks.get(node, []):
@@ -154,7 +186,11 @@ def _traverse(
                 if key in seen_paths:
                     continue
                 seen_paths.add(key)
-                if patterns and path_is_suppressed(path + (sink_name,), patterns):
+                suppressed = bool(patterns) and path_is_suppressed(path + (sink_name,), patterns)
+                if suppressed and not include_suppressed:
+                    continue
+                bucket = hidden if suppressed else reported
+                if len(bucket) >= limit:
                     continue
                 taint_sources = taints.get((node, sink_name), ())
                 risk = _score_attack_path(
@@ -168,7 +204,7 @@ def _traverse(
                     taint_sources=taint_sources,
                     interprocedural=bool(callgraph),
                 )
-                paths.append(
+                bucket.append(
                     AttackPath(
                         entrypoint=entry,
                         sink=sink_name,
@@ -181,7 +217,7 @@ def _traverse(
                         risk=risk,
                     )
                 )
-                if len(paths) >= limit:
+                if _full():
                     break
 
             if len(path) > max_depth:
@@ -198,7 +234,9 @@ def _traverse(
                         sanitized or nxt in sanitizers,
                     )
                 )
-    return paths
+    # Suppressed paths fill only what the real ones left, so the caller's cap on
+    # the total holds and the real ones are never the ones that fall off.
+    return reported + hidden[: max(0, limit - len(reported))]
 
 
 def path_is_suppressed(nodes: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
