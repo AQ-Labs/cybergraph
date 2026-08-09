@@ -46,6 +46,12 @@ from cybergraph.security.verdict import (
 )
 
 BASE_CACHE_DIR = "base"
+#: Written last, after a base ``build_graph`` returns. Its presence is the only
+#: proof the build *finished*: ``GraphStore.open_for_repo`` creates ``graph.db``
+#: at the *start* of a build, so a db alone can be a partial tree left by an
+#: interrupted process. Reusing such a partial base under-reports its protections
+#: and can hide a policy weakening -- a wrong ACCEPT on the tamper dimension.
+BASE_COMPLETE_MARKER = ".complete"
 
 #: Policy-diff kinds that describe a route lacking its login check. The
 #: ``declared_login_rules`` capability reports the *same* event as a FAIL, so
@@ -153,8 +159,12 @@ def _base_state(repo: Path, base_ref: str) -> BaseState:
 
     cache_root = repo / ".cybergraph" / BASE_CACHE_DIR
     cached = cache_root / sha
-    if not (cached / ".cybergraph" / "graph.db").exists():
+    if not (cached / BASE_COMPLETE_MARKER).exists():
+        # No completion marker means the cache is absent or was left partial by
+        # an interrupted build; either way it must not be trusted. Discard any
+        # partial tree and rebuild from scratch.
         _prune(cache_root, keep=sha)
+        shutil.rmtree(cached, ignore_errors=True)
         cached.mkdir(parents=True, exist_ok=True)
         if not _materialize_git_ref(repo, sha, cached):
             shutil.rmtree(cached, ignore_errors=True)
@@ -163,6 +173,8 @@ def _base_state(repo: Path, base_ref: str) -> BaseState:
                 failure=f"could not read the base revision `{base_ref}`",
             )
         build_graph(cached)
+        # Written last: its presence is the promise that the build finished.
+        (cached / BASE_COMPLETE_MARKER).write_text("", encoding="utf-8")
 
     base_policy = load_policy(cached)
     return BaseState(base_policy, evaluate_policy(cached, base_policy), load_config(cached))

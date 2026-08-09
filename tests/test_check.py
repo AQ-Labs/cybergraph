@@ -95,3 +95,45 @@ def test_base_analysis_is_cached(tmp_path: Path):
     assert len(caches) == 1
     check_change(repo)
     assert list((repo / ".cybergraph" / "base").iterdir()) == caches
+
+
+def test_interrupted_base_build_is_not_reused(tmp_path: Path):
+    """A base cache with no completion marker is a partial build; never warm.
+
+    ``GraphStore.open_for_repo`` creates ``graph.db`` at the start of a build, so
+    a db left by an interrupted process must not be served as a complete base --
+    an under-populated base can hide a policy weakening and yield a wrong ACCEPT.
+    """
+    repo = _repo(tmp_path)
+    (repo / "app.py").write_text(AUTH_APP + "\n# edit\n", encoding="utf-8")
+    sha = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    base_dir = repo / ".cybergraph" / "base" / sha
+    (base_dir / ".cybergraph").mkdir(parents=True)
+    (base_dir / ".cybergraph" / "graph.db").write_bytes(b"not a real database")
+    marker = base_dir / ".complete"
+    assert not marker.exists()
+
+    check_change(repo)
+
+    # A completed build now leaves a marker, and the partial db was rebuilt.
+    assert marker.exists()
+    assert (base_dir / ".cybergraph" / "graph.db").read_bytes() != b"not a real database"
+
+
+def test_completed_base_cache_is_reused(tmp_path: Path):
+    """A base built to completion (marker present) is reused, not rebuilt."""
+    repo = _repo(tmp_path)
+    (repo / "app.py").write_text(AUTH_APP + "\n# edit\n", encoding="utf-8")
+    check_change(repo)
+    (cache,) = list((repo / ".cybergraph" / "base").iterdir())
+    marker = cache / ".complete"
+    assert marker.exists()
+    stamp = marker.stat().st_mtime_ns
+    db_stamp = (cache / ".cybergraph" / "graph.db").stat().st_mtime_ns
+    check_change(repo)
+    assert marker.stat().st_mtime_ns == stamp
+    assert (cache / ".cybergraph" / "graph.db").stat().st_mtime_ns == db_stamp
