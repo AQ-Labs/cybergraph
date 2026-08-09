@@ -98,7 +98,31 @@ def _detect_findings(case: Path) -> tuple[set[tuple[str, int, str]], int]:
     return confirmed, abstentions
 
 
-def _detect_paths(case: Path) -> tuple[set[str], set[str]]:
+_PathProperties = tuple[str, bool, str]
+
+
+def _properties_of(path) -> _PathProperties:  # noqa: ANN001 - AttackPath
+    """The claims a reported path makes, all of which are scored.
+
+    Reading only ``sink`` and ``sanitized`` left ``data_reachable`` and the
+    risk label unmeasured by anything in the repository. Measured: mutating
+    ``attack_paths._traverse`` to fall back to a synthetic taint source — i.e.
+    marking *every* attack path in *every* repository as user-data-reachable
+    and escalating it from ``high/72`` to ``critical/92`` — passed the gate,
+    the gate test and all 887 tests. ``data_reachable`` is an affirmative claim
+    about attacker control that eleven reporting surfaces render as
+    "user-controlled data reaches `<sink>`", so it is scored here beside the
+    risk label it drives.
+    """
+    return (path.sink, bool(path.data_reachable), path.risk.label if path.risk else "none")
+
+
+def _expected_path(entry: dict) -> _PathProperties:
+    """One declared path from ``expected.json``. Every property is required."""
+    return (entry["sink"], bool(entry["data_reachable"]), entry["risk"])
+
+
+def _detect_paths(case: Path) -> tuple[set[_PathProperties], set[_PathProperties]]:
     """Unsanitized and sanitized entrypoint-to-sink paths for one case.
 
     Findings are intra-procedural, so a helper that receives user data as an
@@ -109,13 +133,16 @@ def _detect_paths(case: Path) -> tuple[set[str], set[str]]:
     A path crossing a sanitiser is not a positive detection: ``find_attack_paths``
     reports reachability as inventory and records the barrier in ``sanitized``,
     which is the only way this surface has of saying "and something was done
-    about it".
+    about it". It is still *scored*, though — through ``clean`` rather than
+    through tp/fp/fn, because a sanitised path is inventory and counting it as
+    a detection would make the safe interprocedural case a false positive by
+    construction.
     """
     shutil.rmtree(case / ".cybergraph", ignore_errors=True)
     build_graph(case)
     paths = find_attack_paths(case)
-    unsanitized = {path.sink for path in paths if not path.sanitized}
-    sanitized = {path.sink for path in paths if path.sanitized}
+    unsanitized = {_properties_of(path) for path in paths if not path.sanitized}
+    sanitized = {_properties_of(path) for path in paths if path.sanitized}
     return unsanitized, sanitized
 
 
@@ -125,11 +152,16 @@ def _score_case(case: Path) -> dict:
     scoring = doc.get("scoring", "findings")
 
     sanitized: list[str] = []
+    sanitized_expected: list[str] = []
+    inventory_matches = True
     if scoring == "attack_paths":
-        expected = {entry["sink"] for entry in doc.get("paths", [])}
+        expected = {_expected_path(entry) for entry in doc.get("paths", [])}
+        expected_sanitized = {_expected_path(entry) for entry in doc.get("sanitized_paths", [])}
         detected_paths, sanitized_paths = _detect_paths(case)
         detected: set = detected_paths
-        sanitized = sorted(sanitized_paths)
+        sanitized = sorted(str(item) for item in sanitized_paths)
+        sanitized_expected = sorted(str(item) for item in expected_sanitized)
+        inventory_matches = sanitized_paths == expected_sanitized
         # An attack path is either reported or not; there is no `-UNVERIFIED`
         # equivalent on this surface, so abstention is not observable here.
         abstentions = 0
@@ -154,6 +186,7 @@ def _score_case(case: Path) -> dict:
             clean = not detected and not abstentions
         else:
             clean = case_fp == 0 and case_fn == 0
+    clean = clean and inventory_matches
 
     return {
         "name": case.name,
@@ -168,6 +201,7 @@ def _score_case(case: Path) -> dict:
         "expected": sorted(str(item) for item in expected),
         "detected": sorted(str(item) for item in detected),
         "sanitized_paths": sanitized,
+        "sanitized_paths_expected": sanitized_expected,
         "clean": clean,
     }
 
@@ -347,6 +381,9 @@ def main() -> int:
                 f"tp={row['tp']} fp={row['fp']} fn={row['fn']} "
                 f"abstentions={row['abstentions']}"
             )
+            if row["sanitized_paths"] != row["sanitized_paths_expected"]:
+                print(f"            sanitized inventory expected {row['sanitized_paths_expected']}")
+                print(f"            sanitized inventory detected {row['sanitized_paths']}")
 
     print()
     print(f"Wrote {RESULTS}")

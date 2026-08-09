@@ -5,10 +5,13 @@
   "scoring": "attack_paths",
   "findings": [],
   "abstentions": 0,
-  "note": "Scored on attack paths, not findings. Findings are intra-procedural and `run_ping`'s parameter carries no taint of its own, so this case yields zero findings while the entrypoint-to-sink path is correct.",
+  "note": "Scored on attack paths, not findings. Findings are intra-procedural and `run_ping`'s parameter carries no taint of its own, so this case yields zero findings while the entrypoint-to-sink path is correct. Every property the path *claims* is scored, not only the sink: `data_reachable` is false because taint is attributed per (function, sink) pair and the route parameter's taint edge sits on `ping`, not on `run_ping` where the sink is. That is a real limit of the taint attribution, and pinning it here is what stops the tool from claiming user-data reachability -- and the critical/92 that rides on it -- for a path it cannot actually trace. Raising it to true is an improvement, and it must be a deliberate edit of this file rather than a silent escalation.",
   "paths": [
     {
-      "sink": "os.system"
+      "sink": "os.system",
+      "data_reachable": false,
+      "risk": "high"
     }
-  ]
+  ],
+  "sanitized_paths": []
 }

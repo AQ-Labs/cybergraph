@@ -618,6 +618,7 @@
       ],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": false
     },
     {
@@ -633,6 +634,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -648,6 +650,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -667,6 +670,7 @@
         "('app.py', 12, 'CG-CMD-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -682,6 +686,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -697,6 +702,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -716,6 +722,7 @@
         "('app.py', 12, 'CG-CMD-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -735,6 +742,7 @@
         "('app.py', 12, 'CG-CMD-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -750,6 +758,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -769,6 +778,7 @@
         "('app.py', 12, 'CG-CMD-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -782,12 +792,13 @@
       "fn": 0,
       "abstentions": 0,
       "expected": [
-        "os.system"
+        "('os.system', False, 'high')"
       ],
       "detected": [
-        "os.system"
+        "('os.system', False, 'high')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -803,6 +814,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -822,6 +834,7 @@
         "('app.py', 10, 'CG-CODE-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -841,6 +854,7 @@
         "('app.py', 10, 'CG-CODE-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -858,6 +872,7 @@
       ],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": false
     },
     {
@@ -873,6 +888,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -888,6 +904,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -903,6 +920,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -918,6 +936,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -937,6 +956,7 @@
         "('app.py', 13, 'CG-PATH-TRAVERSAL')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -952,6 +972,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -967,6 +988,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -986,6 +1008,7 @@
         "('app.py', 13, 'CG-DESERIALIZE')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1001,7 +1024,10 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [
-        "open"
+        "('open', False, 'medium')"
+      ],
+      "sanitized_paths_expected": [
+        "('open', False, 'medium')"
       ],
       "clean": true
     },
@@ -1022,6 +1048,7 @@
         "('app.py', 15, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1037,6 +1064,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1056,6 +1084,7 @@
         "('app.py', 13, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1071,6 +1100,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1090,6 +1120,7 @@
         "('app.py', 13, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1109,6 +1140,7 @@
         "('app.py', 13, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1124,6 +1156,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1139,6 +1172,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1154,6 +1188,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1173,6 +1208,7 @@
         "('app.py', 13, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1188,6 +1224,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1207,6 +1244,7 @@
         "('app.py', 20, 'CG-SQL-EXEC')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1222,6 +1260,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1237,6 +1276,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1252,6 +1292,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1271,6 +1312,7 @@
         "('app.py', 10, 'CG-TEMPLATE-INJECT')"
       ],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     },
     {
@@ -1286,6 +1328,7 @@
       "expected": [],
       "detected": [],
       "sanitized_paths": [],
+      "sanitized_paths_expected": [],
       "clean": true
     }
   ]
