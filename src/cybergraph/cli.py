@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -318,6 +319,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comparison mode; inferred when omitted",
     )
     coverage.add_argument("--repo", default=".", help="Repository root")
+
+    policy_cmd = sub.add_parser(
+        "policy",
+        help="Show the declared security policy and which entities it protects",
+    )
+    policy_cmd.add_argument("--repo", default=".", help="Repository root")
+    policy_cmd.add_argument(
+        "--baseline", action="store_true",
+        help="Print a proposed policy baseline (TOML) to stdout; writes nothing",
+    )
 
     quickstart = sub.add_parser(
         "quickstart", help="Zero-to-report: init, build, analyze, and open the HTML report"
@@ -673,9 +684,24 @@ def main(argv: list[str] | None = None) -> int:
         print(format_coverage_report(report))
         if not report.established:
             return 1
+    elif args.command == "policy":
+        from .security.policy import evaluate_policy, extract_baseline, load_policy
+        from .security.policy_report import format_policy_report
+
+        repo = Path(args.repo).resolve()
+        if not repo.is_dir():
+            print(f"Not a directory: {repo}", file=sys.stderr)
+            return 1
+        build_graph(repo)
+        if args.baseline:
+            print(extract_baseline(repo))
+            return 0
+        policy = load_policy(repo)
+        protected = evaluate_policy(repo, policy)
+        print(format_policy_report(policy, protected))
+        return 0
     elif args.command == "quickstart":
         import os
-        import sys
         import webbrowser
 
         from .quickstart import run_quickstart
