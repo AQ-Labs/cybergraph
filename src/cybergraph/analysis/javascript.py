@@ -79,12 +79,24 @@ SECRET_EXPOSURE_SINKS = {
 _CORS_CALL_RE = re.compile(r"\bcors\s*\(\s*\{")
 _ORIGIN_ALL_RE = re.compile(r"""origin\s*:\s*(?:['"]\*['"]|true)""")
 _CREDENTIALS_TRUE_RE = re.compile(r"credentials\s*:\s*true")
-_NEXT_PUBLIC_RE = re.compile(
-    r"NEXT_PUBLIC_[A-Za-z0-9_]*"
-    r"(?:SECRET|APIKEY|API_KEY|TOKEN|PASSWORD|PASSWD|PRIVATE|_KEY|KEY)"
-    r"[A-Za-z0-9_]*",
-    re.IGNORECASE,
-)
+_NEXT_PUBLIC_RE = re.compile(r"NEXT_PUBLIC_[A-Za-z0-9_]+")
+_SECRET_SEGMENTS = {
+    "SECRET",
+    "KEY",
+    "TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "APIKEY",
+    "PRIVATE",
+    "CREDENTIAL",
+    "CREDENTIALS",
+}
+
+
+def _next_public_is_secret(name: str) -> bool:
+    # name like "NEXT_PUBLIC_STRIPE_SECRET_KEY" -> segments after the prefix
+    segments = name.upper().split("_")
+    return any(seg in _SECRET_SEGMENTS for seg in segments)
 
 
 def analyze_javascript_file(
@@ -364,15 +376,31 @@ def _language(path: Path) -> str:
 
 
 def _brace_object(source: str, open_index: int) -> tuple[str, int]:
-    """From the '{' at open_index, return (object_text, end_index) at its match."""
+    """From the '{' at open_index, return (object_text, end_index) at its match.
+
+    String-literal-aware: braces inside quoted strings (single, double, or
+    backtick, with backslash escapes) do not affect the depth count.
+    """
     depth = 0
-    for i in range(open_index, len(source)):
-        if source[i] == "{":
+    quote: str | None = None
+    i = open_index
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == "{":
             depth += 1
-        elif source[i] == "}":
+        elif c == "}":
             depth -= 1
             if depth == 0:
                 return source[open_index : i + 1], i
+        i += 1
     return source[open_index:], len(source)
 
 
@@ -405,6 +433,8 @@ def _add_js_web_findings(
     # Next.js: a NEXT_PUBLIC_ name that looks like a secret -> inlined into the bundle.
     seen: set[int] = set()
     for m in _NEXT_PUBLIC_RE.finditer(source):
+        if not _next_public_is_secret(m.group(0)):
+            continue
         line_no = _line_of(source, m.start())
         if line_no in seen:
             continue

@@ -45,3 +45,26 @@ def test_next_public_url_is_clean(tmp_path):
 def test_server_side_secret_is_not_a_client_boundary_finding(tmp_path):
     src = "const k = process.env.STRIPE_SECRET_KEY;\n"
     assert "CG-CLIENT-SECRET-EXPOSED" not in _run(tmp_path, "server.ts", src)
+
+
+def test_next_public_key_substring_names_are_clean(tmp_path):
+    src = (
+        "const a = process.env.NEXT_PUBLIC_TURNKEY_URL;\n"
+        "const b = process.env.NEXT_PUBLIC_MONKEY_ISLAND;\n"
+        "const c = process.env.NEXT_PUBLIC_KEYBOARD_LAYOUT;\n"
+    )
+    assert "CG-CLIENT-SECRET-EXPOSED" not in _run(tmp_path, "config.ts", src)
+
+
+def test_next_public_api_key_is_flagged(tmp_path):
+    src = "const k = process.env.NEXT_PUBLIC_API_KEY;\n"
+    assert "CG-CLIENT-SECRET-EXPOSED" in _run(tmp_path, "config.ts", src)
+
+
+def test_brace_string_with_stray_brace_does_not_false_flag(tmp_path):
+    src = (
+        "app.use(cors({ origin: '*', credentials: false, "
+        "fmt: 'status { code' }));\n"
+        "otherMiddleware({ credentials: true });\n"
+    )
+    assert "CG-CORS-CREDENTIALED-WILDCARD" not in _run(tmp_path, "server.js", src)
