@@ -390,6 +390,47 @@ MUTATIONS: list[Mutation] = [
         ),
         note="the C1 rename escape must be flagged as protection_lost, not silently skipped",
     ),
+    # -- D2: the verdict layer must never ACCEPT over a review-state check ---
+    Mutation(
+        id="D2-verdict-review-state-accepts",
+        disaster="D2",
+        file="cybergraph/security/verdict.py",
+        old="    state = STATE_REVIEW if (reasons or triggers_review(checks)) else STATE_ACCEPT",
+        new="    state = STATE_ACCEPT",
+        tests=(
+            "tests/test_verdict.py::test_fail_reviews",
+            "tests/test_verdict.py::test_unknown_reviews",
+            "tests/test_verdict.py::test_not_supported_reviews_and_is_listed",
+        ),
+        note="a review-state check (FAIL/UNKNOWN/NOT_SUPPORTED) must never read as accept",
+    ),
+    Mutation(
+        id="D2-revisions-failure-reads-pass",
+        disaster="D2",
+        file="cybergraph/security/checks.py",
+        old="    if revisions_failure:",
+        new="    if False and revisions_failure:",
+        tests=("tests/test_checks.py::test_git_failure_makes_everything_unknown",),
+        note="a revisions failure must force every capability UNKNOWN, "
+        "not let evaluation proceed as if nothing failed",
+    ),
+    # -- D1: a relevant file missing from coverage is silence, not evidence --
+    Mutation(
+        id="D1-capability-passes-without-evidence",
+        disaster="D1",
+        file="cybergraph/security/checks.py",
+        old="    if missing:\n        return CheckResult(\n            capability_id, UNKNOWN,\n"
+        '            f"`{missing[0]}` changed but has no analysis record", len(missing),\n'
+        "        )",
+        new="    if missing:\n        return CheckResult(\n            capability_id, PASS,\n"
+        '            f"`{missing[0]}` changed but has no analysis record", len(missing),\n'
+        "        )",
+        tests=(
+            "tests/test_checks.py::test_relevant_file_missing_from_coverage_is_unknown_not_pass",
+        ),
+        note="a relevant file absent from coverage entirely is not evidence of safety; "
+        "it is silence",
+    ),
 ]
 
 

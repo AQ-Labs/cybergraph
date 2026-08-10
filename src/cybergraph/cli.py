@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json as _json
 import sys
 from pathlib import Path
 
@@ -20,8 +21,11 @@ from .security import (
     format_attack_paths,
     load_scanner_findings,
 )
+from .security.check import check_change
 from .security.layers import format_layer_summary, summarize_layers
+from .security.policy import POLICY_FILE, extract_baseline
 from .security.review import format_security_review, review_security_delta
+from .security.verdict import STATE_REVIEW, format_verdict, verdict_to_dict
 from .security.vulnerabilities import import_vulnerability_report
 from .visualize import generate_html_report
 
@@ -175,6 +179,26 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument(
         "repo_pos", nargs="?", default=None,
         help="Repository root to review (optional positional; alias for --repo)",
+    )
+
+    check = sub.add_parser(
+        "check",
+        help="Check whether a change preserves the guarantees CyberGraph can verify",
+    )
+    check.add_argument("repo", nargs="?", default=".", help="Repository root to check")
+    check.add_argument("--base", default=None, help="Git ref, or A..B for a commit range")
+    check.add_argument(
+        "--mode", choices=["worktree", "merge-base", "range"], default=None,
+        help="Comparison mode. Detected from the working tree when omitted",
+    )
+    check.add_argument(
+        "--init-policy", action="store_true",
+        help="Write a baseline cybergraph.policy.toml from routes that already require login",
+    )
+    check.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    check.add_argument(
+        "--fail-on-review", action="store_true",
+        help="Exit 1 when the verdict is review (for CI gating; off by default)",
     )
 
     comment = sub.add_parser("pr-comment", help="Generate a markdown PR security review comment")
@@ -405,6 +429,27 @@ def _resolve_repo(args: argparse.Namespace) -> Path:
     return Path(".").resolve()
 
 
+def _run_check(args) -> int:
+    repo = Path(args.repo).resolve()
+
+    if args.init_policy:
+        target = repo / POLICY_FILE
+        if target.exists():
+            print(f"{POLICY_FILE} already exists. Edit it, or delete it to regenerate.")
+            return 2
+        build_graph(repo)
+        target.write_text(extract_baseline(repo), encoding="utf-8")
+        print(f"Wrote {POLICY_FILE}. Review every line, then commit it.")
+        return 0
+
+    verdict = check_change(repo, base=args.base, mode=args.mode)
+    print(
+        _json.dumps(verdict_to_dict(verdict), indent=2) if args.json
+        else format_verdict(verdict)
+    )
+    return 1 if (args.fail_on_review and verdict.state == STATE_REVIEW) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
 
@@ -536,6 +581,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.ran else 1
     elif args.command == "review":
         print(format_security_review(review_security_delta(repo, base=args.base)))
+    elif args.command == "check":
+        return _run_check(args)
     elif args.command == "pr-comment":
         output = write_pr_comment(repo, Path(args.output).resolve(), base=args.base)
         print(f"Wrote PR comment markdown: {output}")
