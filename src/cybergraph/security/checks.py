@@ -42,6 +42,11 @@ _FINDING_RULES = {
     "code_execution": "CG-CODE-EXEC",
     "deserialization": "CG-DESERIALIZE",
     "path_access": "CG-PATH-TRAVERSAL",
+    "cloud_configuration": {
+        "CG-FIREBASE-RULES-OPEN", "CG-SUPABASE-RLS-DISABLED", "CG-STORAGE-BUCKET-PUBLIC",
+        "CG-IAC-PUBLIC-BUCKET", "CG-IAC-WILDCARD-IAM", "CG-IAC-OPEN-INGRESS",
+        "CG-IAC-HARDCODED-SECRET",
+    },
 }
 
 _BY_ID = {capability.id: capability for capability in CAPABILITIES}
@@ -194,6 +199,7 @@ def _evaluate(
     rule = _FINDING_RULES.get(capability_id)
     if rule is None:  # pragma: no cover - guarded by test_every_capability_is_evaluated
         raise AssertionError(f"capability {capability_id} has no evaluator")
+    rules = {rule} if isinstance(rule, str) else set(rule)
 
     relevant_files = _capability_files(capability_id, changed_files)
     missing, failed, analyzed = _coverage_summary(relevant_files, coverage)
@@ -204,8 +210,8 @@ def _evaluate(
             capability_id, UNKNOWN,
             f"`{missing[0]}` changed but has no analysis record", len(missing),
         )
-    confirmed = [f for f in findings if f.rule_id == rule]
-    unverified = [f for f in findings if f.rule_id == f"{rule}-UNVERIFIED"]
+    confirmed = [f for f in findings if f.rule_id in rules]
+    unverified = [f for f in findings if f.rule_id in {f"{r}-UNVERIFIED" for r in rules}]
     if confirmed:
         return CheckResult(capability_id, FAIL, confirmed[0].message, len(confirmed))
     if unverified:
