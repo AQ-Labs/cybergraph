@@ -43,6 +43,9 @@ CyberGraph is designed to connect those dots.
 - Extracts functions, calls, route entrypoints, auth/authz guards, validators, user-input/data-flow edges, secret access/exposure, cloud resources, and sensitive sink calls.
 - **Config posture** — open Firebase security rules, Supabase tables with row-level
   security off, and public S3/GCS bucket policies. A change that weakens one is a REVIEW.
+- **CORS & client secrets** — a CORS policy allowing any origin *with credentials*
+  (FastAPI / Express), and secrets shipped to the browser via `NEXT_PUBLIC_`. A change
+  that introduces either is a REVIEW.
 - **Cross-file, interprocedural attack paths** (route → service → repository → sink) with confidence, sanitizer-barrier flags, taint/data-reachability, risk scores, and fix guidance; a `--shallow` mode reproduces intra-function traversal for comparison.
 - **Interactive, offline HTML report** built for first-time readers: a dark-mode-first neon graph explorer (glowing, security-typed nodes with a light/dark toggle), NODE/EDGE/ZONE explainer cards, a guided first view that opens on the top attack path with a plain-language narrative, a security-zones view (Attack Surface → Guards → Logic → Sensitive Sinks), search, layer/severity filters, a details panel with source drill-down, and entrypoint→sink path highlighting (Cytoscape.js, fully inlined).
 - **Exec-first report posture**: an A–F security grade with a one-line verdict and severity-distribution bar, a since-last-scan delta strip (new/regressed/fixed), findings grouped into expandable rule cards, an honest findings-cap footer, and a print stylesheet for clean PDF export.
