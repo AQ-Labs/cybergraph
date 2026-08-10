@@ -62,3 +62,16 @@ def test_malformed_bucket_policy_reads_unknown(tmp_path: Path) -> None:
     verdict = check_change(repo, mode="worktree")
     cc = next(c for c in verdict.checks if c.capability_id == "cloud_configuration")
     assert cc.status == UNKNOWN  # never a silent PASS on something we could not parse
+
+
+def test_nested_supabase_migration_disabling_rls_reviews(tmp_path):
+    repo = _repo(tmp_path)
+    d = repo / "apps" / "web" / "supabase" / "migrations"
+    d.mkdir(parents=True)
+    (d / "0003_open.sql").write_text(
+        "ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;\n", encoding="utf-8"
+    )
+    verdict = check_change(repo, mode="worktree")
+    assert verdict.state == STATE_REVIEW
+    assert any(c.capability_id == "cloud_configuration" and c.status == FAIL
+               for c in verdict.checks)

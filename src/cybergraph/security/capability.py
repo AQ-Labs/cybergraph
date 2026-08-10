@@ -51,9 +51,9 @@ VERIFIED_GLOBS = PYTHON_GLOBS
 # reads UNKNOWN -- broad globs (e.g. every *.yaml) would make unrelated changes
 # review. Single source of truth for the capability's `covers` and coverage.
 CONFIG_GLOBS = (
-    "*.tf", "*.tfvars",
-    "*.rules", "firebase.json",
-    "supabase/*.sql",
+    "*.tf",
+    "*.rules", "firebase.json", "*/firebase.json",
+    "supabase/*.sql", "*/supabase/*.sql",
     "*bucket-policy*.json", "*bucket_policy*.json", "*.iam.json",
 )
 
