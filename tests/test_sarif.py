@@ -80,3 +80,8 @@ def test_workflow_runs_check_on_pull_requests():
     workflow = Path(".github/workflows/cybergraph.yml").read_text(encoding="utf-8")
     assert "cybergraph check" in workflow
     assert "merge-base" in workflow
+    # `git fetch --depth=0` is invalid ("depth 0 is not a positive number") and
+    # fails the CI step; the checkout already uses fetch-depth: 0 for full history.
+    assert "--depth=0" not in workflow
+    # a REVIEW must stay a notification in CI, never gate the build.
+    assert "--fail-on-review" not in workflow
