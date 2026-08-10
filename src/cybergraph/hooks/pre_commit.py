@@ -33,6 +33,13 @@ def _script(strict: bool) -> str:
     )
 
 
+def _is_ours(content: str) -> bool:
+    """A hook is ours only if a line is exactly our managed marker comment,
+    not merely because the text mentions the marker string somewhere."""
+    prefix = f"# {MARKER}"
+    return any(line.strip().startswith(prefix) for line in content.splitlines())
+
+
 def _make_executable(path: Path) -> None:
     if os.name == "nt":
         return
@@ -53,7 +60,7 @@ class PreCommitTarget:
         desired = _script(strict)
         if path.exists():
             existing = path.read_text(encoding="utf-8", errors="replace")
-            if MARKER not in existing:
+            if not _is_ours(existing):
                 if not force:
                     return InstallResult(
                         Status.REFUSED_FOREIGN,
@@ -82,8 +89,8 @@ class PreCommitTarget:
         if hooks is None:
             return InstallResult(Status.NOT_A_REPO, "not a git repository")
         path = hooks / "pre-commit"
-        if not path.exists() or MARKER not in path.read_text(
-            encoding="utf-8", errors="replace"
+        if not path.exists() or not _is_ours(
+            path.read_text(encoding="utf-8", errors="replace")
         ):
             return InstallResult(
                 Status.ABSENT,
@@ -100,7 +107,7 @@ class PreCommitTarget:
         if not path.exists():
             return InstallResult(Status.ABSENT, "not installed")
         body = path.read_text(encoding="utf-8", errors="replace")
-        if MARKER not in body:
+        if not _is_ours(body):
             return InstallResult(Status.REFUSED_FOREIGN, "a foreign pre-commit hook is present")
         mode = "strict" if "--fail-on-review" in body else "advisory"
         return InstallResult(Status.ALREADY_PRESENT, f"installed ({mode})")

@@ -84,6 +84,27 @@ def test_uninstall_leaves_foreign_hook_intact(tmp_path: Path) -> None:
     assert _hook(repo).read_text(encoding="utf-8") == "#!/bin/sh\necho mine\n"
 
 
+def test_foreign_hook_mentioning_marker_in_prose_is_still_refused(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _hook(repo).parent.mkdir(parents=True, exist_ok=True)
+    body = "#!/bin/sh\n# we intentionally do not use cybergraph-hook here\necho custom-lint\n"
+    _hook(repo).write_text(body, encoding="utf-8")
+    res = PreCommitTarget().install(repo, strict=False, force=False)
+    assert res.status is Status.REFUSED_FOREIGN
+    assert _hook(repo).read_text(encoding="utf-8") == body
+    assert not (repo / ".git" / "hooks" / "pre-commit.cybergraph.bak").exists()
+
+
+def test_uninstall_leaves_foreign_hook_mentioning_marker_intact(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _hook(repo).parent.mkdir(parents=True, exist_ok=True)
+    body = "#!/bin/sh\n# we intentionally do not use cybergraph-hook here\necho custom-lint\n"
+    _hook(repo).write_text(body, encoding="utf-8")
+    res = PreCommitTarget().uninstall(repo)
+    assert res.status is Status.ABSENT
+    assert _hook(repo).read_text(encoding="utf-8") == body
+
+
 def test_install_outside_git_repo_is_not_a_repo(tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
