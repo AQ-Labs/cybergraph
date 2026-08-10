@@ -18,6 +18,7 @@ from pathlib import Path
 MODE_WORKTREE = "worktree"
 MODE_MERGE_BASE = "merge_base"
 MODE_RANGE = "range"
+MODE_STAGED = "staged"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,21 @@ def _worktree_changes(repo_root: Path) -> tuple[tuple[str, ...], str]:
     return _names(diff + "\n" + untracked), ""
 
 
+def _staged_diff(repo_root: Path) -> Revisions:
+    """Files in the index that differ from HEAD -- exactly what a commit will take.
+
+    Distinct from worktree mode, which also includes unstaged and untracked
+    changes: a pre-commit hook must verify the index, not files the commit
+    leaves behind.
+    """
+    head = _current_branch(repo_root) or "HEAD"
+    ok, out = _git(repo_root, "diff", "--cached", "--name-only")
+    if not ok:
+        return Revisions(MODE_STAGED, "HEAD", head, (),
+                         failure=f"could not read the staged index: {out}")
+    return Revisions(MODE_STAGED, "HEAD", head, _names(out))
+
+
 def _merge_base_diff(repo_root: Path, ref: str, head: str) -> Revisions:
     if not _verify(repo_root, ref):
         return Revisions(MODE_MERGE_BASE, ref, head, (),
@@ -113,6 +129,9 @@ def resolve_revisions(repo_root, base: str | None = None,
         return Revisions(MODE_WORKTREE, "", "", (), failure="not a git repository")
 
     head = _current_branch(repo_root) or "HEAD"
+
+    if mode == MODE_STAGED:
+        return _staged_diff(repo_root)
 
     # Explicit range: base contains "..".
     if base and ".." in base:
