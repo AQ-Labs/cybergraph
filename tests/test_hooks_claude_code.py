@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import json as _json
 from pathlib import Path
 
+from cybergraph.hooks import claude_code
 from cybergraph.hooks.base import Status
 from cybergraph.hooks.claude_code import ClaudeCodeTarget
+from cybergraph.security.verdict import STATE_ACCEPT, STATE_REVIEW, Reason, Verdict
 
 RUN_CMD = "hook run claude-code"
 
@@ -128,3 +131,47 @@ def test_status_reports_absent_advisory_and_strict(tmp_path: Path) -> None:
 
     target.install(tmp_path, strict=True, force=False)
     assert "strict" in target.status(tmp_path).message.lower()
+
+
+def _fake_check(state, headline="dropped login on /admin/export"):
+    def _c(repo, base=None, mode=None):
+        reasons = () if state == STATE_ACCEPT else (Reason(headline=headline),)
+        return Verdict(state, reasons)
+    return _c
+
+
+def _stdin(cwd, stop_active=False):
+    return _json.dumps({"cwd": str(cwd), "stop_hook_active": stop_active,
+                        "hook_event_name": "Stop"})
+
+
+def test_accept_is_silent(tmp_path, capsys):
+    rc = claude_code.run(False, _stdin(tmp_path), check=_fake_check(STATE_ACCEPT))
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_review_advisory_emits_system_message(tmp_path, capsys):
+    rc = claude_code.run(False, _stdin(tmp_path), check=_fake_check(STATE_REVIEW))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert "systemMessage" in payload
+    assert "REVIEW" in payload["systemMessage"]
+    assert "decision" not in payload
+
+
+def test_review_strict_blocks(tmp_path, capsys):
+    rc = claude_code.run(True, _stdin(tmp_path), check=_fake_check(STATE_REVIEW))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["decision"] == "block"
+    assert "REVIEW" in payload["reason"]
+
+
+def test_strict_downgrades_when_stop_hook_active(tmp_path, capsys):
+    rc = claude_code.run(True, _stdin(tmp_path, stop_active=True),
+                         check=_fake_check(STATE_REVIEW))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert "decision" not in payload          # loop guard: no second block
+    assert "systemMessage" in payload

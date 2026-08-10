@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ..security.check import check_change
+from ..security.verdict import STATE_REVIEW, format_verdict
 from .base import (
     InstallResult,
     Status,
@@ -122,3 +124,38 @@ class ClaudeCodeTarget:
             return InstallResult(Status.ABSENT, "not installed")
         mode = "strict" if any("--strict" in c for c in ours) else "advisory"
         return InstallResult(Status.ALREADY_PRESENT, f"installed ({mode})")
+
+
+def _summary(verdict) -> str:
+    heads = [r.headline for r in verdict.reasons if getattr(r, "headline", "")]
+    if heads:
+        return " ".join(heads[:3])
+    return format_verdict(verdict).strip().splitlines()[0] if format_verdict(verdict) else "review"
+
+
+def run(strict: bool, stdin_text: str, *, check=check_change) -> int:
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except json.JSONDecodeError:
+        payload = {}
+    cwd = Path(payload.get("cwd") or ".").resolve()
+    stop_active = bool(payload.get("stop_hook_active"))
+
+    try:
+        verdict = check(cwd, mode="worktree")
+    except Exception as exc:  # never trap the agent on our own failure
+        print(json.dumps({"systemMessage": f"CyberGraph could not run: {exc}"}))
+        return 0
+
+    if verdict.state != STATE_REVIEW:
+        return 0  # ACCEPT (or anything non-review): silent
+
+    summary = _summary(verdict)
+    if strict and not stop_active:
+        print(json.dumps({
+            "decision": "block",
+            "reason": f"CyberGraph REVIEW — {summary} Address these before finishing.",
+        }))
+        return 0
+    print(json.dumps({"systemMessage": f"CyberGraph REVIEW — {summary}"}))
+    return 0
