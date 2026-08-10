@@ -30,6 +30,7 @@ from cybergraph.graph import Edge, Finding, Node
 
 from .csharp import analyze_csharp_file
 from .dockerfile import analyze_dockerfile_file
+from .firebase_rules import analyze_firebase_rules_file
 from .go import analyze_go_file
 from .java import analyze_java_file
 from .javascript import analyze_javascript_file
@@ -46,11 +47,12 @@ CSHARP_SUFFIXES = {".cs"}
 TERRAFORM_SUFFIXES = {".tf"}
 DOCKERFILE_SUFFIXES = {".dockerfile"}
 DOCKERFILE_NAMES = {"Dockerfile"}
+FIREBASE_SUFFIXES = {".rules"}
 
 # Suffixes that have a dedicated security analyzer (everything else falls back).
 ANALYZED_SUFFIXES = (
     PYTHON_SUFFIXES | JAVASCRIPT_SUFFIXES | GO_SUFFIXES | JAVA_SUFFIXES | CSHARP_SUFFIXES
-    | TERRAFORM_SUFFIXES
+    | TERRAFORM_SUFFIXES | FIREBASE_SUFFIXES
 )
 
 
@@ -175,6 +177,8 @@ def _dispatch(path: Path, repo_root: Path, config: CyberGraphConfig) -> Analyzer
             repo_root,
             secret_markers=config.secret_markers,
         )
+    if suffix in FIREBASE_SUFFIXES or path.name == "firebase.json":
+        return analyze_firebase_rules_file(path, repo_root)
     return _fallback_file_node(path, repo_root)
 
 

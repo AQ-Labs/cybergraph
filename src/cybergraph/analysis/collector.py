@@ -32,8 +32,15 @@ SUPPORTED_SUFFIXES = {
     ".php",
     ".tf",
     ".dockerfile",
+    ".rules",
 }
-SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml", "Dockerfile"}
+SUPPORTED_FILENAMES = {
+    "package.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "Dockerfile",
+    "firebase.json",
+}
 
 
 def is_ignored_path(rel_path: str, ignored_paths: tuple[str, ...] = ()) -> bool:
