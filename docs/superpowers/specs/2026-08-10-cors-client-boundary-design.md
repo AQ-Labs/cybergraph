@@ -64,21 +64,30 @@ the existing analyzers' `Finding(...)` shape):
   all-matching pattern such as `".*"`/`"*"`) **and** `allow_credentials=True`. Because
   `python.py` is AST-based, read the keyword arguments precisely: the finding requires BOTH the
   wildcard-origin keyword and the credentials-true keyword on the same call. Neither alone fires.
-- **JavaScript / Express (`javascript.py`):** a `cors({ … })` call with `origin: "*"` or
-  `origin: true` **and** `credentials: true`, or a bare `cors()` (no options → allows all
-  origins) used as middleware. `javascript.py` is line/regex-based; match the `cors(` call and
-  its option object conservatively, requiring both signals (or the bare-`cors()` all-origins
-  case, which is credential-permissive by default in common setups — pinned in the plan).
+- **JavaScript / Express (`javascript.py`):** a `cors({ … })` call whose options object sets
+  `origin: "*"` / `origin: '*'` / `origin: true` **and** `credentials: true`. Both signals are
+  required. `javascript.py` is line/regex-based; match the `cors(` call and its option object
+  conservatively. **A bare `cors()` is CLEAN** — it defaults `credentials: false`, i.e. a
+  wildcard origin *without* credentials, which Decision 2 declares clean; flagging it would
+  contradict the credentialed-wildcard-only rule. (Erratum: an earlier draft of this spec said
+  a bare `cors()` should flag; that was inconsistent with Decision 2 and is corrected here — the
+  implementation does not flag it.)
 - Evidence is the call's line; the CWE is 942 (permissive cross-domain policy).
 
 ### Next.js client-secret boundary (`CG-CLIENT-SECRET-EXPOSED`, CWE-200)
 
 - In `javascript.py`: a `NEXT_PUBLIC_`-prefixed identifier (typically `process.env.NEXT_PUBLIC_…`,
-  but any `NEXT_PUBLIC_<NAME>` token) whose `<NAME>` matches the secret heuristic
-  (`SECRET`/`KEY`/`TOKEN`/`PASSWORD`/`PASSWD`/`APIKEY`, case-insensitive — reuse/extend the
-  existing `SECRET_MARKERS` logic). `NEXT_PUBLIC_` inlines the value into the browser bundle, so
-  a secret-named one is a definite leak. `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_NAME`, etc. are
-  public by design → no finding. CWE-200 (exposure of sensitive information).
+  but any `NEXT_PUBLIC_<NAME>` token) whose `<NAME>` contains, as a whole `_`-delimited **segment**
+  (not a substring), a secret keyword. Two tiers: a strong-secret segment
+  (`SECRET`/`TOKEN`/`PASSWORD`/`PASSWD`/`PRIVATE`/`CREDENTIAL(S)`) always flags; a key-like
+  segment (`KEY`/`APIKEY`) flags **only when the name has no public-by-design marker segment**
+  (`PUBLIC`/`PUBLISHABLE`). This keeps `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` and
+  `NEXT_PUBLIC_PUBLIC_KEY` clean (a Stripe publishable key is *designed* to ship to the browser)
+  while `NEXT_PUBLIC_API_KEY` / `NEXT_PUBLIC_STRIPE_SECRET_KEY` flag. Segment-matching (not
+  substring) is why `NEXT_PUBLIC_TURNKEY_URL` / `MONKEY` / `KEYBOARD` are clean.
+  `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_NAME`, etc. are public by design → no finding.
+  `NEXT_PUBLIC_` inlines the value into the browser bundle, so a strong-secret-named one is a
+  definite leak. CWE-200 (exposure of sensitive information).
 
 ## Verdict integration — one activation, one new capability
 
@@ -117,7 +126,7 @@ the existing analyzers' `Finding(...)` shape):
 - **Python CORS units:** credentialed wildcard → finding; scoped origins → none; wildcard
   without credentials → none; `allow_origin_regex=".*"` + credentials → finding.
 - **JS CORS units:** `cors({origin:"*", credentials:true})` → finding; `cors({origin:["https://x"]})`
-  → none; bare `cors()` middleware → finding (pinned); scoped → none.
+  → none; bare `cors()` middleware → **none** (credentials default off); scoped → none.
 - **Next.js units:** `process.env.NEXT_PUBLIC_STRIPE_SECRET_KEY` → finding; `NEXT_PUBLIC_API_URL`
   → none; a non-`NEXT_PUBLIC_` secret (server-side, `process.env.STRIPE_SECRET_KEY`) → none for
   this rule (it is not a client-boundary leak).
@@ -152,8 +161,8 @@ authorization ontology remain future work.
 
 1. FastAPI credentialed-wildcard CORS → `CG-CORS-CREDENTIALED-WILDCARD`; scoped or
    non-credentialed is clean.
-2. Express `cors()` credentialed-wildcard (and the bare-`cors()` all-origins case) → the same
-   rule; a scoped `cors({origin:[…]})` is clean.
+2. Express `cors({origin:"*"/true, credentials:true})` → the same rule; a scoped
+   `cors({origin:[…]})` and a bare `cors()` (credentials default off) are clean.
 3. `NEXT_PUBLIC_<secret-name>` → `CG-CLIENT-SECRET-EXPOSED`; a public-by-design `NEXT_PUBLIC_`
    name and a server-side secret are clean.
 4. `client_secret_boundary` is `supported=True`; `cross_origin_policy` is added and supported;
