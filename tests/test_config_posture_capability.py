@@ -7,6 +7,7 @@ from cybergraph.security.capability import (
     CAPABILITIES,
     FAIL,
     NOT_APPLICABLE,
+    UNKNOWN,
 )
 from cybergraph.security.check import check_change
 from cybergraph.security.verdict import STATE_REVIEW
@@ -53,3 +54,11 @@ def test_clean_readme_change_accepts(tmp_path: Path) -> None:
     # still accept if nothing else reviews.
     cc = next(c for c in verdict.checks if c.capability_id == "cloud_configuration")
     assert cc.status == NOT_APPLICABLE
+
+
+def test_malformed_bucket_policy_reads_unknown(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "bucket-policy.json").write_text("{not json", encoding="utf-8")
+    verdict = check_change(repo, mode="worktree")
+    cc = next(c for c in verdict.checks if c.capability_id == "cloud_configuration")
+    assert cc.status == UNKNOWN  # never a silent PASS on something we could not parse

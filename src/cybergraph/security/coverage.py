@@ -24,7 +24,7 @@ STATUS_FAILED = "failed"
 STATUS_UNSUPPORTED = "unsupported"
 STATUS_MISSING = "missing"
 
-_PARSE_FAILURE_RULES = ("PY-SYNTAX",)
+_PARSE_FAILURE_RULES = ("PY-SYNTAX", "CG-FILE-UNREADABLE")
 
 
 @dataclass(frozen=True)

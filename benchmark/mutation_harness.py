@@ -472,6 +472,31 @@ MUTATIONS: list[Mutation] = [
         ),
         note="staged mode must read the index (--cached), not the working tree",
     ),
+    # -- D9: config posture findings must reach the verdict, not be dropped --
+    Mutation(
+        id="D9-config-posture-finding-ignored",
+        disaster="D9",
+        file="cybergraph/security/checks.py",
+        old="    confirmed = [f for f in findings if f.rule_id in rules]",
+        new="    confirmed = []",
+        tests=(
+            "tests/test_config_posture_capability.py::test_disabling_rls_makes_check_review",
+        ),
+        note="a config posture finding must FAIL the capability, not be dropped",
+    ),
+    Mutation(
+        id="D9-unparsed-config-reads-clean",
+        disaster="D9",
+        file="cybergraph/analysis/bucket_policy.py",
+        old="    data = json.loads(source)  # JSONDecodeError propagates -> registry containment",
+        new="    try:\n        data = json.loads(source)\n"
+        "    except ValueError:\n        return nodes, [], findings",
+        tests=(
+            "tests/test_config_posture_capability.py::"
+            "test_malformed_bucket_policy_reads_unknown",
+        ),
+        note="an unparseable config must read UNKNOWN, never a clean pass",
+    ),
 ]
 
 
