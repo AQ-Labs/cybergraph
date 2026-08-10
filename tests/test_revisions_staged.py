@@ -46,3 +46,31 @@ def test_staged_mode_empty_index_is_established_not_failed(tmp_path: Path) -> No
     assert rev.mode == MODE_STAGED
     assert rev.failure == ""
     assert rev.changed_files == ()
+
+
+def test_staged_mode_ignores_unstaged_edit_to_tracked_file(tmp_path: Path) -> None:
+    """A modified-but-not-added tracked file must not appear: this is what
+    distinguishes the index (``git diff --cached``) from the working tree
+    (``git diff HEAD``) -- a new/untracked file produces identical output
+    under either, so only an edit to an already-committed file can catch a
+    regression that swaps one for the other."""
+    repo = _repo(tmp_path)
+    (repo / "base.py").write_text("x = 2\n", encoding="utf-8")  # edited, not staged
+
+    rev = resolve_revisions(repo, mode=MODE_STAGED)
+
+    assert rev.mode == MODE_STAGED
+    assert rev.failure == ""
+    assert "base.py" not in rev.changed_files
+
+
+def test_staged_mode_reports_staged_edit_to_tracked_file(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    (repo / "base.py").write_text("x = 2\n", encoding="utf-8")
+    _git(repo, "add", "base.py")  # the edit is now staged
+
+    rev = resolve_revisions(repo, mode=MODE_STAGED)
+
+    assert rev.mode == MODE_STAGED
+    assert rev.failure == ""
+    assert "base.py" in rev.changed_files
