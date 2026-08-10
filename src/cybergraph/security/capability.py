@@ -46,6 +46,9 @@ SOURCE_GLOBS = (
 # The subset with a Phase 1 analyzer that produces findings.
 VERIFIED_GLOBS = PYTHON_GLOBS
 
+# CORS misconfiguration is checked in both the Python (FastAPI) and web layers.
+CORS_GLOBS = PYTHON_GLOBS + WEB_GLOBS
+
 # Declarative config surfaces with a Phase-2 posture analyzer. Kept narrow so a
 # changed config file that is analyzed-and-clean can PASS and an unparsed one
 # reads UNKNOWN -- broad globs (e.g. every *.yaml) would make unrelated changes
@@ -77,9 +80,10 @@ CAPABILITIES: tuple[Capability, ...] = (
                "New routes from the internet to sensitive code", PYTHON_GLOBS, True),
     Capability("source_analysis_support",
                "Languages CyberGraph can read", SOURCE_GLOBS, True),
-    Capability("client_secret_boundary", "Secrets reaching the browser", WEB_GLOBS, False),
+    Capability("client_secret_boundary", "Secrets reaching the browser", WEB_GLOBS, True),
     Capability("cloud_configuration",
                "Cloud and database configuration", CONFIG_GLOBS, True),
+    Capability("cross_origin_policy", "Cross-origin resource sharing", CORS_GLOBS, True),
 )
 
 _BY_ID = {capability.id: capability for capability in CAPABILITIES}
