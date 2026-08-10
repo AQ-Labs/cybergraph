@@ -188,8 +188,9 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("repo", nargs="?", default=".", help="Repository root to check")
     check.add_argument("--base", default=None, help="Git ref, or A..B for a commit range")
     check.add_argument(
-        "--mode", choices=["worktree", "merge-base", "range"], default=None,
-        help="Comparison mode. Detected from the working tree when omitted",
+        "--mode", choices=["worktree", "merge-base", "range", "staged"], default=None,
+        help="Comparison mode. Detected from the working tree when omitted"
+             " (staged = the git index)",
     )
     check.add_argument(
         "--init-policy", action="store_true",
