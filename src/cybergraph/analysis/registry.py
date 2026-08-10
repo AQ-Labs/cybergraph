@@ -28,7 +28,8 @@ from pathlib import Path
 from cybergraph.config import CyberGraphConfig
 from cybergraph.graph import Edge, Finding, Node
 
-from .collector import is_supabase_sql
+from .bucket_policy import analyze_bucket_policy_file
+from .collector import is_bucket_policy, is_supabase_sql
 from .csharp import analyze_csharp_file
 from .dockerfile import analyze_dockerfile_file
 from .firebase_rules import analyze_firebase_rules_file
@@ -183,6 +184,8 @@ def _dispatch(path: Path, repo_root: Path, config: CyberGraphConfig) -> Analyzer
         return analyze_firebase_rules_file(path, repo_root)
     if is_supabase_sql(path):
         return analyze_supabase_rls_file(path, repo_root)
+    if is_bucket_policy(path):
+        return analyze_bucket_policy_file(path, repo_root)
     return _fallback_file_node(path, repo_root)
 
 

@@ -67,12 +67,20 @@ def is_supabase_sql(path: Path) -> bool:
     )
 
 
+def is_bucket_policy(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".json") and (
+        "bucket-policy" in name or "bucket_policy" in name or name.endswith(".iam.json")
+    )
+
+
 def is_supported_source(path: Path) -> bool:
     """Whether the analyzers would read this file at all, ignoring config."""
     return (
         path.suffix.lower() in SUPPORTED_SUFFIXES
         or path.name in SUPPORTED_FILENAMES
         or is_supabase_sql(path)
+        or is_bucket_policy(path)
     )
 
 
