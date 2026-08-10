@@ -47,6 +47,8 @@ _FINDING_RULES = {
         "CG-IAC-PUBLIC-BUCKET", "CG-IAC-WILDCARD-IAM", "CG-IAC-OPEN-INGRESS",
         "CG-IAC-HARDCODED-SECRET",
     },
+    "client_secret_boundary": "CG-CLIENT-SECRET-EXPOSED",
+    "cross_origin_policy": "CG-CORS-CREDENTIALED-WILDCARD",
 }
 
 _BY_ID = {capability.id: capability for capability in CAPABILITIES}

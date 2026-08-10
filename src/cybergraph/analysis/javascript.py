@@ -76,6 +76,39 @@ SECRET_EXPOSURE_SINKS = {
     "child_process.exec",
 }
 
+_CORS_CALL_RE = re.compile(r"\bcors\s*\(\s*\{")
+_ORIGIN_ALL_RE = re.compile(r"""origin\s*:\s*(?:['"]\*['"]|true)""")
+_CREDENTIALS_TRUE_RE = re.compile(r"credentials\s*:\s*true")
+_NEXT_PUBLIC_RE = re.compile(r"NEXT_PUBLIC_[A-Za-z0-9_]+")
+_STRONG_SECRET_SEGMENTS = {
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "PRIVATE",
+    "CREDENTIAL",
+    "CREDENTIALS",
+}
+_KEYLIKE_SEGMENTS = {"KEY", "APIKEY"}
+_PUBLIC_MARKER_SEGMENTS = {"PUBLIC", "PUBLISHABLE"}
+
+
+def _next_public_is_secret(name: str) -> bool:
+    # name like "NEXT_PUBLIC_STRIPE_SECRET_KEY" -> segments after the prefix.
+    # A strong secret segment always flags. A key-like segment only flags when
+    # the name has no public-by-design marker (e.g. Stripe publishable keys are
+    # meant to ship to the browser and should not false-flag). The NEXT_PUBLIC_
+    # prefix itself is stripped first so its own literal "PUBLIC" segment can't
+    # be mistaken for an explicit public-by-design marker on the suffix.
+    upper = name.upper()
+    suffix = upper[len("NEXT_PUBLIC_"):] if upper.startswith("NEXT_PUBLIC_") else upper
+    segments = set(suffix.split("_"))
+    if _STRONG_SECRET_SEGMENTS & segments:
+        return True
+    if _KEYLIKE_SEGMENTS & segments and not (_PUBLIC_MARKER_SEGMENTS & segments):
+        return True
+    return False
+
 
 def analyze_javascript_file(
     path: Path,
@@ -218,6 +251,7 @@ def analyze_javascript_file(
                     )
 
     _add_imports(lines, rel, edges)
+    _add_js_web_findings(source, lines, rel, findings)
     return nodes, edges, findings
 
 
@@ -350,3 +384,83 @@ def _is_secret_exposure(call_name: str) -> bool:
 
 def _language(path: Path) -> str:
     return "typescript" if path.suffix.lower() in {".ts", ".tsx"} else "javascript"
+
+
+def _brace_object(source: str, open_index: int) -> tuple[str, int]:
+    """From the '{' at open_index, return (object_text, end_index) at its match.
+
+    String-literal-aware: braces inside quoted strings (single, double, or
+    backtick, with backslash escapes) do not affect the depth count.
+    """
+    depth = 0
+    quote: str | None = None
+    i = open_index
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return source[open_index : i + 1], i
+        i += 1
+    return source[open_index:], len(source)
+
+
+def _line_of(source: str, index: int) -> int:
+    return source.count("\n", 0, index) + 1
+
+
+def _add_js_web_findings(
+    source: str, lines: list[str], rel: str, findings: list[Finding]
+) -> None:
+    # CORS: cors({ ... origin:*/true ... credentials:true ... })
+    for m in _CORS_CALL_RE.finditer(source):
+        obj, _end = _brace_object(source, m.end() - 1)
+        if _ORIGIN_ALL_RE.search(obj) and _CREDENTIALS_TRUE_RE.search(obj):
+            line_no = _line_of(source, m.start())
+            if is_inline_suppressed(lines, line_no, "CG-CORS-CREDENTIALED-WILDCARD"):
+                continue
+            findings.append(
+                Finding(
+                    rule_id="CG-CORS-CREDENTIALED-WILDCARD",
+                    severity="high",
+                    message="CORS allows any origin with credentials "
+                            "(origin '*'/true + credentials: true)",
+                    file_path=rel,
+                    line_start=line_no,
+                    cwe="CWE-942",
+                    evidence=lines[line_no - 1].strip() if 0 < line_no <= len(lines) else "",
+                )
+            )
+    # Next.js: a NEXT_PUBLIC_ name that looks like a secret -> inlined into the bundle.
+    seen: set[int] = set()
+    for m in _NEXT_PUBLIC_RE.finditer(source):
+        if not _next_public_is_secret(m.group(0)):
+            continue
+        line_no = _line_of(source, m.start())
+        if line_no in seen:
+            continue
+        seen.add(line_no)
+        if is_inline_suppressed(lines, line_no, "CG-CLIENT-SECRET-EXPOSED"):
+            continue
+        findings.append(
+            Finding(
+                rule_id="CG-CLIENT-SECRET-EXPOSED",
+                severity="high",
+                message=f"`{m.group(0)}` ships a secret to the browser bundle "
+                        "(NEXT_PUBLIC_ is inlined client-side)",
+                file_path=rel,
+                line_start=line_no,
+                cwe="CWE-200",
+                evidence=lines[line_no - 1].strip() if 0 < line_no <= len(lines) else "",
+            )
+        )

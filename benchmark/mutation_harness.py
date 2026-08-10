@@ -497,6 +497,26 @@ MUTATIONS: list[Mutation] = [
         ),
         note="an unparseable config must read UNKNOWN, never a clean pass",
     ),
+    # -- D9: CORS/client-secret detectors fail open ------------------------
+    Mutation(
+        id="D9-cors-credentialed-wildcard-missed",
+        disaster="D9",
+        file="cybergraph/analysis/python.py",
+        old='        if not _kw_is_true(kw.get("allow_credentials")):\n'
+        "            continue",
+        new="        if True:\n            continue",
+        tests=("tests/test_python_cors.py::test_credentialed_wildcard_is_flagged",),
+        note="a credentialed-wildcard CORS must be flagged, never dropped",
+    ),
+    Mutation(
+        id="D9-client-secret-exposure-missed",
+        disaster="D9",
+        file="cybergraph/analysis/javascript.py",
+        old='_NEXT_PUBLIC_RE = re.compile(r"NEXT_PUBLIC_[A-Za-z0-9_]+")',
+        new='_NEXT_PUBLIC_RE = re.compile(r"__CYBERGRAPH_NEVER_MATCHES__")',
+        tests=("tests/test_js_cors_nextjs.py::test_next_public_secret_is_flagged",),
+        note="a NEXT_PUBLIC_ secret must be flagged, never missed",
+    ),
 ]
 
 
