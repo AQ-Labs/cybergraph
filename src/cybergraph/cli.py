@@ -202,6 +202,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exit 1 when the verdict is review (for CI gating; off by default)",
     )
 
+    hook = sub.add_parser("hook", help="Install/inspect CyberGraph client hooks")
+    hsub = hook.add_subparsers(dest="hook_action", required=True)
+
+    for action, helptext in (
+        ("install", "Install a CyberGraph hook"),
+        ("uninstall", "Remove a CyberGraph hook"),
+    ):
+        p = hsub.add_parser(action, help=helptext)
+        p.add_argument("target", choices=["claude-code", "pre-commit"])
+        p.add_argument("--repo", default=".", help="Repository root")
+        if action == "install":
+            p.add_argument("--strict", action="store_true",
+                           help="A REVIEW blocks (commit / agent turn) instead of warning")
+            p.add_argument("--force", action="store_true",
+                           help="Back up and replace a foreign pre-commit hook")
+
+    st = hsub.add_parser("status", help="Show which hooks are installed")
+    st.add_argument("--repo", default=".", help="Repository root")
+
+    run_p = hsub.add_parser("run", help="(internal) run a hook; invoked by the installed hook")
+    run_p.add_argument("target", choices=["claude-code"])
+    run_p.add_argument("--strict", action="store_true")
+    run_p.add_argument("--repo", default=".")
+
     comment = sub.add_parser("pr-comment", help="Generate a markdown PR security review comment")
     comment.add_argument("--base", default="HEAD~1", help="Git base ref for comparison")
     comment.add_argument("--repo", default=".", help="Repository root to review")
@@ -451,6 +475,32 @@ def _run_check(args) -> int:
     return 1 if (args.fail_on_review and verdict.state == STATE_REVIEW) else 0
 
 
+def _run_hook(args) -> int:
+    import sys as _sys
+
+    from .hooks import TARGETS, resolve_target
+
+    if args.hook_action == "run":
+        from .hooks import claude_code
+        return claude_code.run(args.strict, _sys.stdin.read())
+
+    if args.hook_action == "status":
+        repo = Path(args.repo).resolve()
+        for name, target in TARGETS.items():
+            res = target.status(repo)
+            print(f"{name:<12} {res.message}")
+        return 0
+
+    repo = Path(args.repo).resolve()
+    target = resolve_target(args.target)
+    if args.hook_action == "install":
+        res = target.install(repo, strict=args.strict, force=args.force)
+    else:
+        res = target.uninstall(repo)
+    print(res.message)
+    return 0 if res.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
 
@@ -584,6 +634,8 @@ def main(argv: list[str] | None = None) -> int:
         print(format_security_review(review_security_delta(repo, base=args.base)))
     elif args.command == "check":
         return _run_check(args)
+    elif args.command == "hook":
+        return _run_hook(args)
     elif args.command == "pr-comment":
         output = write_pr_comment(repo, Path(args.output).resolve(), base=args.base)
         print(f"Wrote PR comment markdown: {output}")
