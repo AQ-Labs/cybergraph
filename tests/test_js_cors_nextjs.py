@@ -61,6 +61,24 @@ def test_next_public_api_key_is_flagged(tmp_path):
     assert "CG-CLIENT-SECRET-EXPOSED" in _run(tmp_path, "config.ts", src)
 
 
+def test_publishable_key_is_clean(tmp_path):
+    src = (
+        "const a = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;\n"
+        "const b = process.env.NEXT_PUBLIC_PUBLIC_KEY;\n"
+    )
+    assert "CG-CLIENT-SECRET-EXPOSED" not in _run(tmp_path, "config.ts", src)
+
+
+def test_public_but_strong_secret_still_flags(tmp_path):
+    src = "const k = process.env.NEXT_PUBLIC_PUBLIC_SECRET_KEY;\n"
+    assert "CG-CLIENT-SECRET-EXPOSED" in _run(tmp_path, "config.ts", src)
+
+
+def test_api_key_still_flags(tmp_path):
+    src = "const k = process.env.NEXT_PUBLIC_API_KEY;\n"
+    assert "CG-CLIENT-SECRET-EXPOSED" in _run(tmp_path, "config.ts", src)
+
+
 def test_brace_string_with_stray_brace_does_not_false_flag(tmp_path):
     src = (
         "app.use(cors({ origin: '*', credentials: false, "

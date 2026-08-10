@@ -80,23 +80,34 @@ _CORS_CALL_RE = re.compile(r"\bcors\s*\(\s*\{")
 _ORIGIN_ALL_RE = re.compile(r"""origin\s*:\s*(?:['"]\*['"]|true)""")
 _CREDENTIALS_TRUE_RE = re.compile(r"credentials\s*:\s*true")
 _NEXT_PUBLIC_RE = re.compile(r"NEXT_PUBLIC_[A-Za-z0-9_]+")
-_SECRET_SEGMENTS = {
+_STRONG_SECRET_SEGMENTS = {
     "SECRET",
-    "KEY",
     "TOKEN",
     "PASSWORD",
     "PASSWD",
-    "APIKEY",
     "PRIVATE",
     "CREDENTIAL",
     "CREDENTIALS",
 }
+_KEYLIKE_SEGMENTS = {"KEY", "APIKEY"}
+_PUBLIC_MARKER_SEGMENTS = {"PUBLIC", "PUBLISHABLE"}
 
 
 def _next_public_is_secret(name: str) -> bool:
-    # name like "NEXT_PUBLIC_STRIPE_SECRET_KEY" -> segments after the prefix
-    segments = name.upper().split("_")
-    return any(seg in _SECRET_SEGMENTS for seg in segments)
+    # name like "NEXT_PUBLIC_STRIPE_SECRET_KEY" -> segments after the prefix.
+    # A strong secret segment always flags. A key-like segment only flags when
+    # the name has no public-by-design marker (e.g. Stripe publishable keys are
+    # meant to ship to the browser and should not false-flag). The NEXT_PUBLIC_
+    # prefix itself is stripped first so its own literal "PUBLIC" segment can't
+    # be mistaken for an explicit public-by-design marker on the suffix.
+    upper = name.upper()
+    suffix = upper[len("NEXT_PUBLIC_"):] if upper.startswith("NEXT_PUBLIC_") else upper
+    segments = set(suffix.split("_"))
+    if _STRONG_SECRET_SEGMENTS & segments:
+        return True
+    if _KEYLIKE_SEGMENTS & segments and not (_PUBLIC_MARKER_SEGMENTS & segments):
+        return True
+    return False
 
 
 def analyze_javascript_file(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from cybergraph.security.capability import CAPABILITIES, FAIL
+from cybergraph.security.capability import CAPABILITIES, FAIL, PASS
 from cybergraph.security.check import check_change
 from cybergraph.security.verdict import STATE_REVIEW
 
@@ -38,6 +38,16 @@ def test_python_credentialed_cors_reviews(tmp_path):
     verdict = check_change(repo, mode="worktree")
     assert verdict.state == STATE_REVIEW
     assert any(c.capability_id == "cross_origin_policy" and c.status == FAIL
+               for c in verdict.checks)
+
+
+def test_clean_web_file_passes_both_web_capabilities(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "app.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    verdict = check_change(repo, mode="worktree")
+    assert any(c.capability_id == "cross_origin_policy" and c.status == PASS
+               for c in verdict.checks)
+    assert any(c.capability_id == "client_secret_boundary" and c.status == PASS
                for c in verdict.checks)
 
 
