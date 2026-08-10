@@ -34,6 +34,27 @@ def _is_ours(entry: dict) -> bool:
     )
 
 
+def _strip_ours(stop: list) -> list:
+    """Remove only our hooks from each Stop entry; drop an entry only when it
+    becomes empty. Foreign hooks sharing an entry with ours are preserved."""
+    result = []
+    for entry in stop:
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        hooks = entry.get("hooks", [])
+        kept = [
+            h for h in hooks
+            if not (isinstance(h, dict) and _RUN_CMD in h.get("command", ""))
+        ]
+        if kept == hooks:
+            result.append(entry)          # nothing of ours in this entry
+        elif kept:
+            result.append({**entry, "hooks": kept})  # keep foreign hooks
+        # else: entry held only our hook(s) -> drop it
+    return result
+
+
 class ClaudeCodeTarget:
     name = "claude-code"
 
@@ -56,7 +77,7 @@ class ClaudeCodeTarget:
                 f"CyberGraph Stop hook already installed "
                 f"({'strict' if strict else 'advisory'}).",
             )
-        stop[:] = [e for e in stop if not _is_ours(e)]
+        stop[:] = _strip_ours(stop)
         stop.append(_entry(strict))
         write_json(settings, data)
         return InstallResult(
@@ -76,7 +97,7 @@ class ClaudeCodeTarget:
         stop = data.get("hooks", {}).get("Stop", [])
         if not any(_is_ours(e) for e in stop):
             return InstallResult(Status.ABSENT, "no CyberGraph Stop hook to remove.")
-        stop[:] = [e for e in stop if not _is_ours(e)]
+        stop[:] = _strip_ours(stop)
         if not stop:
             data["hooks"].pop("Stop", None)
         if not data.get("hooks"):

@@ -87,3 +87,44 @@ def test_malformed_settings_is_refused_not_overwritten(tmp_path: Path) -> None:
     res = ClaudeCodeTarget().install(tmp_path, strict=False, force=False)
     assert res.status is Status.MALFORMED
     assert settings.read_text(encoding="utf-8") == "{not json"
+
+
+def _seed_shared_entry(repo: Path) -> None:
+    settings = _settings(repo)
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({
+        "hooks": {"Stop": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": "echo important-foreign-thing"},
+            {"type": "command", "command": "python -m cybergraph hook run claude-code"},
+        ]}]},
+    }), encoding="utf-8")
+
+
+def test_uninstall_preserves_foreign_hook_sharing_our_entry(tmp_path: Path) -> None:
+    _seed_shared_entry(tmp_path)
+    res = ClaudeCodeTarget().uninstall(tmp_path)
+    assert res.status is Status.REMOVED
+    stop_cmds = [h["command"] for e in _load(tmp_path)["hooks"]["Stop"] for h in e["hooks"]]
+    assert "echo important-foreign-thing" in stop_cmds
+    assert not any(RUN_CMD in c for c in stop_cmds)
+
+
+def test_install_preserves_foreign_hook_sharing_an_entry(tmp_path: Path) -> None:
+    _seed_shared_entry(tmp_path)
+    ClaudeCodeTarget().install(tmp_path, strict=False, force=False)
+    data = _load(tmp_path)
+    stop_cmds = [h["command"] for e in data["hooks"]["Stop"] for h in e["hooks"]]
+    assert "echo important-foreign-thing" in stop_cmds
+    assert sum(1 for c in stop_cmds if RUN_CMD in c) == 1
+
+
+def test_status_reports_absent_advisory_and_strict(tmp_path: Path) -> None:
+    target = ClaudeCodeTarget()
+    fresh = target.status(tmp_path)
+    assert fresh.status is Status.ABSENT
+
+    target.install(tmp_path, strict=False, force=False)
+    assert "advisory" in target.status(tmp_path).message.lower()
+
+    target.install(tmp_path, strict=True, force=False)
+    assert "strict" in target.status(tmp_path).message.lower()
