@@ -61,9 +61,19 @@ def is_ignored_path(rel_path: str, ignored_paths: tuple[str, ...] = ()) -> bool:
     return False
 
 
+def is_supabase_sql(path: Path) -> bool:
+    return path.suffix.lower() == ".sql" and any(
+        part.lower() == "supabase" for part in path.parts
+    )
+
+
 def is_supported_source(path: Path) -> bool:
     """Whether the analyzers would read this file at all, ignoring config."""
-    return path.suffix.lower() in SUPPORTED_SUFFIXES or path.name in SUPPORTED_FILENAMES
+    return (
+        path.suffix.lower() in SUPPORTED_SUFFIXES
+        or path.name in SUPPORTED_FILENAMES
+        or is_supabase_sql(path)
+    )
 
 
 def iter_source_files(repo_root: Path, ignored_paths: tuple[str, ...] = ()) -> list[Path]:
