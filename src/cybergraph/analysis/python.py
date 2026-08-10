@@ -165,6 +165,7 @@ def analyze_python_file(
                     edges.append(Edge(EDGE_SANITIZES, key, call_name, rel, line_no))
 
     _add_django_url_routes(tree, rel, nodes, edges)
+    _add_cors_findings(tree, rel, lines, findings)
     _add_imports(tree, rel, edges)
     return nodes, edges, findings
 
@@ -508,6 +509,62 @@ def _add_django_url_routes(tree: ast.AST, rel: str, nodes: list[Node], edges: li
         view_name = _callable_name(call.args[1])
         if view_name:
             edges.append(Edge("CALLS", key, view_name, rel, line_no))
+
+
+def _cors_allows_all(origins: ast.AST | None, regex: ast.AST | None) -> bool:
+    if isinstance(origins, (ast.List, ast.Tuple)):
+        if any(isinstance(e, ast.Constant) and e.value == "*" for e in origins.elts):
+            return True
+    if isinstance(origins, ast.Constant) and origins.value == "*":
+        return True
+    if isinstance(regex, ast.Constant) and isinstance(regex.value, str):
+        if regex.value in {".*", "^.*$", "*", ".*$", "^.*", "(.*)"}:
+            return True
+    return False
+
+
+def _kw_is_true(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value is True
+
+
+def _add_cors_findings(
+    tree: ast.AST, rel: str, lines: list[str], findings: list[Finding]
+) -> None:
+    """Flag a FastAPI/Starlette CORS middleware allowing any origin WITH credentials.
+
+    The credentialed wildcard is the real vulnerability: any site can make
+    authenticated cross-origin requests. A scoped origin list, or a wildcard
+    without credentials, is not flagged (precision over recall).
+    """
+    for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):
+        name = _callable_name(call.func)
+        is_cors = name == "CORSMiddleware" or (
+            name.endswith("add_middleware")
+            and call.args
+            and _callable_name(call.args[0]) == "CORSMiddleware"
+        )
+        if not is_cors:
+            continue
+        kw = {k.arg: k.value for k in call.keywords if k.arg}
+        if not _cors_allows_all(kw.get("allow_origins"), kw.get("allow_origin_regex")):
+            continue
+        if not _kw_is_true(kw.get("allow_credentials")):
+            continue
+        line_no = getattr(call, "lineno", 1)
+        if is_inline_suppressed(lines, line_no, "CG-CORS-CREDENTIALED-WILDCARD"):
+            continue
+        findings.append(
+            Finding(
+                rule_id="CG-CORS-CREDENTIALED-WILDCARD",
+                severity="high",
+                message="CORS allows any origin with credentials "
+                        "(allow_origins '*' + allow_credentials=True)",
+                file_path=rel,
+                line_start=line_no,
+                cwe="CWE-942",
+                evidence=lines[line_no - 1].strip() if 0 < line_no <= len(lines) else "",
+            )
+        )
 
 
 def classify_name(
