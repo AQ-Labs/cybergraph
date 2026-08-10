@@ -51,3 +51,37 @@ def test_unverified_rule_id_is_preserved_on_export(tmp_path: Path) -> None:
     rule_ids = [rule["id"] for rule in data["runs"][0]["tool"]["driver"]["rules"]]
     assert result_ids == ["CG-SQL-EXEC-UNVERIFIED"], result_ids
     assert "CG-SQL-EXEC-UNVERIFIED" in rule_ids, rule_ids
+
+
+def test_sarif_filter_targets_only_inventory_not_verdicts():
+    """The CI filter must drop only *-SINK-CALL inventory, never an actionable
+    verdict rule; and Python's verdict findings must reach code scanning."""
+    import re
+    from pathlib import Path
+
+    workflow = Path(".github/workflows/cybergraph.yml").read_text(encoding="utf-8")
+    # The filter still exists and still targets the inventory rule family.
+    assert "SINK-CALL" in workflow, "the inventory filter must remain"
+    filter_pattern = re.compile(r"CG-.\*SINK-CALL|\^CG-\.\*SINK-CALL\$")
+    assert filter_pattern.search(workflow), "filter must target the *-SINK-CALL family"
+
+    # No Python verdict rule id may match the filter pattern (they must upload).
+    verdict_rules = (
+        "CG-SQL-EXEC", "CG-CMD-EXEC", "CG-PATH-TRAVERSAL",
+        "CG-TEMPLATE-INJECT", "CG-CODE-EXEC", "CG-DESERIALIZE",
+    )
+    for rule in verdict_rules:
+        assert not re.fullmatch(r"CG-.*SINK-CALL", rule), rule
+
+
+def test_workflow_runs_check_on_pull_requests():
+    from pathlib import Path
+
+    workflow = Path(".github/workflows/cybergraph.yml").read_text(encoding="utf-8")
+    assert "cybergraph check" in workflow
+    assert "merge-base" in workflow
+    # `git fetch --depth=0` is invalid ("depth 0 is not a positive number") and
+    # fails the CI step; the checkout already uses fetch-depth: 0 for full history.
+    assert "--depth=0" not in workflow
+    # a REVIEW must stay a notification in CI, never gate the build.
+    assert "--fail-on-review" not in workflow

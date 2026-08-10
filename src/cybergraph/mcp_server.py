@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from .build import build_graph
 from .graph import GraphStore
 from .rag import answer_grounded, answer_question, format_grounded_answer
 from .security import find_attack_paths, format_attack_paths, load_scanner_findings
+from .security.check import check_change
+from .security.verdict import verdict_to_dict
 
 try:
     from fastmcp import FastMCP
@@ -119,6 +122,24 @@ if FastMCP is not None:
         from .security.vulnerabilities import import_vulnerability_report
 
         return import_vulnerability_report(Path(repo_root).resolve(), Path(report_path).resolve())
+
+    @mcp.tool()
+    def check_change_tool(repo_root: str = ".", base: str = "") -> dict[str, Any]:
+        """Check whether the current change preserves this project's guarantees.
+
+        Returns the same object as `cybergraph check --json`. `state` is
+        "accept" or "review"; `checks` gives a per-capability result; and
+        `not_evaluated` lists what CyberGraph could not check on this change.
+        An "accept" means the checks that ran found nothing — read
+        `not_evaluated` before treating it as broader assurance.
+        """
+        verdict = check_change(Path(repo_root).resolve(), base=base or None)
+        # `cybergraph check --json` prints this same dict through `json.dumps`,
+        # which turns dataclass tuple fields (e.g. `provenance.capabilities`)
+        # into lists. Round-tripping here keeps this tool byte-identical to
+        # that JSON, not merely equal in a Python sense that a raw dict with
+        # tuples inside would fail against the string the CLI actually emits.
+        return _json.loads(_json.dumps(verdict_to_dict(verdict)))
 else:
     mcp = None
 

@@ -101,7 +101,14 @@ paths. Currently under-marketed.
 
 ## 4. Weaknesses
 
-### 4.1 EXISTENTIAL — the core detector is a substring grep, and the project already knows it
+> **Status update — 2026-08-10 (verdict-core / verdict-surfaces, commits `a770280`..`9b03ee2`):**
+> Sections below now carry a status of `OPEN`, `MITIGATED`, or `VERIFIED RESOLVED`. Everything
+> in the original prose (`Measured impact`, code excerpts, etc.) is left as historical record
+> of the state that was true at the original audit date; the status line and the note appended
+> to each section describe what has changed since. See §4.9 below for the honest before/after
+> table with commit shas.
+
+### 4.1 VERIFIED RESOLVED (Python) — the core detector is a substring grep, and the project already knows it
 
 `security/ontology.py:82-85`:
 
@@ -147,7 +154,40 @@ than fixing the rule. Every user hits this on first run without the `jq` snippet
 It also directly inverts the stated strategy: `COMPETITOR_MAP.md` names alert fatigue as the
 dominant developer pain, and the shipped tool manufactures it.
 
-### 4.2 CRITICAL — the ontology silently assumes "web app with route decorators"
+**Resolution (VERIFIED RESOLVED for Python; non-Python remains inventory-grade):** the
+verdict-core plan (Tasks 1–7, merged in `fe07800` "Merge pull request #38 from
+AQ-Labs/feat/verdict-core-detector") replaced the `any(kw in call_name.lower())` substring
+match for Python with an exact-match sink registry (`a770280` `feat(sinks): exact-match
+registry with vulnerability and shell semantics`) plus per-sink unsafe-use predicates
+(`beb9686` `feat(predicates): per-sink semantics with real confinement and shell rules`) that
+require the sink argument be tainted, or the finding is downgraded to a `-UNVERIFIED`
+abstention rather than a confirmed finding. The Task 7 gate
+(`benchmark/run_precision.py`) passed for Python: recall ≥ 0.95, safe-abstention ≤ 0.15
+(currently: `GATE PASSED`, recall 1.00, safe false-positive 0.00 across all gated classes).
+Re-scanning graphify — the same 275-file external repository used for the original
+measurement — now produces **0 confirmed Python findings** (down from 2,739). CyberGraph's
+own `src/` similarly drops from 151 to **0 confirmed Python findings**.
+
+This is Python-only. The four non-Python analyzers (JavaScript/TypeScript, Go, Java, C#) are
+still the regex substring matcher described in §4.5 and still emit `CG-<LANG>-SINK-CALL`
+inventory rows — e.g. re-scanning CyberGraph's own `src/` today still reports 3
+`CG-JS-SINK-CALL` findings against the vendored `assets/cytoscape.min.js`. Those four rules
+remain classified as inventory, not verdicts, until their Phase-2 upgrade (see §4.5).
+
+**The CI SARIF filter (`.github/workflows/cybergraph.yml`, "Drop informational
+sink-inventory findings") is therefore kept, not deleted, and its scope has changed with the
+fix:** before this work the filter's pattern (`^CG-.*SINK-CALL$`) matched Python's own
+substring-grep output, so the tool really was deleting its own only rule's findings, as
+originally documented above. After the Task 1–7 rewrite, Python's verdict rules
+(`CG-SQL-EXEC`, `CG-CMD-EXEC`, `CG-PATH-TRAVERSAL`, `CG-TEMPLATE-INJECT`, `CG-CODE-EXEC`,
+`CG-DESERIALIZE`, and their `-UNVERIFIED` abstention variants) do not match that pattern at
+all — they reach code scanning uploaded and unfiltered. The filter now suppresses only the
+four non-Python `CG-{GO,JAVA,JS,CSHARP}-SINK-CALL` inventory rules, which remain
+substring-based and not actionable until Phase 2 gives those languages the same treatment
+Python just received. `tests/test_sarif.py::test_sarif_filter_targets_only_inventory_not_verdicts`
+is a direct regression test for this scope.
+
+### 4.2 OPEN (severity: CRITICAL) — the ontology silently assumes "web app with route decorators"
 
 Measured on graphify (a substantial real Python CLI/library):
 
@@ -172,7 +212,17 @@ deserialization boundaries, MCP tool handlers.
 Note: `SOURCE_KEYWORDS` already contains `argv`, but nothing ever constructs an entrypoint
 from it — CLI arguments are a textbook CWE-78 source and are entirely unmodelled.
 
-### 4.3 HIGH — `top-risks` output is incorrect, and suppressions do not reach it
+**Status: still OPEN as of 2026-08-10.** Unchanged by verdict-core/verdict-surfaces — those
+plans built a decision layer (`cybergraph check`, capability model, policy) on top of the
+existing entrypoint detection rather than widening it. This is why `cybergraph check`
+reports `UNKNOWN` for `reachable_data_paths` on a repository with no HTTP routes rather than
+a false `accept` — the capability model (Task 8, `feat(checks): evaluate every capability;
+never pass without evidence`) requires positive evidence before a capability passes, so the
+zero-entrypoint gap degrades to an honest abstention instead of a silent pass. Entrypoint
+pluralism (CLI/`__main__`/queues/Lambda/MCP tools) remains unimplemented and is tracked as
+Phase 2 work in `docs/superpowers/plans/2026-08-08-verdict-core.md`.
+
+### 4.3 VERIFIED RESOLVED — `top-risks` output is incorrect, and suppressions do not reach it
 
 Live output on graphify:
 
@@ -194,7 +244,20 @@ yet `cybergraph analyze .` still reports:
 **Suppressions filter `findings` but not attack paths or risk ranking.** The user set a config
 and the ranked output ignored it. This is a defect, not a design decision.
 
-### 4.4 HIGH — call resolution is name-only
+**Resolution:** fixed in `a8f8c26` `fix(paths): suppress before applying the traversal
+limit`, with a direct regression test added in the same commit
+(`tests/test_attack_path_suppressions.py`, Task 6 of verdict-core). Suppression is now
+applied before the traversal/ranking limit is enforced, and follow-up commits (`5772bb8`
+`fix(paths): keep suppressed paths on exploration and evidence surfaces`, `4d60f67`
+`fix(attack-paths): suppressed paths must not starve the exploration surfaces`, `b0d4b12`
+`fix(export): record the graph document's two suppression policies`) ensure a suppressed
+attack path is hidden from ranked/actionable surfaces (`top-risks`, `analyze`, PR review)
+without starving those surfaces of slots, while still appearing on exploration/evidence
+surfaces (HTML report, `explain`, JSON export) for reviewer inspection. Regression pinned
+further in `6bad214` `test(attack-paths): pin traversal invariants and the ranked
+suppression surfaces`.
+
+### 4.4 OPEN (severity: HIGH) — call resolution is name-only
 
 `analysis/resolve.py:89-92`:
 
@@ -212,7 +275,16 @@ nodes** — the call graph is overwhelmingly unresolved dangling strings.
 
 The `low`/`ambiguous` confidence tag is honest but does not recover the lost precision.
 
-### 4.5 HIGH — four of five languages have no parse tree
+**Status: still OPEN as of 2026-08-10.** Unchanged by verdict-core/verdict-surfaces — the
+`14,563 raw CALLS edges against 700 Function nodes` shape on graphify has not been
+re-measured against a fix because no fix landed; name-only resolution remains. The verdict
+layer works around it rather than fixing it: `cybergraph check`'s capability model treats
+call resolution confidence as an input to whether a capability is evaluated at all, so an
+ambiguous resolution degrades toward `UNKNOWN`/`REVIEW` rather than a false `accept`, per the
+governing invariant in `docs/superpowers/plans/2026-08-08-verdict-core.md` ("uncertainty
+never becomes safety"). Receiver-typed/import-resolved call graphs remain Phase 2 work.
+
+### 4.5 OPEN (severity: HIGH) — four of five languages have no parse tree
 
 Only Python uses a real AST (stdlib `ast`). The JavaScript/TypeScript, Go, Java, and C#
 analyzers are regex-based — each begins `import re` and each docstring self-describes as a
@@ -230,6 +302,17 @@ This compounds §4.1 and §4.4. Requiring a *tainted argument* before emitting a
 resolving a call by receiver type, needs structure that regex does not provide. Any precision
 target therefore has to be stated per-language, or the project has to take on a parsing
 dependency (e.g. tree-sitter), which trades directly against the zero-dependency moat in §3.2.
+
+**Status: still OPEN as of 2026-08-10, and this is the direct reason §4.1's CI SARIF filter
+is kept rather than deleted.** The Task 1–7 exact-match-registry-plus-predicate rewrite that
+resolved §4.1 for Python depends on an AST (taint through real expression structure); it was
+applied to `analysis/python.py` only. JavaScript/TypeScript, Go, Java, and C# still run the
+pre-rewrite regex substring matcher and still emit their `CG-{JS,GO,JAVA,CSHARP}-SINK-CALL`
+rule as inventory, not a verdict — there is no tainted-argument requirement to apply without
+a parse tree. Those four rules therefore stay classified as inventory-grade and stay behind
+the CI SARIF filter until each language gets its own Phase-2 sink registry/predicate pass (or
+the project takes on a parsing dependency, which is the tradeoff already recorded above
+against §3.2's zero-dependency moat).
 
 ### 4.6 MEDIUM — benchmark claims drift from the committed artifact
 
@@ -260,6 +343,22 @@ benchmark — the README says so honestly, but the figure gets cited as one.
 | No severity gradation | all analyzers | Everything is `medium`; triage is therefore impossible |
 | Line-based suppressions | `suppressions.py` | No content fingerprint, so any suppression breaks on a line move |
 | Full rebuild every run | `build.py` | No incremental analysis; fine at 275 files, not at 5,000 |
+
+---
+
+## 4.8 Status transitions — before/after, with commit shas
+
+Recorded 2026-08-10, at the end of the verdict-core / verdict-surfaces plans (20 tasks).
+
+| Section | Status | Before | After | Key commit(s) |
+|---|---|---|---|---|
+| §4.1 substring detector | **VERIFIED RESOLVED** (Python only) | CyberGraph `src/`: 151 findings, 1 rule (`CG-SINK-CALL`), 100% medium. graphify (275 files): 2,739 findings, 1 rule, 100% medium. | Python: 0 confirmed findings on both CyberGraph `src/` and graphify — Task 7 gate `GATE PASSED` (recall 1.00 ≥ 0.95, safe false-positive 0.00 ≤ 0.05, safe-abstention 0.00 ≤ 0.15, all classes). Non-Python: CyberGraph `src/` still reports 3 `CG-JS-SINK-CALL` inventory findings (vendored `assets/cytoscape.min.js`) — unchanged, inventory-grade, filtered from code scanning by design (see §4.5). | `a770280` (exact-match sink registry), `beb9686` (per-sink predicates), `fe07800` (Task 1–7 merged, PR #38) |
+| §4.2 entrypoints | **OPEN** | `entrypoints: 0`, `attack paths: 0` on graphify; silent degradation to grep, no warning. | Unchanged measurement; the verdict layer now reports `UNKNOWN` instead of a false accept when no entrypoints exist (Task 8, capability model). | `638a331` `feat(checks): evaluate every capability; never pass without evidence` |
+| §4.3 suppressions ignored in ranking | **VERIFIED RESOLVED** | `.cybergraph.toml` suppressed `tests/*`/`benchmark/*`/`examples/*`; `analyze` still ranked `benchmark/cases/go_http_cmdi/...` and `tests/fixtures/demo_app/...` at CRITICAL. | Suppression applied before the traversal/ranking limit; direct regression test asserts a suppressed path cannot occupy a ranked slot while still surfacing on exploration/evidence views. | `a8f8c26` (fix + `tests/test_attack_path_suppressions.py`), `5772bb8`, `4d60f67`, `b0d4b12`, `6bad214` |
+| §4.4 call resolution name-only | **OPEN** | graphify: 14,563 raw `CALLS` edges against 700 Function nodes; `_simple_name()` resolves by trailing identifier only. | Unchanged measurement; no receiver typing or import resolution added. The verdict layer treats low/ambiguous resolution confidence as grounds to abstain (`UNKNOWN`/`REVIEW`) rather than accept. | none (tracked as Phase 2 in `docs/superpowers/plans/2026-08-08-verdict-core.md`) |
+| §4.5 four languages without parse trees | **OPEN** | JS/TS, Go, Java, C# analyzers are regex-based (`import re`, 6–8 call sites each); no structure to require a tainted argument. | Unchanged; this is why the four `CG-{JS,GO,JAVA,CSHARP}-SINK-CALL` rules remain inventory-grade and why the CI SARIF filter (§4.1) still suppresses them from code scanning. | none (tracked as Phase 2) |
+
+Live re-measurement commands used above: `cybergraph scan src` (CyberGraph self-scan), `cybergraph sarif --repo src --output ...` (rule-id breakdown), `python benchmark/run_precision.py` (gate).
 
 ---
 

@@ -321,6 +321,20 @@ MUTATIONS: list[Mutation] = [
             "tests/test_review.py::test_a_structural_path_becoming_data_reachable_is_worsened",
         ),
     ),
+    # -- D1: the tool's own cache dir must be excluded by component, not substring --
+    Mutation(
+        id="D1-revisions-cybergraph-substring-match",
+        disaster="D1",
+        file="cybergraph/security/revisions.py",
+        old='    return path.split("/", 1)[0] == ".cybergraph"',
+        new='    return "cybergraph" in path',
+        tests=(
+            "tests/test_revisions.py::test_cybergraph_state_dir_is_never_a_changed_file",
+        ),
+        note="a substring match drops real changed files like `cybergraph_utils.py` "
+        "(and every src/cybergraph/*.py change on this tool's own repo) from the "
+        "change set -- a fail-open, not the intended `.cybergraph/` exclusion",
+    ),
     # -- D2: "I could not look" must never read as "nothing to see" ----------
     Mutation(
         id="D2-revisions-failure-empty-not-flagged",

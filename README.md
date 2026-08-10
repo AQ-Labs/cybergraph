@@ -75,6 +75,8 @@ Supported Python: 3.10, 3.11, 3.12, 3.13.
 cybergraph quickstart .        # zero-to-report: init, build, analyze, open report
 cybergraph init .
 cybergraph doctor .
+cybergraph check .            # does this change preserve the guarantees CyberGraph can verify?
+cybergraph policy --repo .    # show the declared security policy and what it protects
 cybergraph analyze .          # build + run every analysis, print top risks
 cybergraph history .          # what's new / fixed / regressed since the last scan
 cybergraph config show .      # inspect effective config + LLM/graph state
@@ -170,6 +172,55 @@ Suppressions hide findings, but the graph still keeps edges such as `REACHES_SIN
 
 **New:** `paths` now also hides matching entrypoint-to-sink *attack paths* from the ranked, actionable surfaces — `cybergraph attack-paths`, top risks, `analyze`, the PR review, the cloud and Strix scopes. Attack paths were previously never suppressed anywhere, so this is a change in what those commands print. A path is hidden only when **every** file it touches is suppressed, so a route crossing from suppressed code into live code is still reported. The exploration and evidence surfaces still show suppressed paths — the JSON graph export (which records the policy under its `suppression` key), the HTML report, the MCP `explain_attack_path_tool`, grounded answers, and LLM triage slices — and a suppressed path never consumes a slot a real one needs on any of them. Each surface caps how many paths it traverses; suppressed paths are collected separately and fill only what the real ones leave, so accepted fixture noise cannot push the genuine attack paths off the end of the report, the exported graph or the evidence an LLM is grounded on. A PR review scans both sides of the diff under the *current* configuration — `[suppressions] paths`, `[ignore] paths` and `[security] sinks` alike — so changing any of them can never appear as an added or removed attack path. It is reported as a configuration change instead, alongside a count of the reachable risks the suppressions hide (hidden, not fixed) and the changed files `[ignore] paths` kept out of the analysis entirely (not analysed, not fixed). A PR that genuinely removes a vulnerable line is still reported as `removed`, and one that genuinely introduces a sink is still reported as `added`. Scan history holds the same line: a finding that disappears because `[suppressions] rules`, `[suppressions] paths` or `[ignore] paths` now covers it is counted as *hidden by config (hidden, not fixed)* rather than as fixed, on `cybergraph history`, on the `analyze` delta line and in the HTML report's delta strip. Its history row stays open, so dropping the suppression later reads as persisting rather than as a regression. A finding that disappears because the code changed is still fixed.
 
+## Security policy
+
+**Phase 1 contract — the sentence this work is judged against:**
+
+> Given a supported AI-generated Python change, CyberGraph can tell whether the specific security guarantees it understands were preserved — and explicitly admit what it could not verify.
+
+`cybergraph check` is the command that evaluates a change against that contract. It compares
+the current state of a repository against a base ref (`--mode merge-base|worktree|range`) and
+reports one of two states: `accept` (the checks that ran found nothing) or `review` (something
+needs a human look) — plus `not_evaluated`, an explicit list of what CyberGraph could not
+check on this change. It never turns "did not look" into a pass; a capability only passes when
+there is positive evidence it was analyzed. `--json` emits the same structure a script or CI
+step can consume; the CI workflow (`.github/workflows/cybergraph.yml`) runs it on every pull
+request as a non-gating notification (no `--fail-on-review`) until the field false-positive
+rate is measured.
+
+`cybergraph check` verifies against a declared **security policy** — the routes/functions that
+are expected to require authentication, ownership checks, or other guards. Bootstrap one from
+what the codebase already does:
+
+```bash
+cybergraph check . --init-policy   # writes cybergraph.policy.toml from routes that already require login
+```
+
+Review every line of the generated `cybergraph.policy.toml`, edit it to reflect intent (not
+just current behaviour), and **commit it to the repository** — it is the baseline `check`
+diffs future changes against, so a change that silently drops a guard the policy declares is
+what turns an `accept` into a `review`. Because it is a plain committed TOML file, any human or
+any agent working in the repository can read it directly to know what CyberGraph expects to be
+protected, without running the tool first:
+
+```bash
+cybergraph policy --repo .            # show the declared policy and which entities it protects
+cybergraph policy --repo . --baseline # print a proposed baseline without writing anything
+```
+
+**Which languages are verified today:** Python is the only language with verdict-grade
+detection — an exact-match sink registry with per-sink taint predicates, gated by a labelled
+precision/recall/abstention benchmark (`benchmark/run_precision.py`). Its findings (`CG-SQL-EXEC`,
+`CG-CMD-EXEC`, `CG-PATH-TRAVERSAL`, `CG-TEMPLATE-INJECT`, `CG-CODE-EXEC`, `CG-DESERIALIZE`) are
+confirmed or explicitly abstain (`-UNVERIFIED`) — never a bare guess. Go, JavaScript/TypeScript,
+Java, and C# are still **inventory-grade**: their sink findings (`CG-GO-SINK-CALL`,
+`CG-JS-SINK-CALL`, `CG-JAVA-SINK-CALL`, `CG-CSHARP-SINK-CALL`) mark "a sensitive sink is used
+here" from a regex-based analyzer with no parse tree and no taint requirement, useful as a map
+of where sensitive calls live but not as a confirmed verdict. CI's SARIF export deliberately
+filters those four inventory rules out of code scanning uploads until each language gets the
+same exact-match-plus-predicate treatment Python already has; Python's verdict rules are never
+filtered and always reach code scanning.
+
 ## Example questions
 
 ```text
@@ -210,6 +261,13 @@ Available tools:
 - `iac_attack_paths_tool`
 - `import_scanner_report_tool`
 - `import_vulnerabilities_tool`
+- `check_change_tool` (mirrors `cybergraph check --json`: `accept`/`review` plus `not_evaluated`)
+
+The MCP surface is an **interoperability surface, not automatic verification**: nothing forces
+a connected agent to call `check_change_tool` before or after making a change, and an agent may
+decline to call it entirely. Reliable, always-invoked checking needs a client-side hook, which
+is future work — treat these tools as available context an agent can pull, not a gate it must
+pass.
 
 ## Project direction
 
