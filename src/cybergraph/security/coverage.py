@@ -17,14 +17,14 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from cybergraph.graph import GraphStore
-from cybergraph.security.capability import SOURCE_GLOBS, VERIFIED_GLOBS
+from cybergraph.security.capability import CONFIG_GLOBS, SOURCE_GLOBS, VERIFIED_GLOBS
 
 STATUS_ANALYZED = "analyzed"
 STATUS_FAILED = "failed"
 STATUS_UNSUPPORTED = "unsupported"
 STATUS_MISSING = "missing"
 
-_PARSE_FAILURE_RULES = ("PY-SYNTAX",)
+_PARSE_FAILURE_RULES = ("PY-SYNTAX", "CG-FILE-UNREADABLE")
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ def assess_coverage(
     repo_root = Path(repo_root).resolve()
     sources = tuple(
         file for file in changed_files
-        if any(fnmatch(file, pattern) for pattern in SOURCE_GLOBS)
+        if any(fnmatch(file, pattern) for pattern in SOURCE_GLOBS + CONFIG_GLOBS)
     )
     if not sources:
         return ()
@@ -67,7 +67,7 @@ def assess_coverage(
     for file in sources:
         if file in failed:
             results.append(FileCoverage(file, STATUS_FAILED, "the file could not be read"))
-        elif not any(fnmatch(file, pattern) for pattern in VERIFIED_GLOBS):
+        elif not any(fnmatch(file, pattern) for pattern in VERIFIED_GLOBS + CONFIG_GLOBS):
             results.append(
                 FileCoverage(file, STATUS_UNSUPPORTED, "no analyzer for this language yet")
             )

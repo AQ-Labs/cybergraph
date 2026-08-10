@@ -28,12 +28,16 @@ from pathlib import Path
 from cybergraph.config import CyberGraphConfig
 from cybergraph.graph import Edge, Finding, Node
 
+from .bucket_policy import analyze_bucket_policy_file
+from .collector import is_bucket_policy, is_supabase_sql
 from .csharp import analyze_csharp_file
 from .dockerfile import analyze_dockerfile_file
+from .firebase_rules import analyze_firebase_rules_file
 from .go import analyze_go_file
 from .java import analyze_java_file
 from .javascript import analyze_javascript_file
 from .python import analyze_python_file
+from .supabase_rls import analyze_supabase_rls_file
 from .terraform import analyze_terraform_file
 
 AnalyzerResult = tuple[list[Node], list[Edge], list[Finding]]
@@ -46,11 +50,12 @@ CSHARP_SUFFIXES = {".cs"}
 TERRAFORM_SUFFIXES = {".tf"}
 DOCKERFILE_SUFFIXES = {".dockerfile"}
 DOCKERFILE_NAMES = {"Dockerfile"}
+FIREBASE_SUFFIXES = {".rules"}
 
 # Suffixes that have a dedicated security analyzer (everything else falls back).
 ANALYZED_SUFFIXES = (
     PYTHON_SUFFIXES | JAVASCRIPT_SUFFIXES | GO_SUFFIXES | JAVA_SUFFIXES | CSHARP_SUFFIXES
-    | TERRAFORM_SUFFIXES
+    | TERRAFORM_SUFFIXES | FIREBASE_SUFFIXES
 )
 
 
@@ -175,6 +180,12 @@ def _dispatch(path: Path, repo_root: Path, config: CyberGraphConfig) -> Analyzer
             repo_root,
             secret_markers=config.secret_markers,
         )
+    if suffix in FIREBASE_SUFFIXES or path.name == "firebase.json":
+        return analyze_firebase_rules_file(path, repo_root)
+    if is_supabase_sql(path):
+        return analyze_supabase_rls_file(path, repo_root)
+    if is_bucket_policy(path):
+        return analyze_bucket_policy_file(path, repo_root)
     return _fallback_file_node(path, repo_root)
 
 

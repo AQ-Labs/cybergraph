@@ -32,8 +32,15 @@ SUPPORTED_SUFFIXES = {
     ".php",
     ".tf",
     ".dockerfile",
+    ".rules",
 }
-SUPPORTED_FILENAMES = {"package.json", "requirements.txt", "pyproject.toml", "Dockerfile"}
+SUPPORTED_FILENAMES = {
+    "package.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "Dockerfile",
+    "firebase.json",
+}
 
 
 def is_ignored_path(rel_path: str, ignored_paths: tuple[str, ...] = ()) -> bool:
@@ -54,9 +61,27 @@ def is_ignored_path(rel_path: str, ignored_paths: tuple[str, ...] = ()) -> bool:
     return False
 
 
+def is_supabase_sql(path: Path) -> bool:
+    return path.suffix.lower() == ".sql" and any(
+        part.lower() == "supabase" for part in path.parts
+    )
+
+
+def is_bucket_policy(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith(".json") and (
+        "bucket-policy" in name or "bucket_policy" in name or name.endswith(".iam.json")
+    )
+
+
 def is_supported_source(path: Path) -> bool:
     """Whether the analyzers would read this file at all, ignoring config."""
-    return path.suffix.lower() in SUPPORTED_SUFFIXES or path.name in SUPPORTED_FILENAMES
+    return (
+        path.suffix.lower() in SUPPORTED_SUFFIXES
+        or path.name in SUPPORTED_FILENAMES
+        or is_supabase_sql(path)
+        or is_bucket_policy(path)
+    )
 
 
 def iter_source_files(repo_root: Path, ignored_paths: tuple[str, ...] = ()) -> list[Path]:

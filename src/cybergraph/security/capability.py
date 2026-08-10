@@ -36,7 +36,6 @@ _REVIEW_STATES = frozenset({FAIL, UNKNOWN, NOT_SUPPORTED})
 
 PYTHON_GLOBS = ("*.py",)
 WEB_GLOBS = ("*.ts", "*.tsx", "*.js", "*.jsx", "*.vue", "*.svelte", "*.mjs", "*.cjs")
-INFRA_GLOBS = ("*.tf", "*.tfvars", "supabase/*", "firebase.json", "*.yaml", "*.yml")
 
 # Every extension CyberGraph recognises as executable source, supported or not.
 SOURCE_GLOBS = (
@@ -46,6 +45,17 @@ SOURCE_GLOBS = (
 )
 # The subset with a Phase 1 analyzer that produces findings.
 VERIFIED_GLOBS = PYTHON_GLOBS
+
+# Declarative config surfaces with a Phase-2 posture analyzer. Kept narrow so a
+# changed config file that is analyzed-and-clean can PASS and an unparsed one
+# reads UNKNOWN -- broad globs (e.g. every *.yaml) would make unrelated changes
+# review. Single source of truth for the capability's `covers` and coverage.
+CONFIG_GLOBS = (
+    "*.tf",
+    "*.rules", "firebase.json", "*/firebase.json",
+    "supabase/*.sql", "*/supabase/*.sql",
+    "*bucket-policy*.json", "*bucket_policy*.json", "*.iam.json",
+)
 
 
 @dataclass(frozen=True)
@@ -69,7 +79,7 @@ CAPABILITIES: tuple[Capability, ...] = (
                "Languages CyberGraph can read", SOURCE_GLOBS, True),
     Capability("client_secret_boundary", "Secrets reaching the browser", WEB_GLOBS, False),
     Capability("cloud_configuration",
-               "Cloud and database configuration", INFRA_GLOBS, False),
+               "Cloud and database configuration", CONFIG_GLOBS, True),
 )
 
 _BY_ID = {capability.id: capability for capability in CAPABILITIES}
