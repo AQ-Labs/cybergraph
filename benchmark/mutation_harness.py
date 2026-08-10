@@ -445,6 +445,33 @@ MUTATIONS: list[Mutation] = [
         note="a relevant file absent from coverage entirely is not evidence of safety; "
         "it is silence",
     ),
+    # -- D9: a client hook fails open ------------------------------------
+    Mutation(
+        id="D9-pre-commit-substring-ownership-clobbers-foreign",
+        disaster="D9",
+        file="cybergraph/hooks/pre_commit.py",
+        old="    return any(line.strip().startswith(prefix) for line in content.splitlines())",
+        new="    return MARKER in content",
+        tests=(
+            "tests/test_hooks_pre_commit.py::"
+            "test_foreign_hook_mentioning_marker_in_prose_is_still_refused",
+        ),
+        note="ownership must be a structural line match, not a substring search: a "
+        "foreign hook that merely mentions the marker in a comment must still be "
+        "refused, not silently claimed and overwritten",
+    ),
+    Mutation(
+        id="D9-staged-falls-back-to-worktree",
+        disaster="D9",
+        file="cybergraph/security/revisions.py",
+        old='    ok, out = _git(repo_root, "diff", "--cached", "--name-only")',
+        new='    ok, out = _git(repo_root, "diff", "--name-only", "HEAD")',
+        tests=(
+            "tests/test_revisions_staged.py::"
+            "test_staged_mode_ignores_unstaged_edit_to_tracked_file",
+        ),
+        note="staged mode must read the index (--cached), not the working tree",
+    ),
 ]
 
 

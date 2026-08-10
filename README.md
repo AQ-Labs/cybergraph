@@ -221,6 +221,23 @@ filters those four inventory rules out of code scanning uploads until each langu
 same exact-match-plus-predicate treatment Python already has; Python's verdict rules are never
 filtered and always reach code scanning.
 
+### Run the check automatically — `cybergraph hook`
+
+`cybergraph check` verifies a change, but something has to invoke it. Install a hook so it
+runs on its own at the moment code is accepted:
+
+```bash
+cybergraph hook install claude-code   # runs when an agent turn ends (Stop hook)
+cybergraph hook install pre-commit     # runs before each commit (the staged index)
+cybergraph hook status                 # what's installed
+cybergraph hook uninstall pre-commit
+```
+
+By default a REVIEW is **surfaced, not blocking** — the commit proceeds and the agent
+continues. Install with `--strict` to make a REVIEW block (a non-zero pre-commit exit, or a
+Claude Code stop-block the agent must resolve). Installing over a pre-commit hook you already
+have is refused unless you pass `--force` (which backs the old hook up first).
+
 ## Example questions
 
 ```text
