@@ -76,6 +76,16 @@ SECRET_EXPOSURE_SINKS = {
     "child_process.exec",
 }
 
+_CORS_CALL_RE = re.compile(r"\bcors\s*\(\s*\{")
+_ORIGIN_ALL_RE = re.compile(r"""origin\s*:\s*(?:['"]\*['"]|true)""")
+_CREDENTIALS_TRUE_RE = re.compile(r"credentials\s*:\s*true")
+_NEXT_PUBLIC_RE = re.compile(
+    r"NEXT_PUBLIC_[A-Za-z0-9_]*"
+    r"(?:SECRET|APIKEY|API_KEY|TOKEN|PASSWORD|PASSWD|PRIVATE|_KEY|KEY)"
+    r"[A-Za-z0-9_]*",
+    re.IGNORECASE,
+)
+
 
 def analyze_javascript_file(
     path: Path,
@@ -218,6 +228,7 @@ def analyze_javascript_file(
                     )
 
     _add_imports(lines, rel, edges)
+    _add_js_web_findings(source, lines, rel, findings)
     return nodes, edges, findings
 
 
@@ -350,3 +361,65 @@ def _is_secret_exposure(call_name: str) -> bool:
 
 def _language(path: Path) -> str:
     return "typescript" if path.suffix.lower() in {".ts", ".tsx"} else "javascript"
+
+
+def _brace_object(source: str, open_index: int) -> tuple[str, int]:
+    """From the '{' at open_index, return (object_text, end_index) at its match."""
+    depth = 0
+    for i in range(open_index, len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[open_index : i + 1], i
+    return source[open_index:], len(source)
+
+
+def _line_of(source: str, index: int) -> int:
+    return source.count("\n", 0, index) + 1
+
+
+def _add_js_web_findings(
+    source: str, lines: list[str], rel: str, findings: list[Finding]
+) -> None:
+    # CORS: cors({ ... origin:*/true ... credentials:true ... })
+    for m in _CORS_CALL_RE.finditer(source):
+        obj, _end = _brace_object(source, m.end() - 1)
+        if _ORIGIN_ALL_RE.search(obj) and _CREDENTIALS_TRUE_RE.search(obj):
+            line_no = _line_of(source, m.start())
+            if is_inline_suppressed(lines, line_no, "CG-CORS-CREDENTIALED-WILDCARD"):
+                continue
+            findings.append(
+                Finding(
+                    rule_id="CG-CORS-CREDENTIALED-WILDCARD",
+                    severity="high",
+                    message="CORS allows any origin with credentials "
+                            "(origin '*'/true + credentials: true)",
+                    file_path=rel,
+                    line_start=line_no,
+                    cwe="CWE-942",
+                    evidence=lines[line_no - 1].strip() if 0 < line_no <= len(lines) else "",
+                )
+            )
+    # Next.js: a NEXT_PUBLIC_ name that looks like a secret -> inlined into the bundle.
+    seen: set[int] = set()
+    for m in _NEXT_PUBLIC_RE.finditer(source):
+        line_no = _line_of(source, m.start())
+        if line_no in seen:
+            continue
+        seen.add(line_no)
+        if is_inline_suppressed(lines, line_no, "CG-CLIENT-SECRET-EXPOSED"):
+            continue
+        findings.append(
+            Finding(
+                rule_id="CG-CLIENT-SECRET-EXPOSED",
+                severity="high",
+                message=f"`{m.group(0)}` ships a secret to the browser bundle "
+                        "(NEXT_PUBLIC_ is inlined client-side)",
+                file_path=rel,
+                line_start=line_no,
+                cwe="CWE-200",
+                evidence=lines[line_no - 1].strip() if 0 < line_no <= len(lines) else "",
+            )
+        )
