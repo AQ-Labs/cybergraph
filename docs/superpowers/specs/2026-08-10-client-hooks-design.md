@@ -162,9 +162,18 @@ prints its findings and does not block, never one that blocks spuriously or corr
   merge; with a malformed `settings.json` → refuse with a message, never overwrite the user's
   file blind.
 - A foreign `pre-commit` hook → `refused_foreign` (or backup+replace under `--force`).
-- The installed hook itself, at fire time, treats a `check` failure as fail-closed for
-  `--strict` (a check that cannot run is not an ACCEPT) and as a visible warning for advisory —
-  it never swallows an error into a silent pass.
+- The installed hook itself, at fire time, distinguishes two kinds of "not an ACCEPT":
+  - An *established but uncertain* comparison (a bad base, an unreadable diff, an `UNKNOWN`
+    capability) resolves to **REVIEW**, so `--strict` blocks it — a check that ran and could
+    not vouch for the change is never treated as safe.
+  - An *internal exception* in CyberGraph's own code (a genuine crash, not an uncertain result)
+    is **never a silent ACCEPT** — the failure is always surfaced. The two targets differ by
+    construction: the Claude Code Stop-hook wrapper catches it and emits a visible message
+    without blocking (inert-safe — it deliberately does not trap the agent on our own bug, in
+    strict or advisory); the pre-commit hook is a thin `exec` of `cybergraph check`, so a crash
+    propagates a non-zero exit and surfaces as a blocked commit (the safe direction). (See the
+    inert-safe worst case above.)
+  Either way, an error is never swallowed into a silent pass.
 - Uninstall of an absent or foreign hook → success with an honest message; it removes only ours.
 
 ## Testing
