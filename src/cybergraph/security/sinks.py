@@ -120,37 +120,7 @@ _JAVASCRIPT: tuple[Sink, ...] = (
          "opens a file whose path comes from this value", "path", bare=True),
 )
 
-_GO: tuple[Sink, ...] = (
-    # SQL — db/tx receivers unresolvable → bare on the PascalCase method name.
-    Sink("Query", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    Sink("QueryRow", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    Sink("QueryContext", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    Sink("QueryRowContext", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    Sink("Exec", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    Sink("ExecContext", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
-    # Command — exec.Command(name, args…); shell only when name is sh/bash -c → conditional.
-    Sink("exec.Command", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
-         shell=SHELL_CONDITIONAL),
-    Sink("exec.CommandContext", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
-         shell=SHELL_CONDITIONAL),
-    # Path — os/ioutil receivers → bare on the PascalCase method name.
-    Sink("Open", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
-    Sink("OpenFile", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
-    Sink("ReadFile", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
-    Sink("WriteFile", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
-    Sink("Create", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
-         "opens a file whose path comes from this value", "path", bare=True),
-)
-
-_BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {
-    "python": _PYTHON,
-    "javascript": _JAVASCRIPT,
-    "go": _GO,
-}
+_BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {"python": _PYTHON, "javascript": _JAVASCRIPT}
 
 
 def all_sinks() -> tuple[Sink, ...]:

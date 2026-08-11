@@ -36,7 +36,6 @@ _REVIEW_STATES = frozenset({FAIL, UNKNOWN, NOT_SUPPORTED})
 
 PYTHON_GLOBS = ("*.py",)
 WEB_GLOBS = ("*.ts", "*.tsx", "*.js", "*.jsx", "*.vue", "*.svelte", "*.mjs", "*.cjs")
-GO_GLOBS = ("*.go",)
 
 # Every extension CyberGraph recognises as executable source, supported or not.
 SOURCE_GLOBS = (
@@ -71,14 +70,11 @@ class Capability:
 
 
 CAPABILITIES: tuple[Capability, ...] = (
-    Capability("sql_construction", "Unsafe database queries",
-               PYTHON_GLOBS + WEB_GLOBS + GO_GLOBS, True),
-    Capability("command_execution", "Unsafe system commands",
-               PYTHON_GLOBS + WEB_GLOBS + GO_GLOBS, True),
+    Capability("sql_construction", "Unsafe database queries", PYTHON_GLOBS + WEB_GLOBS, True),
+    Capability("command_execution", "Unsafe system commands", PYTHON_GLOBS + WEB_GLOBS, True),
     Capability("code_execution", "Code run from user input", PYTHON_GLOBS + WEB_GLOBS, True),
     Capability("deserialization", "Unsafe data loading", PYTHON_GLOBS, True),
-    Capability("path_access", "Files opened from user input",
-               PYTHON_GLOBS + WEB_GLOBS + GO_GLOBS, True),
+    Capability("path_access", "Files opened from user input", PYTHON_GLOBS + WEB_GLOBS, True),
     Capability("declared_login_rules", "Your declared login rules", PYTHON_GLOBS, True),
     Capability("reachable_data_paths",
                "New routes from the internet to sensitive code", PYTHON_GLOBS, True),
