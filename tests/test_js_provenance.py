@@ -76,3 +76,25 @@ def test_assess_command_inherent_shell_tainted_unsafe():
     assert assess(_sink("child_process.exec"), "`ls ${dir}`", {"dir"}) == VERDICT_UNSAFE
     assert assess(_sink("child_process.exec"), "`ls ${dir}`", set()) == VERDICT_UNKNOWN
     assert assess(_sink("child_process.exec"), "'ls -la'", set()) == VERDICT_SAFE
+
+
+def test_classify_bare_concat_is_composed():
+    assert classify("cmd + userInput") == "composed"
+    assert classify("base + dir") == "composed"
+
+
+def test_assess_bare_concat_tainted_is_unsafe():
+    assert (
+        assess(_sink("child_process.exec"), "base + userInput", {"userInput"})
+        == VERDICT_UNSAFE
+    )
+
+
+def test_assess_bare_concat_untainted_is_unknown():
+    # a variable, unresolved -> UNKNOWN, never SAFE
+    assert assess(_sink("db.query"), "base + dir", set()) == VERDICT_UNKNOWN
+
+
+def test_arithmetic_in_call_is_not_composed():
+    # the '+' is inside parens, not top-level
+    assert classify("f(1 + 2)") == "opaque"

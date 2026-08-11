@@ -70,7 +70,7 @@ def classify(arg_text: str) -> str:
         return LITERAL
     if s.startswith("`") and "${" in s:
         return COMPOSED
-    if "+" in s and ("'" in s or '"' in s or "`" in s):
+    if len(_split_plus(s)) > 1:
         return COMPOSED
     return OPAQUE
 
