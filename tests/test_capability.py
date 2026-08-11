@@ -22,7 +22,8 @@ def test_python_change_makes_python_capabilities_relevant():
 def test_typescript_change_makes_the_web_capability_relevant():
     rel = relevance(("web/page.tsx",))
     assert rel["client_secret_boundary"] is True
-    assert rel["sql_construction"] is False
+    assert rel["sql_construction"] is True  # the four injection capabilities now cover web too
+    assert rel["deserialization"] is False  # still Python-only
 
 
 def test_go_change_is_caught_by_general_source_support():
