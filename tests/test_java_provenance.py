@@ -109,3 +109,39 @@ def test_assess_append_escaped_quote_swallows_real_call_not_safe():
     assert (
         assess(_sql(), 'sb.append("a\\").append(userInput)', {"userInput"}) == VERDICT_UNKNOWN
     )
+
+
+def test_assess_trailing_call_after_append_chain_tainted_unsafe():
+    # A trailing call this module has no special name for (`.substring(...)`)
+    # after a recognised, all-literal append chain must still be examined --
+    # not silently dropped because the FIRST recognised call's own operands
+    # were all literal.
+    assert assess(_sql(), 'sb.append("a").substring(evil)', {"evil"}) == VERDICT_UNSAFE
+
+
+def test_assess_trailing_call_after_append_chain_unresolved_unknown():
+    # Same shape, but the trailing operand is a plain, unresolved identifier
+    # rather than a taint-confirmed one -- UNKNOWN, never SAFE.
+    assert assess(_sql(), 'sb.append("a").substring(x)', set()) == VERDICT_UNKNOWN
+
+
+def test_assess_trailing_append_after_format_call_tainted_unsafe():
+    # Same class of gap, the other direction: a trailing `.append(...)` after
+    # a recognised, all-literal `String.format(...)` call.
+    assert (
+        assess(_sql(), 'String.format("%s","lit").append(evil)', {"evil"}) == VERDICT_UNSAFE
+    )
+
+
+def test_assess_trailing_substring_after_format_call_tainted_unsafe():
+    # And a trailing call with no special name at all after `String.format(...)`.
+    assert (
+        assess(_sql(), 'String.format("%s","lit").substring(evil)', {"evil"}) == VERDICT_UNSAFE
+    )
+
+
+def test_assess_format_only_all_literal_is_safe():
+    # Regression guard: a `String.format(...)` call with no trailing chain and
+    # every argument a proven literal must still read SAFE -- the coverage
+    # guard closing the trailing-call gap above must not over-correct this.
+    assert assess(_sql(), 'String.format("literal")', set()) == VERDICT_SAFE

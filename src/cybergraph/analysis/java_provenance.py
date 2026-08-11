@@ -41,6 +41,22 @@ _NUMERIC_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 _JAVA_KEYWORDS = frozenset({"true", "false", "null"})
 _CONST_LITERAL_KEYWORDS = _JAVA_KEYWORDS
 _APPEND_RE = re.compile(r"\.append\s*\(")
+# Any bareword call, dotted or bare: matches `append(`/`substring(` in a
+# member chain, and `format(` inside `String.format(`. Deliberately broader
+# than `_APPEND_RE` -- this is what makes the operand-extraction coverage
+# check in `_chain_operand_candidates` a single shared guard rather than a
+# per-idiom special case: it finds a *trailing* `.substring(evil)` after a
+# recognised append/format chain exactly the same way it finds the
+# recognised chain itself.
+_CALL_RE = re.compile(r"[A-Za-z_]\w*\s*\(")
+# A "gap" between (or before/after) recognised calls is safe to skip only
+# when it is pure chain navigation -- a receiver/method name and the dots
+# connecting them (`sb.`, `.`, `.toString`) -- never anything else. Method
+# and receiver *names* are not treated as data operands anywhere in this
+# module (the same is true of `sb` in `sb.append(x)`), so this deliberately
+# does not flag a bare name here; what it does flag is anything with
+# structure this module cannot vouch for -- brackets, stray quotes, operators.
+_NAV_ONLY_RE = re.compile(r"^[\s.\w]*$")
 
 
 def extract_first_arg(source: str, open_paren: int) -> str | None:
@@ -193,34 +209,6 @@ def _operand_candidates(operands: list[str]) -> tuple[list[str], bool]:
     return names, unresolved
 
 
-def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from non-literal top-level ``+`` operands."""
-    return _operand_candidates(_split_plus(arg_text))
-
-
-def _format_operand_candidates(format_text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from ALL of a ``String.format(...)`` call's arguments.
-
-    Unlike a JS template literal, whose leading piece is always a literal
-    fragment of the source text, Java's format argument is a normal runtime
-    value: ``String.format(userFmt, x)`` and
-    ``String.format("SELECT * FROM " + tbl, "x")`` both carry a non-literal
-    format. So every argument -- format included -- is assessed with the same
-    positive-literal-proof logic; a format that genuinely is a string literal
-    is a proven literal and is skipped by `_is_proven_literal_operand` on its
-    own, with no special-casing needed here.
-
-    If `_split_call_args` cannot find where the call's arguments end -- an
-    unbalanced quote inside one of them, say -- it returns ``None`` rather
-    than a partial list, and that must read as unresolved, never as "no
-    arguments found, so every (nonexistent) argument is trivially literal."
-    """
-    args = _split_call_args(format_text)
-    if args is None:
-        return [], True
-    return _operand_candidates(args)
-
-
 def _append_open_parens(text: str) -> list[int]:
     """Indices of the ``(`` in every real, unquoted ``.append(`` call.
 
@@ -260,53 +248,151 @@ def _append_open_parens(text: str) -> list[int]:
     return positions
 
 
-def _append_operand_candidates(text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from every real ``.append(...)`` call's argument.
+def _matching_close_paren(text: str, open_paren: int) -> int | None:
+    """Index of the ``)`` matching the ``(`` at ``open_paren``, or None if unbalanced.
 
-    A ``StringBuilder`` chain (``sb.append(a).append(b).toString()``) is
-    Java's other composing idiom: each appended operand is assessed with the
-    same positive-literal-proof logic as a ``+`` operand or a
-    ``String.format`` argument. Uses `_append_open_parens` rather than a bare
-    regex scan so a `.append(` inside a string literal is never mistaken for
-    a real call.
+    Quote/paren-aware like `extract_first_arg`, but returns only the
+    boundary, not the argument text: a chain call's raw slice may carry its
+    own top-level commas (``String.format("%s", "lit")``), and this
+    deliberately does not split on them -- `_chain_operand_candidates` checks
+    the whole slice for a single literal first and otherwise falls back to a
+    broad identifier scan across it, which finds every identifier regardless
+    of where the commas fall.
+    """
+    depth = 0
+    quote: str | None = None
+    i = open_paren
+    while i < len(text):
+        c = text[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None  # unbalanced -> caller must treat as unresolved, never SAFE
 
-    A detected append site whose own argument does not balance --
-    ``sb.append("a).append(userInput)``, where the unterminated ``"a`` string
-    swallows everything after it, including the real ``.append(userInput)``
-    -- must never be silently dropped from ``operands``: `extract_first_arg`
-    returning ``None`` there is exactly the "we could not read this" case
-    ``unresolved`` exists for. Dropping it instead of flagging it is what let
-    an unreadable append chain fall through to the COMPOSED "every operand is
-    a proven literal" branch and read SAFE.
+
+def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
+    """Candidate variable names from EVERY call in a dotted call chain --
+    ``String.format(...)``, a ``StringBuilder``/``.append`` chain, or any mix,
+    including calls this module has no special name for (``.substring(...)``,
+    ``.concat(...)``, ``.replace(...)``, ...).
+
+    This is the shared coverage guard: three rounds of review found the same
+    fail-open shape three times over -- ``_format_operand_candidates`` reading
+    only ``String.format(...)``'s own arguments, and ``_append_operand_candidates``
+    reading only ``.append(...)`` sites, both let a SAFE verdict through
+    whenever a *trailing* call they did not recognise (``.substring(evil)``
+    after either idiom) was silently never examined. Precision was scoped to
+    "the operands of the calls we went looking for"; the invariant that
+    actually has to hold is "the operands of the WHOLE text, proven, not
+    assumed". So this walks every real (quote-aware, `_CALL_RE`-matched) call
+    in the text, whichever name it has, and tracks a `cursor` proving each
+    one's args were read *and* that nothing between two calls -- or before the
+    first, or after the last -- was left unexamined:
+
+    * a gap that is pure chain navigation (a receiver/method name, dots,
+      whitespace -- `_NAV_ONLY_RE`) is skipped, same as a receiver name always
+      has been in this module;
+    * any other gap (brackets, stray text, an unrecognised shape) is not
+      trusted to be inert: it is scanned for identifiers exactly like a
+      non-literal operand, and marks the result unresolved;
+    * a call whose own argument list never balances (the unterminated-string
+      shape from the previous two rounds) marks the rest of the text from
+      that point on as unresolved rather than dropping it.
+
+    SAFE is reachable through this function only when every character of the
+    text was accounted for by a proven-literal operand or benign navigation --
+    never by "the first call we recognised happened to be all-literal".
     """
     operands: list[str] = []
     unresolved = False
-    for open_paren in _append_open_parens(text):
-        arg = extract_first_arg(text, open_paren)
-        if arg is None:
+    cursor = 0
+    n = len(text)
+    for open_paren in _call_open_parens_generic(text):
+        if open_paren < cursor:
+            continue  # already inside a call span consumed above
+        gap = text[cursor:open_paren]
+        if not _NAV_ONLY_RE.match(gap):
             unresolved = True
-            continue
-        operands.append(arg)
+            operands.append(gap)
+        close_paren = _matching_close_paren(text, open_paren)
+        if close_paren is None:
+            unresolved = True
+            cursor = n
+            break
+        arg = text[open_paren + 1 : close_paren].strip()
+        if arg:
+            operands.append(arg)
+        cursor = close_paren + 1
+    tail = text[cursor:]
+    if not _NAV_ONLY_RE.match(tail):
+        unresolved = True
+        operands.append(tail)
     names, operand_unresolved = _operand_candidates(operands)
     return names, unresolved or operand_unresolved
 
 
+def _call_open_parens_generic(text: str) -> list[int]:
+    """Indices of the ``(`` in every real, unquoted call: `_CALL_RE`, quote-aware.
+
+    Same quote-tracking scan as `_append_open_parens`, generalised from the
+    literal ``.append(`` to any bareword call -- deliberately so: it is what
+    lets `_chain_operand_candidates` find a trailing ``.substring(evil)`` or
+    ``.concat(...)`` the same way it finds the ``.append(``/``format(`` it
+    was looking for, instead of needing a new special case per method name.
+    """
+    positions: list[int] = []
+    quote: str | None = None
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            i += 1
+            continue
+        match = _CALL_RE.match(text, i)
+        if match:
+            positions.append(match.end() - 1)
+            i = match.end()
+            continue
+        i += 1
+    return positions
+
+
 def variable_names(arg_text: str) -> list[str]:
-    """Identifiers from a top-level ``+`` operand, a ``String.format`` call, or a
-    ``.append`` chain -- in that priority order, matching `classify`/`assess`.
+    """Identifiers from a top-level ``+`` operand, or a call chain otherwise --
+    matching `assess`'s dispatch and its coverage guard.
     """
     s = arg_text.strip()
     parts = _split_plus(s)
     if len(parts) > 1:
         names, _unresolved = _operand_candidates(parts)
         return _dedup(names)
-    if s.startswith("String.format(") and s.endswith(")"):
-        names, _unresolved = _format_operand_candidates(s)
-        return _dedup(names)
-    if _append_open_parens(s):
-        names, _unresolved = _append_operand_candidates(s)
-        return _dedup(names)
-    names, _unresolved = _plus_operand_candidates(arg_text)
+    names, _unresolved = _chain_operand_candidates(s)
     return _dedup(names)
 
 
@@ -355,56 +441,6 @@ def _split_plus(text: str) -> list[str]:
     return parts
 
 
-def _split_call_args(s: str) -> list[str] | None:
-    """Top-level, comma-separated arguments of the first ``(...)`` call in s.
-
-    Mirrors ``extract_first_arg``'s string/paren-aware scan, but returns every
-    top-level argument instead of stopping at the first. Used to split
-    ``String.format(...)``'s argument list.
-
-    Returns ``None`` -- not a partial list -- if the call never closes (an
-    unbalanced quote inside an argument can swallow the rest of the text,
-    including the closing ``)``). A caller that treated the empty/partial
-    list this used to return as "this call has no arguments" would let it
-    fall through to "every (zero) argument is a proven literal" and read
-    SAFE; ``None`` forces the caller to treat it as unresolved instead.
-    """
-    open_paren = s.index("(")
-    depth = 0
-    quote: str | None = None
-    start = -1
-    args: list[str] = []
-    i = open_paren
-    while i < len(s):
-        c = s[i]
-        if quote is not None:
-            if c == "\\":
-                i += 2
-                continue
-            if c == quote:
-                quote = None
-        elif c in "'\"":
-            quote = c
-        elif c == "(":
-            depth += 1
-            if depth == 1:
-                start = i + 1
-        elif c in "[{":
-            depth += 1
-        elif c in "]}":
-            depth -= 1
-        elif c == ")":
-            depth -= 1
-            if depth == 0:
-                args.append(s[start:i].strip())
-                return args
-        elif c == "," and depth == 1:
-            args.append(s[start:i].strip())
-            start = i + 1
-        i += 1
-    return None  # unbalanced -> caller must treat as unresolved, never SAFE
-
-
 def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
     """Verdict for a Java sink call. Only an all-literal/constant construction is SAFE."""
     if arg_text is None:
@@ -418,15 +454,15 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
         # its own operands first, so a `String.format(...)`/`.append(...)`
         # shape embedded *inside* one of them (a nested call, or merely text
         # inside a string literal) never suppresses examination of the
-        # operands beside it -- that suppression is the false-SAFE this
-        # ordering exists to close.
+        # operands beside it -- that suppression is the false-SAFE round 1
+        # closed. Otherwise, `_chain_operand_candidates` is the shared
+        # coverage guard closing round 3: it proves the operands it collects
+        # account for the WHOLE text, not just the first call recognised.
         parts = _split_plus(s)
         if len(parts) > 1:
             names, unresolved = _operand_candidates(parts)
-        elif s.startswith("String.format(") and s.endswith(")"):
-            names, unresolved = _format_operand_candidates(s)
         else:
-            names, unresolved = _append_operand_candidates(s)
+            names, unresolved = _chain_operand_candidates(s)
         if any(n in tainted_names for n in names):
             return VERDICT_UNSAFE
         if names or unresolved:
@@ -435,13 +471,12 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
             return VERDICT_UNKNOWN
         # every operand is a proven literal/constant (e.g. `String.format("%d", 1)`)
         return VERDICT_SAFE
-    # OPAQUE: candidates are only extracted from a `String.format(...)` call, a
-    # `.append(...)` chain, or a `+` operand, so nothing is found in a bare
-    # identifier (none of those) even though the whole argument *is* one.
-    # Handle that shape directly: a bare identifier can be checked against
-    # taint; any other opaque expression (a call, field access, ...) has no
-    # name to check and must fail safe rather than read as unconditionally
-    # SAFE.
+    # OPAQUE: candidates are only extracted from a call chain or a `+`
+    # operand, so nothing is found in a bare identifier (neither of those)
+    # even though the whole argument *is* one. Handle that shape directly: a
+    # bare identifier can be checked against taint; any other opaque
+    # expression (a call, field access, ...) has no name to check and must
+    # fail safe rather than read as unconditionally SAFE.
     s = arg_text.strip()
     match = _IDENT_RE.fullmatch(s)
     if match and match.group(0) not in _JAVA_KEYWORDS and match.group(0) in tainted_names:
