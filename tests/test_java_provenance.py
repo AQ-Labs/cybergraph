@@ -157,6 +157,11 @@ def test_assess_non_allowlisted_new_receiver_never_safe():
         'new Foo("lit").append("x")',
         'new File("etc").append("x")',
         'new java.io.File("etc").append("x")',
+        # Package-qualified spoof: an attacker class whose simple name collides
+        # with StringBuilder must NOT be trusted -- the allowlist is the bare
+        # (unqualified) `new StringBuilder`/`new StringBuffer` shape only.
+        'new com.evil.StringBuilder("a").append("b")',
+        'new org.attacker.StringBuffer("a").append("b")',
     ):
         assert assess(_sql(), text, set()) == VERDICT_UNKNOWN, text
 

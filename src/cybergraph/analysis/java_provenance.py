@@ -332,7 +332,13 @@ def _chain_receiver(leading_gap: str) -> str | None:
         # semantics are unknown: return the whole receiver as a non-literal
         # operand so an all-literal `new Foo("a").append("b")` cannot read SAFE.
         cls = method.group().strip()
-        if cls in ("StringBuilder", "StringBuffer"):
+        # Only the BARE `new StringBuilder(...)` / `new StringBuffer(...)` shape
+        # is allowlisted -- `prefix` is exactly `new` with no package qualifier.
+        # A qualified name (`new com.evil.StringBuilder(...)`) leaves a non-empty
+        # qualifier in `prefix`; we cannot tell the real `java.lang.StringBuilder`
+        # from an attacker class whose simple name merely collides, so any
+        # qualified form is treated as an unmodelled construct (never SAFE).
+        if prefix.strip() == "new" and cls in ("StringBuilder", "StringBuffer"):
             return None
         return g
     return prefix
