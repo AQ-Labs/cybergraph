@@ -124,15 +124,13 @@ def test_unrelated_go_failure_does_not_taint_a_python_capability():
 
     A failed `.go` file must not drag an unrelated Python capability to
     UNKNOWN -- only failures within that capability's own declared scope count.
-    Uses `deserialization`, which stays Python-only even after Go joined
-    `sql_construction`/`command_execution`/`path_access`.
     """
     coverage = (
         FileCoverage("app.py", "analyzed"),
         FileCoverage("main.go", "failed", "the file could not be read"),
     )
     results = _run(changed_files=("app.py", "main.go"), coverage=coverage)
-    assert _status(results, "deserialization") == PASS
+    assert _status(results, "sql_construction") == PASS
     assert _status(results, "source_analysis_support") == NOT_SUPPORTED
 
 
