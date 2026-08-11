@@ -563,6 +563,79 @@ MUTATIONS: list[Mutation] = [
         "`(id || 1)`) must still have its identifiers found; matching only from the "
         "operand's start silently drops the name and the construction reads safe",
     ),
+    # -- D9: the Go verdict assessor must never fail open --------------------
+    Mutation(
+        id="D9-go-tainted-sink-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_go_provenance.py::test_assess_concat_tainted_unsafe",),
+        note="a tainted Go sink argument must not read safe",
+    ),
+    Mutation(
+        id="D9-go-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_go_provenance.py::test_assess_sprintf_unresolved_unknown",),
+        note="a Go variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-go-operand-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        idents = _IDENT_RE.findall(p)\n"
+        "        if not idents:\n"
+        "            unresolved = True\n"
+        "            continue",
+        new="        m = _IDENT_RE.match(p)\n"
+        "        if m is None:\n"
+        "            continue\n"
+        "        idents = [m.group(0)]",
+        tests=("tests/test_go_provenance.py::test_assess_non_leading_ident_operand_not_safe",),
+        note="a '+' operand not led by an identifier character (e.g. `(id)`) must still "
+        "have its identifiers found; matching only from the operand's start silently "
+        "drops the name and the construction reads safe",
+    ),
+    Mutation(
+        id="D9-go-sprintf-format-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="    args = _split_call_args(sprintf_text)\n"
+        "    return _operand_candidates(args)",
+        new="    args = _split_call_args(sprintf_text)\n"
+        "    return _operand_candidates(args[1:])",
+        tests=("tests/test_go_provenance.py::test_sprintf_variable_format_is_unsafe",),
+        note="fmt.Sprintf's FORMAT argument is a runtime value in Go, not a literal like "
+        "a JS template literal's leading piece; skipping it drops a tainted format "
+        "string (`fmt.Sprintf(userQuery)`) and the sink reads safe",
+    ),
+    Mutation(
+        id="D9-go-command-shell-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_UNSAFE\n"
+        "    return VERDICT_UNKNOWN",
+        new="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_SAFE\n"
+        "    return VERDICT_UNKNOWN",
+        tests=("tests/test_go_provenance.py::test_command_shell_form_tainted_is_unsafe",),
+        note="a taint-confirmed command argument (`exec.Command(\"sh\", \"-c\", userCmd)` "
+        "with tainted userCmd) must not read safe",
+    ),
 ]
 
 
