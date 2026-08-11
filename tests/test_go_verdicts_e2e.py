@@ -105,6 +105,24 @@ def test_go_sqli_reviews_under_sql_construction(tmp_path):
                for c in verdict.checks)
 
 
+def test_go_shell_command_injection_reviews(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "h.go").write_text(
+        'package m\nimport ("net/http"; "os/exec")\n'
+        'func h(w http.ResponseWriter, r *http.Request) {\n'
+        '  userCmd := r.URL.Query().Get("cmd")\n'
+        '  exec.Command("sh", "-c", userCmd)\n}\n',
+        encoding="utf-8",
+    )
+    _n, _e, findings = analyze_go_file(repo / "h.go", repo)
+    assert any(f.rule_id == "CG-CMD-EXEC" for f in findings)
+
+    verdict = check_change(repo, mode="worktree")
+    assert verdict.state == STATE_REVIEW
+    assert any(c.capability_id == "command_execution" and c.status == FAIL
+               for c in verdict.checks)
+
+
 def test_go_still_not_supported_overall(tmp_path):
     repo = _repo(tmp_path)
     (repo / "h.go").write_text("package m\nvar X = 1\n", encoding="utf-8")

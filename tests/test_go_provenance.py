@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from cybergraph.analysis.go_provenance import assess, classify, extract_first_arg
+from cybergraph.analysis.go_provenance import (
+    assess,
+    assess_command,
+    classify,
+    extract_all_args,
+    extract_first_arg,
+)
 from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNKNOWN, VERDICT_UNSAFE
 from cybergraph.security.sinks import lookup_sink
 
@@ -56,3 +62,51 @@ def test_assess_opaque_unknown():
 
 def test_assess_unreadable_unknown():
     assert assess(_sink("db.Query"), None, set()) == VERDICT_UNKNOWN
+
+
+# -- C1: fmt.Sprintf's FORMAT argument is a runtime value in Go, not a literal --
+
+
+def test_sprintf_variable_format_is_unsafe():
+    assert assess(
+        _sink("db.Query"), "fmt.Sprintf(userQuery)", {"userQuery"}
+    ) == VERDICT_UNSAFE
+    assert assess(
+        _sink("db.Query"), 'fmt.Sprintf("SELECT * FROM " + tbl)', {"tbl"}
+    ) == VERDICT_UNSAFE
+
+
+# -- C2: command sinks must be assessed over ALL arguments, not just argv[0] --
+
+
+def _cmd_sink():
+    return _sink("exec.Command")
+
+
+def test_command_shell_form_tainted_is_unsafe():
+    src = 'exec.Command("sh", "-c", userCmd)'
+    args = extract_all_args(src, src.index("("))
+    assert args == ['"sh"', '"-c"', "userCmd"]
+    assert assess_command(_cmd_sink(), args, {"userCmd"}) == VERDICT_UNSAFE
+
+
+def test_command_shell_form_unresolved_is_unknown():
+    src = 'exec.Command("sh", "-c", userCmd)'
+    args = extract_all_args(src, src.index("("))
+    assert assess_command(_cmd_sink(), args, set()) == VERDICT_UNKNOWN
+
+
+def test_command_all_literal_is_safe():
+    src = 'exec.Command("ls", "-la")'
+    args = extract_all_args(src, src.index("("))
+    assert assess_command(_cmd_sink(), args, set()) == VERDICT_SAFE
+
+
+def test_command_argv_tainted_is_unsafe_or_unknown():
+    src = 'exec.Command("git", userBranch)'
+    args = extract_all_args(src, src.index("("))
+    assert assess_command(_cmd_sink(), args, {"userBranch"}) in (
+        VERDICT_UNSAFE,
+        VERDICT_UNKNOWN,
+    )
+    assert assess_command(_cmd_sink(), args, {"userBranch"}) != VERDICT_SAFE
