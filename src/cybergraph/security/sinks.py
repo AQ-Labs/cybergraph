@@ -146,10 +146,47 @@ _GO: tuple[Sink, ...] = (
          "opens a file whose path comes from this value", "path", bare=True),
 )
 
+_JAVA: tuple[Sink, ...] = (
+    # SQL (bare method names)
+    Sink("executeQuery", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("executeUpdate", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("execute", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("query", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("update", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("createNativeQuery", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("createQuery", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    # Command (bare; Runtime.exec / ProcessBuilder / .start)
+    Sink("exec", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
+         bare=True, shell=SHELL_CONDITIONAL),
+    Sink("ProcessBuilder", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
+         bare=True, shell=SHELL_CONDITIONAL),
+    Sink("start", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
+         bare=True, shell=SHELL_CONDITIONAL),
+    # Path (bare; incl. constructor sinks File / FileReader / FileWriter / FileInputStream)
+    Sink("File", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("FileReader", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("FileWriter", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("FileInputStream", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("readAllBytes", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("write", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    # Deserialization
+    Sink("readObject", "CG-DESERIALIZE", "CWE-502", SEVERITY_CRITICAL,
+         _DESERIALIZE, "deserialize", bare=True),
+    Sink("readUnshared", "CG-DESERIALIZE", "CWE-502", SEVERITY_CRITICAL,
+         _DESERIALIZE, "deserialize", bare=True),
+)
+
 _BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {
     "python": _PYTHON,
     "javascript": _JAVASCRIPT,
     "go": _GO,
+    "java": _JAVA,
 }
 
 
