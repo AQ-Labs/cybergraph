@@ -50,12 +50,13 @@ _APPEND_RE = re.compile(r"\.append\s*\(")
 # recognised chain itself.
 _CALL_RE = re.compile(r"[A-Za-z_]\w*\s*\(")
 # A "gap" between (or before/after) recognised calls is safe to skip only
-# when it is pure chain navigation -- a receiver/method name and the dots
-# connecting them (`sb.`, `.`, `.toString`) -- never anything else. Method
-# and receiver *names* are not treated as data operands anywhere in this
-# module (the same is true of `sb` in `sb.append(x)`), so this deliberately
-# does not flag a bare name here; what it does flag is anything with
-# structure this module cannot vouch for -- brackets, stray quotes, operators.
+# when it is pure chain navigation -- method names and the dots connecting
+# them (`.`, `.toString`) -- never anything else. This regex only decides
+# nav-vs-structural (brackets, stray quotes, operators are flagged); the
+# leading gap of a chain is examined further by `_chain_receiver`, because the
+# *receiver* it carries (`sb` in `sb.append(x)`) is a real data operand whose
+# prior state feeds the resulting string and so must be taint-checked, not
+# waved through as navigation.
 _NAV_ONLY_RE = re.compile(r"^[\s.\w]*$")
 
 
@@ -252,12 +253,10 @@ def _matching_close_paren(text: str, open_paren: int) -> int | None:
     """Index of the ``)`` matching the ``(`` at ``open_paren``, or None if unbalanced.
 
     Quote/paren-aware like `extract_first_arg`, but returns only the
-    boundary, not the argument text: a chain call's raw slice may carry its
-    own top-level commas (``String.format("%s", "lit")``), and this
-    deliberately does not split on them -- `_chain_operand_candidates` checks
-    the whole slice for a single literal first and otherwise falls back to a
-    broad identifier scan across it, which finds every identifier regardless
-    of where the commas fall.
+    boundary, not the argument text: `_chain_operand_candidates` uses this to
+    advance its coverage cursor past the whole call, and separately splits the
+    call's argument list on top-level commas (via `extract_all_args`) so each
+    argument is tested individually.
     """
     depth = 0
     quote: str | None = None
@@ -284,6 +283,48 @@ def _matching_close_paren(text: str, open_paren: int) -> int | None:
                 return i
         i += 1
     return None  # unbalanced -> caller must treat as unresolved, never SAFE
+
+
+_TRAILING_IDENT_RE = re.compile(r"\w+\s*$")
+
+
+def _chain_receiver(leading_gap: str) -> str | None:
+    """The receiver operand of a call chain, or None when it is genuinely inert.
+
+    ``leading_gap`` is the text before the first call's ``(`` -- a nav-only
+    span (`_NAV_ONLY_RE`) of the form ``<receiver>.<method>`` (`sb.append`),
+    a bare ``<method>`` (`format`, `buildQuery`), or a construction
+    (`new StringBuilder`). The method name is the trailing identifier; what
+    precedes it, minus the connecting dot, is the receiver expression.
+
+    Returns None -- SAFE-eligible, inert -- for:
+      * no receiver at all (a bare call), OR
+      * exactly ``String`` (the static ``String.format``/``join``/``valueOf``/
+        ``copyValueOf`` allowlist -- receiver is the class name), OR
+      * a ``new ...`` construction (its own args are examined as a call, so the
+        freshly built value carries no external string state of its own).
+
+    Otherwise returns the receiver expression (a bare variable like ``sb`` /
+    ``evil`` / ``query``, a field access, an unknown form) so the caller
+    taint-checks it exactly like an argument: it is a non-literal operand and
+    can never be proven safe.
+    """
+    g = leading_gap.strip()
+    if not g:
+        return None
+    method = _TRAILING_IDENT_RE.search(g)
+    if method is None:
+        return None
+    prefix = g[: method.start()].strip()
+    if prefix.endswith("."):
+        prefix = prefix[:-1].strip()
+    if not prefix:
+        return None  # bare call: no receiver
+    if prefix == "String":
+        return None  # allowlisted static receiver
+    if re.match(r"^new(?:\s|$)", prefix):
+        return None  # `new X(...)` construction; args examined as a call
+    return prefix
 
 
 def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
@@ -330,14 +371,31 @@ def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
         if not _NAV_ONLY_RE.match(gap):
             unresolved = True
             operands.append(gap)
+        elif cursor == 0:
+            # Only the leading gap carries the chain's *receiver*; every later
+            # gap is `.method` navigation on the previous call's result and is
+            # genuinely inert. An instance receiver's prior state IS part of
+            # the resulting string, so a bare-variable receiver (`sb`, `evil`,
+            # `query`) is a non-literal operand and must be taint-checked just
+            # like an argument -- never exempted as mere navigation. Only a
+            # `String.*` static call or a `new ...(...)` construction receiver
+            # (whose own args are examined as a call below) stays SAFE-eligible.
+            receiver = _chain_receiver(gap)
+            if receiver is not None:
+                operands.append(receiver)
         close_paren = _matching_close_paren(text, open_paren)
         if close_paren is None:
             unresolved = True
             cursor = n
             break
-        arg = text[open_paren + 1 : close_paren].strip()
-        if arg:
-            operands.append(arg)
+        # Split the call's argument list on TOP-LEVEL commas (quote/paren-aware
+        # via `extract_all_args`) so each argument is tested individually by
+        # the proven-literal check -- a multi-arg all-literal call
+        # (`String.format("%d", 1)`) is a literal composition, not one opaque
+        # comma-joined span.
+        for arg in extract_all_args(text, open_paren):
+            if arg:
+                operands.append(arg)
         cursor = close_paren + 1
     tail = text[cursor:]
     if not _NAV_ONLY_RE.match(tail):

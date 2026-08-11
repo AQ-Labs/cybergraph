@@ -5,6 +5,7 @@ from cybergraph.analysis.java_provenance import (
     assess_command,
     assess_deserialization,
     classify,
+    variable_names,
 )
 from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNKNOWN, VERDICT_UNSAFE
 from cybergraph.security.sinks import lookup_sink
@@ -87,11 +88,64 @@ def test_assess_parenthesized_operand_never_safe():
     assert assess(_sql(), "(userInput)", {"userInput"}) == VERDICT_UNKNOWN
 
 
-def test_assess_stringbuilder_all_literal_chain_is_safe():
-    # The one legitimate append-SAFE case: every appended operand is a
-    # proven literal, so the fail-safe fix for the unbalanced-quote bug below
-    # must not over-correct this into UNKNOWN.
-    assert assess(_sql(), 'sb.append("a").append("b")', set()) == VERDICT_SAFE
+def test_assess_stringbuilder_bare_variable_receiver_never_safe():
+    # A bare-variable receiver (`sb`) is a non-literal operand: its prior
+    # state is part of the resulting string, so it can never be proven safe --
+    # even when every *appended* operand is a proven literal. Untainted and
+    # unprovable -> UNKNOWN, never SAFE.
+    assert assess(_sql(), 'sb.append("a").append("b")', set()) == VERDICT_UNKNOWN
+
+
+def test_assess_tainted_receiver_of_append_unsafe():
+    # CRITICAL fail-open: the receiver of a call chain is a non-literal
+    # operand. A tainted bare-variable receiver must read UNSAFE, not SAFE.
+    assert assess(_sql(), 'evil.append("x")', {"evil"}) == VERDICT_UNSAFE
+
+
+def test_assess_tainted_receiver_with_trailing_tostring_unsafe():
+    # Same, with a trailing `.toString()` navigation after the append.
+    assert assess(_sql(), 'sb.append(" LIMIT 10").toString()', {"sb"}) == VERDICT_UNSAFE
+
+
+def test_assess_variable_receiver_untainted_is_unknown_not_safe():
+    # A variable receiver with no confirmed taint is still unprovable ->
+    # UNKNOWN, never SAFE.
+    assert (
+        assess(_sql(), 'query.append(" LIMIT 10").toString()', set()) == VERDICT_UNKNOWN
+    )
+
+
+def test_variable_names_includes_chain_receiver():
+    # Parity with `assess`: the chain receiver is a candidate variable name.
+    assert "evil" in variable_names('evil.append("x")')
+    assert "sb" in variable_names('sb.append(" LIMIT 10").toString()')
+
+
+def test_assess_format_multi_arg_all_literal_numeric_is_safe():
+    # Precision: a multi-arg `String.format` whose args are each a proven
+    # literal is a literal composition -> SAFE. The arg list must be split on
+    # top-level commas and each arg tested individually.
+    assert assess(_sql(), 'String.format("%d", 1)', set()) == VERDICT_SAFE
+
+
+def test_assess_format_multi_arg_all_literal_strings_is_safe():
+    assert assess(_sql(), 'String.format("%s", "a", "b")', set()) == VERDICT_SAFE
+
+
+def test_assess_stringbuilder_all_literal_new_receiver_is_safe():
+    # A literal-construction receiver (`new StringBuilder(...)`) is inert; its
+    # constructor args are examined as a call. Every operand here is a proven
+    # literal, so the whole construction reads SAFE.
+    assert assess(_sql(), 'new StringBuilder("a").append("b")', set()) == VERDICT_SAFE
+
+
+def test_assess_tainted_new_constructor_arg_unsafe():
+    # The `new` receiver is inert, but its constructor args are still examined
+    # as a call -- a tainted constructor arg must read UNSAFE.
+    assert (
+        assess(_sql(), 'new StringBuilder(userInput).append("b")', {"userInput"})
+        == VERDICT_UNSAFE
+    )
 
 
 def test_assess_append_unbalanced_string_swallows_real_call_not_safe():
