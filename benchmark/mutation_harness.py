@@ -607,6 +607,35 @@ MUTATIONS: list[Mutation] = [
         "have its identifiers found; matching only from the operand's start silently "
         "drops the name and the construction reads safe",
     ),
+    Mutation(
+        id="D9-go-sprintf-format-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="    args = _split_call_args(sprintf_text)\n"
+        "    return _operand_candidates(args)",
+        new="    args = _split_call_args(sprintf_text)\n"
+        "    return _operand_candidates(args[1:])",
+        tests=("tests/test_go_provenance.py::test_sprintf_variable_format_is_unsafe",),
+        note="fmt.Sprintf's FORMAT argument is a runtime value in Go, not a literal like "
+        "a JS template literal's leading piece; skipping it drops a tainted format "
+        "string (`fmt.Sprintf(userQuery)`) and the sink reads safe",
+    ),
+    Mutation(
+        id="D9-go-command-shell-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_UNSAFE\n"
+        "    return VERDICT_UNKNOWN",
+        new="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_SAFE\n"
+        "    return VERDICT_UNKNOWN",
+        tests=("tests/test_go_provenance.py::test_command_shell_form_tainted_is_unsafe",),
+        note="a taint-confirmed command argument (`exec.Command(\"sh\", \"-c\", userCmd)` "
+        "with tainted userCmd) must not read safe",
+    ),
 ]
 
 

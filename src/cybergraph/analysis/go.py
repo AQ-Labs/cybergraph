@@ -14,7 +14,8 @@ from pathlib import Path
 
 from cybergraph.analysis._source_text import strip_code
 from cybergraph.analysis.go_provenance import assess as assess_go_sink
-from cybergraph.analysis.go_provenance import extract_first_arg
+from cybergraph.analysis.go_provenance import assess_command as assess_go_command
+from cybergraph.analysis.go_provenance import extract_all_args, extract_first_arg
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -177,8 +178,17 @@ def analyze_go_file(
             if sink is not None or _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if sink is not None:
-                    arg = extract_first_arg(source, abs_off)
-                    verdict = assess_go_sink(sink, arg, set(tainted))
+                    if sink.vuln_class == "command":
+                        # Command sinks take argv, not a single string: grading
+                        # only the first argument would see just the program
+                        # name (the literal `"sh"` in `exec.Command("sh",
+                        # "-c", userCmd)`) and never the tainted argument that
+                        # follows it. Assess the whole argument list instead.
+                        args = extract_all_args(source, abs_off)
+                        verdict = assess_go_command(sink, args, set(tainted))
+                    else:
+                        arg = extract_first_arg(source, abs_off)
+                        verdict = assess_go_sink(sink, arg, set(tainted))
                     finding = _go_verdict_finding(sink, verdict, rel, line_no, line)
                     if finding is not None and not is_inline_suppressed(
                         lines, line_no, finding.rule_id

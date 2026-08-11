@@ -69,6 +69,53 @@ def extract_first_arg(source: str, open_paren: int) -> str | None:
     return None  # unbalanced -> caller treats as UNKNOWN
 
 
+def extract_all_args(source: str, open_paren: int) -> list[str]:
+    """Return every top-level argument's source text, or [] if unbalanced.
+
+    Command-class sinks (`exec.Command`, `exec.CommandContext`) take argv, not
+    a single string, so grading them on `extract_first_arg` alone only ever
+    sees the program name -- for the Go shell idiom, the literal `"sh"` -- and
+    never the tainted argument that follows it. This walks the same
+    string/paren-aware scan as `extract_first_arg` but keeps collecting past
+    the first top-level comma instead of stopping there.
+    """
+    depth = 0
+    quote: str | None = None
+    start = -1
+    args: list[str] = []
+    i = open_paren
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == "(":
+            depth += 1
+            if depth == 1:
+                start = i + 1
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                tail = source[start:i].strip()
+                if tail or args:
+                    args.append(tail)
+                return args
+        elif c == "," and depth == 1:
+            args.append(source[start:i].strip())
+            start = i + 1
+        i += 1
+    return []  # unbalanced -> caller treats as UNKNOWN
+
+
 def classify(arg_text: str) -> str:
     s = arg_text.strip()
     if _STRING_ONLY_RE.match(s):
@@ -129,13 +176,19 @@ def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
 
 
 def _sprintf_operand_candidates(sprintf_text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from a ``fmt.Sprintf(...)`` call's non-format args.
+    """Candidate variable names from ALL of a ``fmt.Sprintf(...)`` call's arguments.
 
-    The first argument (the format literal) is skipped; the same
-    positive-literal-proof logic is applied to the rest.
+    Unlike a JS template literal, whose leading piece is always a literal
+    fragment of the source text, Go's format argument is a normal runtime
+    value: ``fmt.Sprintf(userQuery)`` and ``fmt.Sprintf("SELECT * FROM " +
+    tbl, "x")`` both carry a non-literal format. So every argument -- format
+    included -- is assessed with the same positive-literal-proof logic; a
+    format that genuinely is a string literal is a proven literal and is
+    skipped by `_is_proven_literal_operand` on its own, with no special-casing
+    needed here.
     """
     args = _split_call_args(sprintf_text)
-    return _operand_candidates(args[1:])
+    return _operand_candidates(args)
 
 
 def variable_names(arg_text: str) -> list[str]:
@@ -266,5 +319,42 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
     s = arg_text.strip()
     match = _IDENT_RE.fullmatch(s)
     if match and match.group(0) not in _GO_KEYWORDS and match.group(0) in tainted_names:
+        return VERDICT_UNSAFE
+    return VERDICT_UNKNOWN
+
+
+def assess_command(sink: Sink, args: list[str] | None, tainted_names: set[str]) -> str:
+    """Verdict for a Go command sink (`exec.Command`/`exec.CommandContext`) over ALL arguments.
+
+    `assess` grades a sink on its first argument alone, which is right for a
+    single SQL/path string but wrong for argv: it would see only the program
+    name and miss a tainted argument anywhere else in the call. This assesses
+    the whole argument list instead, reusing `_operand_candidates` /
+    `_is_proven_literal_operand` so the same positive-literal-proof invariant
+    holds -- a non-literal argument with no scannable identifier is
+    unresolved, never silently SAFE.
+
+    Verdict rule, fail-safe throughout:
+    - no arguments (unreadable call) -> UNKNOWN.
+    - every argument is a proven literal/constant -> SAFE.
+    - the shell form -- argv[0] is a shell (`sh`/`bash`/`/bin/sh`/`/bin/bash`)
+      with a `-c` argument present -- and some argument is not a proven
+      literal -> UNSAFE if a candidate name is taint-confirmed, else UNKNOWN.
+    - otherwise (argv form, or any other shape) and some argument is not a
+      proven literal -> UNSAFE if a candidate name is taint-confirmed, else
+      UNKNOWN.
+
+    The shell and non-shell branches compute identically: taint confirmation
+    over every argument's candidate names is what decides UNSAFE vs. UNKNOWN
+    in both, because this phase does not yet distinguish argument-injection
+    severity by argv position. In neither branch is a non-literal argument
+    ever read as SAFE, which is the false-SAFE this function exists to close.
+    """
+    if not args:
+        return VERDICT_UNKNOWN
+    if all(_is_proven_literal_operand(a) for a in args):
+        return VERDICT_SAFE
+    names, _unresolved = _operand_candidates(args)
+    if any(n in tainted_names for n in names):
         return VERDICT_UNSAFE
     return VERDICT_UNKNOWN
