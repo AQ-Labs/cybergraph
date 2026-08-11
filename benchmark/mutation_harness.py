@@ -517,6 +517,33 @@ MUTATIONS: list[Mutation] = [
         tests=("tests/test_js_cors_nextjs.py::test_next_public_secret_is_flagged",),
         note="a NEXT_PUBLIC_ secret must be flagged, never missed",
     ),
+    # -- D9: the JS verdict assessor must never fail open --------------------
+    Mutation(
+        id="D9-js-tainted-sqli-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_js_provenance.py::test_assess_sql_tainted_variable_is_unsafe",),
+        note="a tainted JS sink argument must not read safe",
+    ),
+    Mutation(
+        id="D9-js-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE\n"
+        "        return VERDICT_UNKNOWN",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE\n"
+        "        return VERDICT_SAFE",
+        tests=(
+            "tests/test_js_provenance.py::test_assess_sql_unresolved_variable_is_unknown_not_safe",
+        ),
+        note="a JS variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
 ]
 
 
