@@ -209,8 +209,15 @@ def _format_operand_candidates(format_text: str) -> tuple[list[str], bool]:
     positive-literal-proof logic; a format that genuinely is a string literal
     is a proven literal and is skipped by `_is_proven_literal_operand` on its
     own, with no special-casing needed here.
+
+    If `_split_call_args` cannot find where the call's arguments end -- an
+    unbalanced quote inside one of them, say -- it returns ``None`` rather
+    than a partial list, and that must read as unresolved, never as "no
+    arguments found, so every (nonexistent) argument is trivially literal."
     """
     args = _split_call_args(format_text)
+    if args is None:
+        return [], True
     return _operand_candidates(args)
 
 
@@ -262,13 +269,26 @@ def _append_operand_candidates(text: str) -> tuple[list[str], bool]:
     ``String.format`` argument. Uses `_append_open_parens` rather than a bare
     regex scan so a `.append(` inside a string literal is never mistaken for
     a real call.
+
+    A detected append site whose own argument does not balance --
+    ``sb.append("a).append(userInput)``, where the unterminated ``"a`` string
+    swallows everything after it, including the real ``.append(userInput)``
+    -- must never be silently dropped from ``operands``: `extract_first_arg`
+    returning ``None`` there is exactly the "we could not read this" case
+    ``unresolved`` exists for. Dropping it instead of flagging it is what let
+    an unreadable append chain fall through to the COMPOSED "every operand is
+    a proven literal" branch and read SAFE.
     """
     operands: list[str] = []
+    unresolved = False
     for open_paren in _append_open_parens(text):
         arg = extract_first_arg(text, open_paren)
-        if arg is not None:
-            operands.append(arg)
-    return _operand_candidates(operands)
+        if arg is None:
+            unresolved = True
+            continue
+        operands.append(arg)
+    names, operand_unresolved = _operand_candidates(operands)
+    return names, unresolved or operand_unresolved
 
 
 def variable_names(arg_text: str) -> list[str]:
@@ -335,12 +355,19 @@ def _split_plus(text: str) -> list[str]:
     return parts
 
 
-def _split_call_args(s: str) -> list[str]:
+def _split_call_args(s: str) -> list[str] | None:
     """Top-level, comma-separated arguments of the first ``(...)`` call in s.
 
     Mirrors ``extract_first_arg``'s string/paren-aware scan, but returns every
     top-level argument instead of stopping at the first. Used to split
     ``String.format(...)``'s argument list.
+
+    Returns ``None`` -- not a partial list -- if the call never closes (an
+    unbalanced quote inside an argument can swallow the rest of the text,
+    including the closing ``)``). A caller that treated the empty/partial
+    list this used to return as "this call has no arguments" would let it
+    fall through to "every (zero) argument is a proven literal" and read
+    SAFE; ``None`` forces the caller to treat it as unresolved instead.
     """
     open_paren = s.index("(")
     depth = 0
@@ -375,7 +402,7 @@ def _split_call_args(s: str) -> list[str]:
             args.append(s[start:i].strip())
             start = i + 1
         i += 1
-    return args  # unbalanced -> caller treats as best-effort partial list
+    return None  # unbalanced -> caller must treat as unresolved, never SAFE
 
 
 def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:

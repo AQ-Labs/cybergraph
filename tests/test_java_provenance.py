@@ -81,5 +81,31 @@ def test_assess_stringbuilder_chain_tainted_append_unsafe():
 
 def test_assess_parenthesized_operand_never_safe():
     # A parenthesized operand is not a proven literal even when it wraps a
-    # tainted name -- it must never read SAFE.
-    assert assess(_sql(), "(userInput)", {"userInput"}) != VERDICT_SAFE
+    # tainted name -- it must never read SAFE. The OPAQUE bare-identifier
+    # check does not unwrap parens, so this resolves to UNKNOWN, not UNSAFE --
+    # pinned exactly rather than with a weaker `!= VERDICT_SAFE`.
+    assert assess(_sql(), "(userInput)", {"userInput"}) == VERDICT_UNKNOWN
+
+
+def test_assess_stringbuilder_all_literal_chain_is_safe():
+    # The one legitimate append-SAFE case: every appended operand is a
+    # proven literal, so the fail-safe fix for the unbalanced-quote bug below
+    # must not over-correct this into UNKNOWN.
+    assert assess(_sql(), 'sb.append("a").append("b")', set()) == VERDICT_SAFE
+
+
+def test_assess_append_unbalanced_string_swallows_real_call_not_safe():
+    # `"a` never closes, so the single-pass quote-tracking scan reads the
+    # rest of the text -- including the real `.append(userInput)` -- as
+    # still "inside a string." The detected append site's own argument then
+    # fails to balance too, which must register as unresolved, not as "no
+    # operands found, so every operand is trivially literal."
+    assert assess(_sql(), 'sb.append("a).append(userInput)', {"userInput"}) == VERDICT_UNKNOWN
+
+
+def test_assess_append_escaped_quote_swallows_real_call_not_safe():
+    # Same failure mode via an escaped quote (`\"`) that never terminates the
+    # string instead of a plain missing closing quote.
+    assert (
+        assess(_sql(), 'sb.append("a\\").append(userInput)', {"userInput"}) == VERDICT_UNKNOWN
+    )
