@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from cybergraph.security.capability import NOT_SUPPORTED, UNKNOWN
+from cybergraph.security.capability import UNKNOWN
 from cybergraph.security.coverage_report import (
     CAP_CHECKED,
     build_coverage_report,
@@ -46,11 +46,16 @@ def test_unparseable_python_makes_its_capabilities_unknown(tmp_path: Path):
     assert _cap(report, "sql_construction").status == UNKNOWN
 
 
-def test_go_file_makes_source_support_not_supported(tmp_path: Path):
+def test_go_file_is_checked_via_its_partial_analyzer(tmp_path: Path):
+    """Go now has a partial analyzer (sql/command/path sinks), like web already did --
+    this surface reports CAP_CHECKED, not NOT_SUPPORTED. The stricter honesty
+    guarantee (Go is not a Phase-1 *verified* language) still holds in the
+    verdict path, where `source_analysis_support` stays NOT_SUPPORTED for Go
+    (see test_go_verdicts_e2e.py::test_go_still_not_supported_overall)."""
     repo = _repo(tmp_path)
     (repo / "main.go").write_text("package main\n", encoding="utf-8")
     report = build_coverage_report(repo)
-    assert _cap(report, "source_analysis_support").status == NOT_SUPPORTED
+    assert _cap(report, "source_analysis_support").status == CAP_CHECKED
 
 
 def test_readme_only_change_establishes_an_empty_report(tmp_path: Path):
