@@ -314,14 +314,15 @@ the CI SARIF filter until each language gets its own Phase-2 sink registry/predi
 the project takes on a parsing dependency, which is the tradeoff already recorded above
 against §3.2's zero-dependency moat).
 
-**Note (2026-08-11): resolved for JS SQL/command/code/path (slice 1 of the non-Python
-upgrade); Go/Java/C# and other JS classes remain inventory-grade.** Without a JS parser, a
-structural, statement-local classifier (`analysis/js_provenance.py`) now grades the four core
-sink argument classes (SQL, command, code-exec, path) for JavaScript/TypeScript as SAFE
-(all-literal/constant construction only), UNSAFE (a construction containing a variable that
-line-based intra-function taint confirms), or UNKNOWN (a variable it cannot resolve — never
-SAFE) rather than emitting the flat `CG-JS-SINK-CALL` inventory row. This is one language and
-four sink classes only: Go, Java, and C# are unchanged, and other JS/TS sink classes (beyond
+**Note (2026-08-11): resolved for JS (core four) and Go (SQL/command/path); Java/C# and
+other classes remain inventory-grade.** Without a JS or Go parser, a structural,
+statement-local classifier per language (`analysis/js_provenance.py`,
+`analysis/go_provenance.py`) now grades sink arguments as SAFE (all-literal/constant
+construction only), UNSAFE (a construction containing a variable that line-based
+intra-function taint confirms), or UNKNOWN (a variable it cannot resolve — never SAFE)
+rather than emitting the flat `CG-{JS,GO}-SINK-CALL` inventory row. JS covers four sink
+classes (SQL, command, code-exec, path); Go covers three (SQL, command, path — Go has no
+registered code-exec sink). Java and C# are unchanged, and other JS/TS sink classes (beyond
 SQL/command/code/path) still fall back to the pre-rewrite inventory rule. §4.5 stays OPEN.
 
 ### 4.6 MEDIUM — benchmark claims drift from the committed artifact
