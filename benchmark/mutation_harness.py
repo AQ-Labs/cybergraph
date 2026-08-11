@@ -563,6 +563,50 @@ MUTATIONS: list[Mutation] = [
         "`(id || 1)`) must still have its identifiers found; matching only from the "
         "operand's start silently drops the name and the construction reads safe",
     ),
+    # -- D9: the Go verdict assessor must never fail open --------------------
+    Mutation(
+        id="D9-go-tainted-sink-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_go_provenance.py::test_assess_concat_tainted_unsafe",),
+        note="a tainted Go sink argument must not read safe",
+    ),
+    Mutation(
+        id="D9-go-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_go_provenance.py::test_assess_sprintf_unresolved_unknown",),
+        note="a Go variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-go-operand-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/go_provenance.py",
+        old="        idents = _IDENT_RE.findall(p)\n"
+        "        if not idents:\n"
+        "            unresolved = True\n"
+        "            continue",
+        new="        m = _IDENT_RE.match(p)\n"
+        "        if m is None:\n"
+        "            continue\n"
+        "        idents = [m.group(0)]",
+        tests=("tests/test_go_provenance.py::test_assess_non_leading_ident_operand_not_safe",),
+        note="a '+' operand not led by an identifier character (e.g. `(id)`) must still "
+        "have its identifiers found; matching only from the operand's start silently "
+        "drops the name and the construction reads safe",
+    ),
 ]
 
 
