@@ -83,7 +83,44 @@ _PYTHON: tuple[Sink, ...] = (
          "opens a file whose path comes from this value", "path"),
 )
 
-_BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {"python": _PYTHON}
+_JS_SQL = "sends this value to the database as part of a query"
+_JS_CMD = "runs a system command built from this value"
+
+_JAVASCRIPT: tuple[Sink, ...] = (
+    # SQL — receivers (db/pool/knex/connection) are unresolvable → bare on the method name.
+    Sink("query", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _JS_SQL, "sql", bare=True),
+    Sink("execute", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _JS_SQL, "sql", bare=True),
+    Sink("raw", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _JS_SQL, "sql", bare=True),
+    # Command — exec/execSync spawn a shell (inherent); spawn/execFile take argv (conditional).
+    Sink("child_process.exec", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _JS_CMD,
+         "command", shell=SHELL_INHERENT),
+    Sink("exec", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _JS_CMD, "command",
+         bare=True, shell=SHELL_INHERENT),
+    Sink("execSync", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _JS_CMD, "command",
+         bare=True, shell=SHELL_INHERENT),
+    Sink("spawn", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _JS_CMD, "command",
+         bare=True, shell=SHELL_CONDITIONAL),
+    Sink("execFile", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _JS_CMD, "command",
+         bare=True, shell=SHELL_CONDITIONAL),
+    # Code
+    Sink("eval", "CG-CODE-EXEC", "CWE-95", SEVERITY_CRITICAL,
+         "runs this value as program code", "code"),
+    Sink("Function", "CG-CODE-EXEC", "CWE-95", SEVERITY_CRITICAL,
+         "runs this value as program code", "code"),
+    # Path — fs / fs.promises receivers unresolvable → bare on the method name.
+    Sink("readFile", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("readFileSync", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("writeFile", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("writeFileSync", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+    Sink("createReadStream", "CG-PATH-TRAVERSAL", "CWE-22", SEVERITY_HIGH,
+         "opens a file whose path comes from this value", "path", bare=True),
+)
+
+_BY_LANGUAGE: dict[str, tuple[Sink, ...]] = {"python": _PYTHON, "javascript": _JAVASCRIPT}
 
 
 def all_sinks() -> tuple[Sink, ...]:
