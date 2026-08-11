@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 
 from cybergraph.analysis._source_text import strip_code
+from cybergraph.analysis.go_provenance import assess as assess_go_sink
+from cybergraph.analysis.go_provenance import extract_first_arg
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -23,6 +25,8 @@ from cybergraph.security.ontology import (
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
+from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE
+from cybergraph.security.sinks import lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
 FUNC_RE = re.compile(
@@ -68,6 +72,10 @@ def analyze_go_file(
 ) -> tuple[list[Node], list[Edge], list[Finding]]:
     source = path.read_text(encoding="utf-8", errors="ignore")
     lines = source.splitlines()
+    # Absolute offset (into `source`) of the start of each line in `lines`, so a
+    # per-line regex match position can be translated into a `source` index --
+    # needed for `extract_first_arg`, which must read across line breaks.
+    line_starts = _line_start_offsets(source)
     # Code view with comments and string literals blanked, so an input marker in
     # a comment or a string cannot fabricate a taint source. Aligned 1:1 with
     # `lines`; a marker is only believed where it survives on real code.
@@ -155,8 +163,30 @@ def analyze_go_file(
                         {"reason": "secret passed to exposure sink"},
                     )
                 )
-            if _is_sink(call_name, custom_sinks):
+            sink = lookup_sink(call_name, "go")
+            if sink is not None or _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
+                if sink is not None:
+                    abs_off = line_starts[line_no - 1] + call.end() - 1
+                    arg = extract_first_arg(source, abs_off)
+                    verdict = assess_go_sink(sink, arg, set(tainted))
+                    finding = _go_verdict_finding(sink, verdict, rel, line_no, line)
+                    if finding is not None and not is_inline_suppressed(
+                        lines, line_no, finding.rule_id
+                    ):
+                        findings.append(finding)
+                elif not is_inline_suppressed(lines, line_no, "CG-GO-SINK-CALL"):
+                    findings.append(
+                        Finding(
+                            rule_id="CG-GO-SINK-CALL",
+                            severity="medium",
+                            message=f"Go file reaches sensitive sink `{call_name}`",
+                            file_path=rel,
+                            line_start=line_no,
+                            cwe="CWE-20",
+                            evidence=line.strip(),
+                        )
+                    )
                 taint_source = source_key or _tainted_source_for_line(line, tainted)
                 if taint_source:
                     edges.append(
@@ -167,18 +197,6 @@ def analyze_go_file(
                             rel,
                             line_no,
                             {"function": sink_source, "reason": "tainted argument"},
-                        )
-                    )
-                if not is_inline_suppressed(lines, line_no, "CG-GO-SINK-CALL"):
-                    findings.append(
-                        Finding(
-                            rule_id="CG-GO-SINK-CALL",
-                            severity="medium",
-                            message=f"Go file reaches sensitive sink `{call_name}`",
-                            file_path=rel,
-                            line_start=line_no,
-                            cwe="CWE-20",
-                            evidence=line.strip(),
                         )
                     )
 
@@ -245,6 +263,39 @@ def _classify_go_name(name: str) -> dict[str, bool]:
         "crypto_related": "hash" in lowered or "encrypt" in lowered or "sign" in lowered,
         "sink_related": "query" in lowered or "exec" in lowered,
     }
+
+
+def _line_start_offsets(source: str) -> list[int]:
+    """Absolute `source` offset of the first character of each `splitlines()` line.
+
+    `source.splitlines()` and `source.splitlines(keepends=True)` share identical
+    split points, differing only in whether each element keeps its trailing line
+    terminator -- so summing the keepends lengths reconstructs the exact offsets
+    the terminator-stripped `lines` started at.
+    """
+    offsets: list[int] = []
+    offset = 0
+    for segment in source.splitlines(keepends=True):
+        offsets.append(offset)
+        offset += len(segment)
+    return offsets
+
+
+def _go_verdict_finding(sink, verdict, rel, line_no, line):
+    if verdict == VERDICT_SAFE:
+        return None
+    unsafe = verdict == VERDICT_UNSAFE
+    return Finding(
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}-UNVERIFIED",
+        severity=sink.severity if unsafe else "medium",
+        message=(f"`{sink.name}` {sink.plain}" if unsafe
+                 else f"`{sink.name}` {sink.plain}, and CyberGraph could not confirm "
+                      "the value is safe"),
+        file_path=rel,
+        line_start=line_no,
+        cwe=sink.cwe,
+        evidence=line.strip(),
+    )
 
 
 def _is_sink(call_name: str, custom_sinks: tuple[str, ...] = ()) -> bool:
