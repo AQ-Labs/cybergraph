@@ -148,6 +148,26 @@ def test_assess_tainted_new_constructor_arg_unsafe():
     )
 
 
+def test_assess_non_allowlisted_new_receiver_never_safe():
+    # Only `new StringBuilder/StringBuffer(...)` is a modelled, SAFE-eligible
+    # construction receiver. Any other `new X(...)` is an unmodelled construct
+    # whose `.method(...)` semantics are unknown -- even with all-literal args
+    # it must NOT read SAFE, or an unknown builder becomes a fail-open.
+    for text in (
+        'new Foo("lit").append("x")',
+        'new File("etc").append("x")',
+        'new java.io.File("etc").append("x")',
+    ):
+        assert assess(_sql(), text, set()) == VERDICT_UNKNOWN, text
+
+
+def test_assess_non_allowlisted_new_receiver_tainted_arg_unsafe():
+    # A tainted operand in a non-allowlisted construction is still caught.
+    assert (
+        assess(_sql(), 'new File("x").append(evil)', {"evil"}) == VERDICT_UNSAFE
+    )
+
+
 def test_assess_append_unbalanced_string_swallows_real_call_not_safe():
     # `"a` never closes, so the single-pass quote-tracking scan reads the
     # rest of the text -- including the real `.append(userInput)` -- as

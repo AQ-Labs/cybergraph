@@ -301,8 +301,10 @@ def _chain_receiver(leading_gap: str) -> str | None:
       * no receiver at all (a bare call), OR
       * exactly ``String`` (the static ``String.format``/``join``/``valueOf``/
         ``copyValueOf`` allowlist -- receiver is the class name), OR
-      * a ``new ...`` construction (its own args are examined as a call, so the
-        freshly built value carries no external string state of its own).
+      * a ``new StringBuilder(...)`` / ``new StringBuffer(...)`` construction
+        (its own args are examined as a call, so the freshly built value carries
+        no external string state of its own). Any other ``new X(...)`` is an
+        unmodelled construct and is returned as a non-literal operand.
 
     Otherwise returns the receiver expression (a bare variable like ``sb`` /
     ``evil`` / ``query``, a field access, an unknown form) so the caller
@@ -323,7 +325,16 @@ def _chain_receiver(leading_gap: str) -> str | None:
     if prefix == "String":
         return None  # allowlisted static receiver
     if re.match(r"^new(?:\s|$)", prefix):
-        return None  # `new X(...)` construction; args examined as a call
+        # A construction receiver stays SAFE-eligible ONLY for the modelled
+        # string builders -- their own constructor args are examined as a call
+        # below, so a freshly built value carries no external string state. Any
+        # other `new X(...)` is an unmodelled construct whose `.method(...)`
+        # semantics are unknown: return the whole receiver as a non-literal
+        # operand so an all-literal `new Foo("a").append("b")` cannot read SAFE.
+        cls = method.group().strip()
+        if cls in ("StringBuilder", "StringBuffer"):
+            return None
+        return g
     return prefix
 
 
