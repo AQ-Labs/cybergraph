@@ -24,8 +24,18 @@ def test_unparseable_file_is_failed_not_clean(tmp_path: Path):
 
 
 def test_language_without_an_analyzer_is_unsupported(tmp_path: Path):
+    (tmp_path / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+    assert _status(tmp_path, ("Main.java",)) == {"Main.java": "unsupported"}
+
+
+def test_go_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
+    """Go joined the verified gate alongside Python/config/web (sql/command/path
+    sinks); it is no longer reported as a blind spot at the file-coverage level.
+    The stricter honesty guarantee -- Go is not a Phase-1 *verified* language --
+    still holds at the capability level, where `source_analysis_support` stays
+    NOT_SUPPORTED for Go (see test_go_verdicts_e2e.py)."""
     (tmp_path / "main.go").write_text("package main\n", encoding="utf-8")
-    assert _status(tmp_path, ("main.go",)) == {"main.go": "unsupported"}
+    assert _status(tmp_path, ("main.go",)) == {"main.go": "analyzed"}
 
 
 def test_deleted_file_is_missing_not_failed(tmp_path: Path):

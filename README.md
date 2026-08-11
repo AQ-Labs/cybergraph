@@ -48,6 +48,8 @@ CyberGraph is designed to connect those dots.
   that introduces either is a REVIEW.
 - **JS/TS SQL/command/code/path verdicts** — Express/Node sink arguments are graded SAFE/UNSAFE/UNKNOWN
   from construction provenance (literal vs. tainted-variable vs. unresolved), not just inventoried.
+  Go now earns the same treatment for its SQL/command/path sinks (`database/sql`, `os/exec`,
+  `os`/`io/ioutil`), fail-safe on anything a Go parser would be needed to read.
 - **Cross-file, interprocedural attack paths** (route → service → repository → sink) with confidence, sanitizer-barrier flags, taint/data-reachability, risk scores, and fix guidance; a `--shallow` mode reproduces intra-function traversal for comparison.
 - **Interactive, offline HTML report** built for first-time readers: a dark-mode-first neon graph explorer (glowing, security-typed nodes with a light/dark toggle), NODE/EDGE/ZONE explainer cards, a guided first view that opens on the top attack path with a plain-language narrative, a security-zones view (Attack Surface → Guards → Logic → Sensitive Sinks), search, layer/severity filters, a details panel with source drill-down, and entrypoint→sink path highlighting (Cytoscape.js, fully inlined).
 - **Exec-first report posture**: an A–F security grade with a one-line verdict and severity-distribution bar, a since-last-scan delta strip (new/regressed/fixed), findings grouped into expandable rule cards, an honest findings-cap footer, and a print stylesheet for clean PDF export.
