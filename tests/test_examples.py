@@ -53,4 +53,7 @@ def test_vulnerable_express_example_builds() -> None:
 
     assert counts["findings"] >= 1  # the SQL sink in listUsers
     answer = answer_question(repo, "database query")
-    assert "db.query" in answer.lower() or "CG-JS-SINK-CALL" in answer
+    # db.query is now a registered sink graded to a real verdict (CG-SQL-EXEC), not
+    # the old flat CG-JS-SINK-CALL inventory finding.
+    assert "CG-SQL-EXEC" in answer
+    assert "query" in answer.lower()
