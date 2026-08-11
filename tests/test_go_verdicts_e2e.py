@@ -37,6 +37,37 @@ def test_sprintf_unresolved_query_is_unverified(tmp_path):
     assert "CG-SQL-EXEC-UNVERIFIED" in rules and "CG-SQL-EXEC" not in rules
 
 
+def test_url_query_reader_is_not_a_sql_sink(tmp_path):
+    # `r.URL.Query()` (net/http's zero-arg query-param reader) shares its bare
+    # final segment with the SQL `Query` sink but takes no argument -- it must
+    # not be treated as reaching a sink at all, with no db call anywhere.
+    src = (
+        'func listUsers(w http.ResponseWriter, r *http.Request) {\n'
+        '  name := r.URL.Query().Get("name")\n'
+        '}\n'
+    )
+    rules = _rules(tmp_path, src)
+    assert "CG-SQL-EXEC" not in rules
+    assert "CG-SQL-EXEC-UNVERIFIED" not in rules
+    assert "CG-GO-SINK-CALL" not in rules
+
+
+def test_url_query_reader_and_real_sink_only_flags_the_sink(tmp_path):
+    # The same zero-arg reader alongside a genuine, tainted `db.Query(...)`
+    # call: only the real injection is flagged, and it is flagged exactly
+    # once (the reader itself must not add a second, spurious finding).
+    src = (
+        'func listUsers(w http.ResponseWriter, r *http.Request) {\n'
+        '  name := r.URL.Query().Get("name")\n'
+        '  db.Query("select * from users where name = \'" + name + "\'")\n'
+        '}\n'
+    )
+    rules = _rules(tmp_path, src)
+    assert rules.count("CG-SQL-EXEC") == 1
+    assert "CG-SQL-EXEC-UNVERIFIED" not in rules
+    assert "CG-GO-SINK-CALL" not in rules
+
+
 def _cap(cid):
     return next(c for c in CAPABILITIES if c.id == cid)
 

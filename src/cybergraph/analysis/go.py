@@ -164,10 +164,19 @@ def analyze_go_file(
                     )
                 )
             sink = lookup_sink(call_name, "go")
+            abs_off = line_starts[line_no - 1] + call.end() - 1
+            if sink is not None and _is_empty_call(source, abs_off):
+                # A registry sink call with an empty argument list is not a real
+                # sink invocation -- every real sink (`db.Query(sql)`,
+                # `exec.Command(name)`, `os.Open(path)`) takes >=1 argument. This
+                # is how a zero-arg reader that happens to share a bare sink's
+                # name (e.g. net/http's `r.URL.Query()`) is told apart from an
+                # actual call to that sink: skip it entirely, not even a
+                # CG-GO-SINK-CALL inventory entry -- it is not a sink call.
+                continue
             if sink is not None or _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if sink is not None:
-                    abs_off = line_starts[line_no - 1] + call.end() - 1
                     arg = extract_first_arg(source, abs_off)
                     verdict = assess_go_sink(sink, arg, set(tainted))
                     finding = _go_verdict_finding(sink, verdict, rel, line_no, line)
@@ -296,6 +305,21 @@ def _go_verdict_finding(sink, verdict, rel, line_no, line):
         cwe=sink.cwe,
         evidence=line.strip(),
     )
+
+
+def _is_empty_call(source: str, open_paren: int) -> bool:
+    """True if the call's argument list, starting at `source[open_paren]` (a
+    ``(``), is empty -- i.e. the next non-whitespace character is ``)``.
+
+    Deliberately simpler than `extract_first_arg`: it only needs to tell an
+    empty `()` apart from a non-empty one, not classify the argument, so it
+    does not need to be string/paren-aware -- whitespace cannot hide a `)`
+    inside a string literal or nested expression, only precede the real one.
+    """
+    i = open_paren + 1
+    while i < len(source) and source[i].isspace():
+        i += 1
+    return i < len(source) and source[i] == ")"
 
 
 def _is_sink(call_name: str, custom_sinks: tuple[str, ...] = ()) -> bool:
