@@ -133,11 +133,17 @@ def classify(arg_text: str) -> str:
     s = arg_text.strip()
     if _STRING_ONLY_RE.match(s):
         return LITERAL
+    # A top-level `+` is checked before either call-shaped idiom below, and
+    # decides COMPOSED on its own: whether one of its operands *also* happens
+    # to look like a `String.format(...)` call or contain the text
+    # `.append(` (e.g. inside a string literal, or as a nested sub-call) is
+    # irrelevant to the classification of the whole expression, and must
+    # never gate whether the `+`'s other operands get examined at all.
+    if len(_split_plus(s)) > 1:
+        return COMPOSED
     if s.startswith("String.format(") and s.endswith(")"):
         return COMPOSED
-    if _APPEND_RE.search(s):
-        return COMPOSED
-    if len(_split_plus(s)) > 1:
+    if _append_open_parens(s):
         return COMPOSED
     return OPAQUE
 
@@ -208,17 +214,57 @@ def _format_operand_candidates(format_text: str) -> tuple[list[str], bool]:
     return _operand_candidates(args)
 
 
+def _append_open_parens(text: str) -> list[int]:
+    """Indices of the ``(`` in every real, unquoted ``.append(`` call.
+
+    A plain ``_APPEND_RE.search``/``finditer`` over the raw text is
+    quote-unaware: an argument that merely *contains* the text ``.append(``
+    inside a string literal -- ``"foo.append(1)" + userInput`` -- would match
+    just the same as a genuine ``StringBuilder`` chain, hijacking the append
+    branch and silently dropping the real (and here, tainted) operand after
+    the ``+``. This walks the same quote-tracking scan `_split_plus` and
+    `extract_first_arg` already use, and only recognises ``.append(`` outside
+    any ``"..."``/``'...'`` literal.
+    """
+    positions: list[int] = []
+    quote: str | None = None
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            i += 1
+            continue
+        match = _APPEND_RE.match(text, i)
+        if match:
+            positions.append(match.end() - 1)
+            i = match.end()
+            continue
+        i += 1
+    return positions
+
+
 def _append_operand_candidates(text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from every ``.append(...)`` call's argument.
+    """Candidate variable names from every real ``.append(...)`` call's argument.
 
     A ``StringBuilder`` chain (``sb.append(a).append(b).toString()``) is
     Java's other composing idiom: each appended operand is assessed with the
     same positive-literal-proof logic as a ``+`` operand or a
-    ``String.format`` argument.
+    ``String.format`` argument. Uses `_append_open_parens` rather than a bare
+    regex scan so a `.append(` inside a string literal is never mistaken for
+    a real call.
     """
     operands: list[str] = []
-    for match in _APPEND_RE.finditer(text):
-        open_paren = match.end() - 1
+    for open_paren in _append_open_parens(text):
         arg = extract_first_arg(text, open_paren)
         if arg is not None:
             operands.append(arg)
@@ -226,12 +272,18 @@ def _append_operand_candidates(text: str) -> tuple[list[str], bool]:
 
 
 def variable_names(arg_text: str) -> list[str]:
-    """Identifiers from a ``String.format``/``.append`` chain or a ``+`` operand."""
+    """Identifiers from a top-level ``+`` operand, a ``String.format`` call, or a
+    ``.append`` chain -- in that priority order, matching `classify`/`assess`.
+    """
     s = arg_text.strip()
+    parts = _split_plus(s)
+    if len(parts) > 1:
+        names, _unresolved = _operand_candidates(parts)
+        return _dedup(names)
     if s.startswith("String.format(") and s.endswith(")"):
         names, _unresolved = _format_operand_candidates(s)
         return _dedup(names)
-    if _APPEND_RE.search(s):
+    if _append_open_parens(s):
         names, _unresolved = _append_operand_candidates(s)
         return _dedup(names)
     names, _unresolved = _plus_operand_candidates(arg_text)
@@ -335,12 +387,19 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
         return VERDICT_SAFE
     if construction == COMPOSED:
         s = arg_text.strip()
-        if s.startswith("String.format(") and s.endswith(")"):
+        # Same priority order as `classify`: a top-level `+` is resolved on
+        # its own operands first, so a `String.format(...)`/`.append(...)`
+        # shape embedded *inside* one of them (a nested call, or merely text
+        # inside a string literal) never suppresses examination of the
+        # operands beside it -- that suppression is the false-SAFE this
+        # ordering exists to close.
+        parts = _split_plus(s)
+        if len(parts) > 1:
+            names, unresolved = _operand_candidates(parts)
+        elif s.startswith("String.format(") and s.endswith(")"):
             names, unresolved = _format_operand_candidates(s)
-        elif _APPEND_RE.search(s):
-            names, unresolved = _append_operand_candidates(s)
         else:
-            names, unresolved = _plus_operand_candidates(arg_text)
+            names, unresolved = _append_operand_candidates(s)
         if any(n in tainted_names for n in names):
             return VERDICT_UNSAFE
         if names or unresolved:

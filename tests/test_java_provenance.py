@@ -49,3 +49,37 @@ def test_assess_command_shell_tainted_unsafe():
 def test_deserialization_never_safe():
     assert assess_deserialization(True) == VERDICT_UNSAFE     # tainted stream
     assert assess_deserialization(False) == VERDICT_UNKNOWN   # unresolved -> still not safe
+
+
+def test_assess_append_text_in_string_literal_does_not_hide_tainted_operand():
+    # ".append(" appearing inside a string literal must not be read as a real
+    # StringBuilder chain -- doing so would hijack the append branch and drop
+    # the tainted `userInput` operand after the `+`, a false SAFE.
+    assert assess(_sql(), '"foo.append(1)" + userInput', {"userInput"}) == VERDICT_UNSAFE
+
+
+def test_assess_format_call_containing_append_text_does_not_hide_tainted_operand():
+    # Same hijack, via a `String.format(...)` call whose own string-literal
+    # argument happens to contain the text ".append(".
+    assert (
+        assess(_sql(), 'String.format("x.append(1)") + userInput', {"userInput"})
+        == VERDICT_UNSAFE
+    )
+
+
+def test_assess_append_text_in_string_literal_untainted_is_unknown_not_safe():
+    # Same shape as above, but the `+` operand is a plain, unresolved
+    # identifier rather than a taint-confirmed one -- UNKNOWN, never SAFE.
+    assert assess(_sql(), '"foo.append(1)" + other', set()) == VERDICT_UNKNOWN
+
+
+def test_assess_stringbuilder_chain_tainted_append_unsafe():
+    # A genuine StringBuilder chain, assessed (not just classified): a
+    # tainted appended operand must read UNSAFE.
+    assert assess(_sql(), 'sb.append("x").append(userInput)', {"userInput"}) == VERDICT_UNSAFE
+
+
+def test_assess_parenthesized_operand_never_safe():
+    # A parenthesized operand is not a proven literal even when it wraps a
+    # tainted name -- it must never read SAFE.
+    assert assess(_sql(), "(userInput)", {"userInput"}) != VERDICT_SAFE
