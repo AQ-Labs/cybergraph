@@ -25,7 +25,9 @@ def test_javascript_analyzer_detects_express_routes_and_sinks(tmp_path: Path) ->
     assert any(edge.kind == "EXPOSES_ENTRYPOINT" for edge in edges)
     assert any(edge.kind == "REACHES_SINK" for edge in edges)
     assert any(edge.kind == "USES_SECRET" for edge in edges)
-    assert any(finding.rule_id == "CG-JS-SINK-CALL" for finding in findings)
+    # db.query is a registered sink; req.body.name is an unresolved member
+    # expression (not a bare tainted identifier) -> graded UNKNOWN, not inventory.
+    assert any(finding.rule_id == "CG-SQL-EXEC-UNVERIFIED" for finding in findings)
 
 
 def test_javascript_analyzer_respects_inline_finding_suppression(tmp_path: Path) -> None:
@@ -34,7 +36,7 @@ def test_javascript_analyzer_respects_inline_finding_suppression(tmp_path: Path)
     app = repo / "app.js"
     app.write_text(
         "function handler(req) {\n"
-        "  // cybergraph: ignore CG-JS-SINK-CALL accepted fixture query\n"
+        "  // cybergraph: ignore CG-SQL-EXEC-UNVERIFIED accepted fixture query\n"
         "  return db.query(req.body.name);\n"
         "}\n",
         encoding="utf-8",
@@ -79,7 +81,9 @@ def test_javascript_analyzer_detects_bare_eval_sink(tmp_path: Path) -> None:
 
     assert any(edge.kind == "CALLS" and edge.target == "eval" for edge in edges)
     assert any(edge.kind == "REACHES_SINK" and edge.target == "eval" for edge in edges)
-    assert any(finding.rule_id == "CG-JS-SINK-CALL" for finding in findings)
+    # eval is a registered sink; req.query.code is an unresolved member
+    # expression -> graded UNKNOWN, not inventory.
+    assert any(finding.rule_id == "CG-CODE-EXEC-UNVERIFIED" for finding in findings)
 
 
 def test_javascript_analyzer_emits_calls_for_named_express_handlers(tmp_path: Path) -> None:
@@ -156,7 +160,9 @@ def test_javascript_genuine_source_still_detected_and_reaches_sink(tmp_path: Pat
     assert _input_nodes(nodes), "genuine req.query must create an Input source"
     assert any(edge.kind == "READS_INPUT" for edge in edges)
     assert any(edge.kind == "TAINTS" for edge in edges)
-    assert any(f.rule_id == "CG-JS-SINK-CALL" for f in findings)
+    # db.query is a registered sink; `name` is a bare identifier the analyzer
+    # confirms tainted -> graded UNSAFE, not inventory.
+    assert any(f.rule_id == "CG-SQL-EXEC" for f in findings)
 
 
 def test_javascript_template_interpolation_source_is_detected(tmp_path: Path) -> None:
