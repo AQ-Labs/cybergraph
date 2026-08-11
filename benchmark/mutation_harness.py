@@ -517,6 +517,52 @@ MUTATIONS: list[Mutation] = [
         tests=("tests/test_js_cors_nextjs.py::test_next_public_secret_is_flagged",),
         note="a NEXT_PUBLIC_ secret must be flagged, never missed",
     ),
+    # -- D9: the JS verdict assessor must never fail open --------------------
+    Mutation(
+        id="D9-js-tainted-sqli-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_js_provenance.py::test_assess_sql_tainted_variable_is_unsafe",),
+        note="a tainted JS sink argument must not read safe",
+    ),
+    Mutation(
+        id="D9-js-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
+        tests=(
+            "tests/test_js_provenance.py::test_assess_sql_unresolved_variable_is_unknown_not_safe",
+        ),
+        note="a JS variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-js-concat-operand-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        idents = _IDENT_RE.findall(p)\n"
+        "        if not idents:\n"
+        "            unresolved = True\n"
+        "            continue",
+        new="        m = _IDENT_RE.match(p)\n"
+        "        if m is None:\n"
+        "            continue\n"
+        "        idents = [m.group(0)]",
+        tests=("tests/test_js_provenance.py::test_assess_paren_tainted_operand_is_unsafe",),
+        note="a '+' operand not led by an identifier character (e.g. `(id)`, `[id]`, "
+        "`(id || 1)`) must still have its identifiers found; matching only from the "
+        "operand's start silently drops the name and the construction reads safe",
+    ),
 ]
 
 
