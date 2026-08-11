@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from cybergraph.analysis.js_provenance import (
     assess,
+    assess_command,
     classify,
+    extract_all_args,
     extract_first_arg,
     variable_names,
 )
@@ -124,3 +126,43 @@ def test_assess_paren_untainted_operand_is_unknown_not_safe():
     assert assess(_sink("db.query"), "'x = ' + (id || 1)", set()) == VERDICT_UNKNOWN
     assert assess(_sink("db.query"), "'x = ' + [id]", set()) == VERDICT_UNKNOWN
     assert assess(_sink("db.query"), "'x = ' + (id ? id : 1)", set()) == VERDICT_UNKNOWN
+
+
+# -- command sinks must be assessed over ALL arguments, not just argv[0] --
+
+
+def test_extract_all_args_shell_form():
+    src = 'spawn("sh", ["-c", userCmd])'
+    args = extract_all_args(src, src.index("("))
+    assert args == ['"sh"', '["-c", userCmd]']
+
+
+def test_extract_all_args_single_arg():
+    src = "exec(cmd)"
+    args = extract_all_args(src, src.index("("))
+    assert args == ["cmd"]
+
+
+def test_extract_all_args_unbalanced_is_empty():
+    assert extract_all_args("spawn('sh', [", 5) == []
+
+
+def test_assess_command_shell_form_tainted_is_unsafe():
+    assert assess_command(['"sh"', '["-c", userCmd]'], {"userCmd"}) == VERDICT_UNSAFE
+
+
+def test_assess_command_shell_form_untainted_is_unknown():
+    assert assess_command(['"sh"', '["-c", userCmd]'], set()) == VERDICT_UNKNOWN
+
+
+def test_assess_command_all_literal_is_safe():
+    assert assess_command(['"ls"', '"-la"'], set()) == VERDICT_SAFE
+
+
+def test_assess_command_first_arg_tainted_is_unsafe():
+    # exec/execSync: the command IS the first (only) argument -- must still work
+    assert assess_command(["cmd"], {"cmd"}) == VERDICT_UNSAFE
+
+
+def test_assess_command_no_args_is_unknown():
+    assert assess_command([], set()) == VERDICT_UNKNOWN

@@ -7,7 +7,8 @@ from pathlib import Path
 
 from cybergraph.analysis._source_text import strip_code
 from cybergraph.analysis.js_provenance import assess as assess_js_sink
-from cybergraph.analysis.js_provenance import extract_first_arg
+from cybergraph.analysis.js_provenance import assess_command as assess_js_command
+from cybergraph.analysis.js_provenance import extract_all_args, extract_first_arg
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -219,9 +220,20 @@ def analyze_javascript_file(
             if sink is not None or _is_sink(call_name, custom_sinks):
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if sink is not None:
-                    arg = extract_first_arg(source, line_starts[line_no - 1] + call.end() - 1)
+                    open_paren = line_starts[line_no - 1] + call.end() - 1
                     tainted_names = set(tainted)
-                    verdict = assess_js_sink(sink, arg, tainted_names)
+                    if sink.vuln_class == "command":
+                        # Command sinks like `spawn`/`execFile` take argv, not
+                        # a single string: grading only the first argument
+                        # would see just the program name (the literal `"sh"`
+                        # in `spawn("sh", ["-c", userCmd])`) and never the
+                        # tainted argument that follows it. Assess the whole
+                        # argument list instead.
+                        args = extract_all_args(source, open_paren)
+                        verdict = assess_js_command(args, tainted_names)
+                    else:
+                        arg = extract_first_arg(source, open_paren)
+                        verdict = assess_js_sink(sink, arg, tainted_names)
                     finding = _js_verdict_finding(sink, verdict, rel, line_no, line)
                     if finding is not None and not is_inline_suppressed(
                         lines, line_no, finding.rule_id
