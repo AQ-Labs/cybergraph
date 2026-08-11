@@ -39,6 +39,21 @@ def test_unresolved_variable_query_is_unverified(tmp_path):
     assert "CG-SQL-EXEC" not in rules  # not a confident unsafe on an unproven variable
 
 
+def test_tainted_concat_operand_shapes_are_unsafe(tmp_path):
+    # each of these begins the '+' operand with '(', '[', or a ternary rather
+    # than a leading identifier character -- all must still confirm unsafe
+    idioms = [
+        "db.query('SELECT * FROM u WHERE id = ' + (id))",
+        "db.query('SELECT * FROM u WHERE id = ' + (id || 1))",
+        "db.query('SELECT * FROM u WHERE id = ' + [id])",
+        "db.query('SELECT ' + (id ? id : 1))",
+    ]
+    for i, call in enumerate(idioms):
+        src = f"function h(db, req){{ const id = req.query.id;\n  return {call}; }}\n"
+        rules = _rules(tmp_path, f"c{i}.js", src)
+        assert "CG-SQL-EXEC" in rules, call
+
+
 def test_non_registry_sink_stays_inventory(tmp_path):
     # res.render is in the legacy SINK_CALLS but not the verdict registry -> inventory-grade
     rules = _rules(tmp_path, "a.js", "function h(res, x){ return res.render(x); }\n")

@@ -20,10 +20,12 @@ from cybergraph.security.sinks import Sink
 
 _IDENT_RE = re.compile(r"[A-Za-z_$][\w$]*")
 _STRING_ONLY_RE = re.compile(r"""^\s*(?:'[^']*'|"[^"]*"|`[^`]*`)\s*$""")
-# a template literal with no interpolation hole
-_TEMPLATE_NO_INTERP_RE = re.compile(r"^\s*`[^`]*`\s*$")
+_NUMERIC_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 _INTERP_RE = re.compile(r"\$\{([^}]*)\}")
 _JS_KEYWORDS = {"true", "false", "null", "undefined", "this"}
+# numeric/boolean/null constants -- proven literals even though "true"/"null" are
+# also excluded from candidate variable names as JS keywords
+_CONST_LITERAL_KEYWORDS = {"true", "false", "null"}
 
 
 def extract_first_arg(source: str, open_paren: int) -> str | None:
@@ -75,21 +77,61 @@ def classify(arg_text: str) -> str:
     return OPAQUE
 
 
+def _is_proven_literal_operand(operand: str) -> bool:
+    """True only for a construction that is positively known to be constant.
+
+    A string/template literal with no ``${}`` hole, or a numeric/boolean/null
+    constant. Anything else -- a bare identifier, a parenthesized expression, a
+    bracketed expression, a ternary, a call, member access -- is NOT proven
+    literal, even if it happens to contain no scannable identifier: absence of
+    a name must never be read as proof of literal-ness.
+    """
+    s = operand.strip()
+    if not s:
+        return False
+    if _STRING_ONLY_RE.match(s) and "${" not in s:
+        return True
+    if _NUMERIC_RE.match(s):
+        return True
+    if s in _CONST_LITERAL_KEYWORDS:
+        return True
+    return False
+
+
+def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
+    """Candidate variable names from non-literal top-level ``+`` operands.
+
+    Also returns whether any operand is "unresolved": not a proven literal and
+    yet contains no identifier at all (e.g. `(1 + 1)` as an operand) -- such an
+    operand must never be silently treated as safe just because it has no name
+    to check.
+    """
+    names: list[str] = []
+    unresolved = False
+    for part in _split_plus(arg_text):
+        p = part.strip()
+        if not p or _is_proven_literal_operand(p):
+            continue
+        idents = _IDENT_RE.findall(p)
+        if not idents:
+            unresolved = True
+            continue
+        for ident in idents:
+            if ident not in _JS_KEYWORDS:
+                names.append(ident)
+    return names, unresolved
+
+
 def variable_names(arg_text: str) -> list[str]:
-    """Identifiers introduced by ${...} interpolation or a + operand, minus literals."""
+    """Identifiers introduced by ${...} interpolation or a non-literal + operand."""
     names: list[str] = []
     for hole in _INTERP_RE.findall(arg_text):
         m = _IDENT_RE.search(hole)
         if m and m.group(0) not in _JS_KEYWORDS:
             names.append(m.group(0))
     if "+" in arg_text:
-        # operands that are not string literals
-        for part in _split_plus(arg_text):
-            p = part.strip()
-            if p and p[0] not in "'\"`":
-                m = _IDENT_RE.match(p)
-                if m and m.group(0) not in _JS_KEYWORDS and not p[0].isdigit():
-                    names.append(m.group(0))
+        plus_names, _unresolved = _plus_operand_candidates(arg_text)
+        names.extend(plus_names)
     # de-dup, preserve order
     seen: set[str] = set()
     out = []
@@ -143,12 +185,17 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
         return VERDICT_SAFE
     if construction == COMPOSED:
         names = variable_names(arg_text)
-        if not names:
-            # composed of only literals (e.g. `'a' + 'b'`) -> safe
-            return VERDICT_SAFE
+        unresolved = False
+        if "+" in arg_text:
+            _plus_names, unresolved = _plus_operand_candidates(arg_text)
         if any(n in tainted_names for n in names):
             return VERDICT_UNSAFE
-        return VERDICT_UNKNOWN
+        if names or unresolved:
+            # a candidate variable (resolved or not) or an operand we could not
+            # prove literal -> never read as safe
+            return VERDICT_UNKNOWN
+        # every operand is a proven literal/constant (e.g. `'a' + 'b'`) -> safe
+        return VERDICT_SAFE
     # OPAQUE: `variable_names` only extracts identifiers introduced by `${...}`
     # interpolation or a `+` operand, so it finds nothing in a bare identifier
     # (no template, no `+`) even though the whole argument *is* one. Handle

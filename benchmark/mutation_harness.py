@@ -533,16 +533,35 @@ MUTATIONS: list[Mutation] = [
         id="D9-js-unresolved-var-reads-safe",
         disaster="D9",
         file="cybergraph/analysis/js_provenance.py",
-        old="        if any(n in tainted_names for n in names):\n"
-        "            return VERDICT_UNSAFE\n"
-        "        return VERDICT_UNKNOWN",
-        new="        if any(n in tainted_names for n in names):\n"
-        "            return VERDICT_UNSAFE\n"
-        "        return VERDICT_SAFE",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
         tests=(
             "tests/test_js_provenance.py::test_assess_sql_unresolved_variable_is_unknown_not_safe",
         ),
         note="a JS variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-js-concat-operand-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="        idents = _IDENT_RE.findall(p)\n"
+        "        if not idents:\n"
+        "            unresolved = True\n"
+        "            continue",
+        new="        m = _IDENT_RE.match(p)\n"
+        "        if m is None:\n"
+        "            continue\n"
+        "        idents = [m.group(0)]",
+        tests=("tests/test_js_provenance.py::test_assess_paren_tainted_operand_is_unsafe",),
+        note="a '+' operand not led by an identifier character (e.g. `(id)`, `[id]`, "
+        "`(id || 1)`) must still have its identifiers found; matching only from the "
+        "operand's start silently drops the name and the construction reads safe",
     ),
 ]
 

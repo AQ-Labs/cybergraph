@@ -98,3 +98,29 @@ def test_assess_bare_concat_untainted_is_unknown():
 def test_arithmetic_in_call_is_not_composed():
     # the '+' is inside parens, not top-level
     assert classify("f(1 + 2)") == "opaque"
+
+
+def test_assess_all_literal_concat_is_safe():
+    assert assess(_sink("db.query"), "'a' + 'b'", set()) == VERDICT_SAFE
+
+
+def test_assess_paren_tainted_operand_is_unsafe():
+    # a '+' operand that begins with '(' carries no leading identifier char, but
+    # a tainted variable inside it must still be found -- never read as safe
+    assert assess(_sink("db.query"), "'x = ' + (id)", {"id"}) == VERDICT_UNSAFE
+    assert assess(_sink("db.query"), "'x = ' + (id || 1)", {"id"}) == VERDICT_UNSAFE
+
+
+def test_assess_bracket_tainted_operand_is_unsafe():
+    assert assess(_sink("db.query"), "'x = ' + [id]", {"id"}) == VERDICT_UNSAFE
+
+
+def test_assess_ternary_tainted_operand_is_unsafe():
+    assert assess(_sink("db.query"), "'x = ' + (id ? id : 1)", {"id"}) == VERDICT_UNSAFE
+
+
+def test_assess_paren_untainted_operand_is_unknown_not_safe():
+    assert assess(_sink("db.query"), "'x = ' + (id)", set()) == VERDICT_UNKNOWN
+    assert assess(_sink("db.query"), "'x = ' + (id || 1)", set()) == VERDICT_UNKNOWN
+    assert assess(_sink("db.query"), "'x = ' + [id]", set()) == VERDICT_UNKNOWN
+    assert assess(_sink("db.query"), "'x = ' + (id ? id : 1)", set()) == VERDICT_UNKNOWN

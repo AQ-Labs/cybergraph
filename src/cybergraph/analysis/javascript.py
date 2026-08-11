@@ -220,7 +220,7 @@ def analyze_javascript_file(
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 if sink is not None:
                     arg = extract_first_arg(source, line_starts[line_no - 1] + call.end() - 1)
-                    tainted_names = set(tainted) | _line_tainted_names(line, tainted)
+                    tainted_names = set(tainted)
                     verdict = assess_js_sink(sink, arg, tainted_names)
                     finding = _js_verdict_finding(sink, verdict, rel, line_no, line)
                     if finding is not None and not is_inline_suppressed(
@@ -404,11 +404,6 @@ def _line_start_offsets(source: str) -> list[int]:
         offsets.append(offset)
         offset += len(segment)
     return offsets
-
-
-def _line_tainted_names(line: str, tainted: dict) -> set[str]:
-    """Names on this line that the analyzer tracks as user-controlled."""
-    return {name for name in tainted if re.search(rf"\b{re.escape(name)}\b", line)}
 
 
 def _js_verdict_finding(sink, verdict, rel, line_no, line):
