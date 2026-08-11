@@ -636,6 +636,25 @@ MUTATIONS: list[Mutation] = [
         note="a taint-confirmed command argument (`exec.Command(\"sh\", \"-c\", userCmd)` "
         "with tainted userCmd) must not read safe",
     ),
+    Mutation(
+        id="D9-js-command-shell-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/js_provenance.py",
+        old="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_UNSAFE\n"
+        "    return VERDICT_UNKNOWN",
+        new="    names, _unresolved = _operand_candidates(args)\n"
+        "    if any(n in tainted_names for n in names):\n"
+        "        return VERDICT_SAFE\n"
+        "    return VERDICT_UNKNOWN",
+        tests=(
+            "tests/test_js_provenance.py::test_assess_command_shell_form_tainted_is_unsafe",
+        ),
+        note="a taint-confirmed command argument (`spawn(\"sh\", [\"-c\", userCmd])` with "
+        "tainted userCmd, the command in a later argument than the shell program name) "
+        "must not read safe",
+    ),
 ]
 
 

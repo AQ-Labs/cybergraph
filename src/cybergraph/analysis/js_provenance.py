@@ -66,6 +66,53 @@ def extract_first_arg(source: str, open_paren: int) -> str | None:
     return None  # unbalanced -> caller treats as UNKNOWN
 
 
+def extract_all_args(source: str, open_paren: int) -> list[str]:
+    """Return every top-level argument's source text, or [] if unbalanced.
+
+    Command-class sinks (`spawn`, `execFile`) take argv, not a single string,
+    so grading them on `extract_first_arg` alone only ever sees the program
+    name -- for the shell idiom `spawn("sh", ["-c", userCmd])`, the literal
+    `"sh"` -- and never the tainted argument that follows it. This walks the
+    same string/paren-aware scan as `extract_first_arg` but keeps collecting
+    past the first top-level comma instead of stopping there.
+    """
+    depth = 0
+    quote: str | None = None
+    start = -1
+    args: list[str] = []
+    i = open_paren
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == "(":
+            depth += 1
+            if depth == 1:
+                start = i + 1
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                tail = source[start:i].strip()
+                if tail or args:
+                    args.append(tail)
+                return args
+        elif c == "," and depth == 1:
+            args.append(source[start:i].strip())
+            start = i + 1
+        i += 1
+    return []  # unbalanced -> caller treats as UNKNOWN
+
+
 def classify(arg_text: str) -> str:
     s = arg_text.strip()
     if _STRING_ONLY_RE.match(s) and "${" not in s:
@@ -98,17 +145,19 @@ def _is_proven_literal_operand(operand: str) -> bool:
     return False
 
 
-def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
-    """Candidate variable names from non-literal top-level ``+`` operands.
+def _operand_candidates(operands: list[str]) -> tuple[list[str], bool]:
+    """Candidate variable names from operands that are not proven literal.
 
-    Also returns whether any operand is "unresolved": not a proven literal and
-    yet contains no identifier at all (e.g. `(1 + 1)` as an operand) -- such an
-    operand must never be silently treated as safe just because it has no name
-    to check.
+    Each element of ``operands`` is checked independently against
+    ``_is_proven_literal_operand``; a proven literal contributes nothing. A
+    non-literal operand contributes its identifiers as candidates, or -- if it
+    has no identifier at all (e.g. `(1 + 1)`, or an opaque call) -- marks the
+    result "unresolved" so it is never silently treated as safe just because
+    it has no name to check.
     """
     names: list[str] = []
     unresolved = False
-    for part in _split_plus(arg_text):
+    for part in operands:
         p = part.strip()
         if not p or _is_proven_literal_operand(p):
             continue
@@ -120,6 +169,11 @@ def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
             if ident not in _JS_KEYWORDS:
                 names.append(ident)
     return names, unresolved
+
+
+def _plus_operand_candidates(arg_text: str) -> tuple[list[str], bool]:
+    """Candidate variable names from non-literal top-level ``+`` operands."""
+    return _operand_candidates(_split_plus(arg_text))
 
 
 def variable_names(arg_text: str) -> list[str]:
@@ -205,5 +259,35 @@ def assess(sink: Sink, arg_text: str | None, tainted_names: set[str]) -> str:
     s = arg_text.strip()
     match = _IDENT_RE.fullmatch(s)
     if match and match.group(0) not in _JS_KEYWORDS and match.group(0) in tainted_names:
+        return VERDICT_UNSAFE
+    return VERDICT_UNKNOWN
+
+
+def assess_command(args: list[str], tainted_names: set[str]) -> str:
+    """Verdict for a JS command sink (`spawn`/`execFile`/`exec`) over ALL arguments.
+
+    `assess` grades a sink on its first argument alone, which is right for
+    `exec(cmd)` where the command IS the first argument, but wrong for the
+    shell-argv form `spawn("sh", ["-c", userCmd])`: there the first argument
+    is just the literal program name and the tainted command is two slots
+    over, so first-arg-only grading never sees it and the call reads SAFE.
+    This assesses the whole argument list instead, reusing
+    `_operand_candidates` / `_is_proven_literal_operand` so the same
+    positive-literal-proof invariant holds throughout -- a non-literal
+    argument (including an array-literal argv element like `["-c", cmd]`,
+    which is not itself a proven literal) is never silently read as safe.
+
+    Verdict, fail-safe throughout:
+    - no arguments (unreadable call) -> UNKNOWN.
+    - every argument is a proven literal/constant -> SAFE.
+    - otherwise, a taint-confirmed candidate in any argument -> UNSAFE.
+    - otherwise (an unresolved or untainted candidate argument) -> UNKNOWN.
+    """
+    if not args:
+        return VERDICT_UNKNOWN
+    if all(_is_proven_literal_operand(a) for a in args):
+        return VERDICT_SAFE
+    names, _unresolved = _operand_candidates(args)
+    if any(n in tainted_names for n in names):
         return VERDICT_UNSAFE
     return VERDICT_UNKNOWN
