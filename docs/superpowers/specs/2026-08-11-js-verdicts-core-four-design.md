@@ -86,14 +86,28 @@ paren matcher — the technique from #45's `_brace_object`, adapted to `(`/`)`):
   extracted → **OPAQUE** (fail-safe).
 - **Taint refinement:** reuse the function-local taint `javascript.py` already computes — whether
   an interpolated/concatenated identifier is a known user-controlled value.
-- **Per-class assessment** (mirrors `predicates`, JS-side):
-  - **SQL / path:** LITERAL → SAFE; COMPOSED with a tainted or plain variable → UNSAFE; OPAQUE →
-    UNKNOWN. A template whose interpolations are all literals/constants → SAFE (the
-    `f"... ORDER BY {ALLOWED}"` case, JS-side).
-  - **command:** an inherent-shell sink with any non-literal argument → UNSAFE; a conditional-shell
-    sink with array argv and no `shell: true` → SAFE for the shell mechanism; otherwise by
-    construction as above.
-  - **code:** `eval`/`Function` with a non-literal argument → UNSAFE; a literal → SAFE.
+- **Per-class assessment** (the *concept* mirrors `predicates`, but the safe/unknown split is
+  deliberately MORE conservative than Python's, because JS taint is weaker — intra-function and
+  line-based — so "untainted therefore safe" is not trustworthy here). Python trusts its strong
+  AST taint to clear an untainted-but-composed query; JS must not, or a real injection whose flow
+  the weaker taint missed would read SAFE. Therefore:
+  - **SQL / path:** an argument that is a literal, or a template/concatenation whose every part is
+    a literal or a resolvable constant → **SAFE**. A construction containing a variable that taint
+    confirms is user-controlled → **UNSAFE**. A construction containing a variable of *unknown*
+    provenance (taint neither confirms nor refutes) → **UNKNOWN** — never SAFE (JS can't vouch for
+    it) and never a confident UNSAFE (it might be an allowlisted constant). Opaque / unreadable →
+    **UNKNOWN**.
+  - **command:** an inherent-shell sink whose argument is anything but an all-literal/constant
+    string → UNSAFE when taint confirms user input, else UNKNOWN; a conditional-shell sink with an
+    array argv and no `shell: true` → SAFE for the shell mechanism (then assess the elements as
+    above); a string command with no resolvable shell status → UNKNOWN (platform-dependent, as in
+    Python's `_assess_command`).
+  - **code:** `eval` / `new Function` with an all-literal argument → SAFE; with a taint-confirmed
+    user value → UNSAFE; with a variable of unknown provenance → UNKNOWN.
+
+  The invariant across all four: **only an all-literal/constant construction is SAFE; any variable
+  is UNSAFE (taint-confirmed) or UNKNOWN (unresolved), never SAFE.** This is the concrete
+  expression of the judged-against sentence and the cardinal precision rule.
 - **Verdict → finding:** UNSAFE → the sink's `rule_id` at its severity; UNKNOWN → `rule_id` +
   `-UNVERIFIED` at reduced severity; SAFE → no finding. (Same mapping as Python's `_finding_for`.)
 
@@ -172,9 +186,10 @@ names outside the registry.
 
 1. `sinks.py` resolves the JS SQL/command/code/path sink names to Python's rule ids; Python
    lookups unchanged.
-2. The JS classifier maps literal → SAFE, interpolated/concatenated-with-a-variable → UNSAFE,
-   opaque/unreadable → UNKNOWN, per class (SQL/command/code/path), with the shell/argv and
-   only-literal-interpolation nuances correct.
+2. The JS classifier maps an all-literal/constant construction → SAFE, a variable that taint
+   confirms is user-controlled → UNSAFE, a variable of unknown provenance or an unreadable
+   argument → UNKNOWN, per class (SQL/command/code/path), with the shell/argv and
+   only-literal-interpolation nuances correct. No variable is ever SAFE.
 3. A JS injection on a changed `.ts`/`.js` → the matching capability FAIL → `cybergraph check`
    REVIEW; a parameterized/array-argv/literal change → SAFE → ACCEPT (end-to-end).
 4. `source_analysis_support` still reports JS NOT_SUPPORTED (the tool does not overclaim full JS
