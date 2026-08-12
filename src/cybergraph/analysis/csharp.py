@@ -12,6 +12,13 @@ import re
 from pathlib import Path
 
 from cybergraph.analysis._source_text import strip_code
+from cybergraph.analysis.csharp_provenance import (
+    assess,
+    assess_command,
+    assess_deserialization,
+    extract_all_args,
+    extract_first_arg,
+)
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -22,6 +29,8 @@ from cybergraph.security.ontology import (
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
+from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE
+from cybergraph.security.sinks import lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
 METHOD_RE = re.compile(
@@ -29,6 +38,31 @@ METHOD_RE = re.compile(
     r"[\w<>\[\],.\s]+?\s+(?P<name>[A-Za-z_]\w*)\s*\([^;{]*\)\s*\{"
 )
 METHOD_PARAMS_RE = re.compile(r"\((?P<params>[^)]*)\)")
+# Same "TYPE NAME(params) {" shape as METHOD_RE, but with the access-modifier
+# prefix OPTIONAL: a minimal top-level/local handler (`void H(string user) {
+# ... }`, no `public`/`private`) is common in ASP.NET minimal-API style code
+# and in test fixtures alike, and its parameters are exactly as
+# request-bindable as an attributed action's -- C# taint is already
+# weak/intra-method by design (see csharp_provenance's module docstring), so
+# seeding grading's taint set from every declared parameter name in the file
+# this way is one more conservative, fail-toward-flagging heuristic, not a
+# precision loss: a `\b`-anchored, whitespace-then-a-distinct-name shape still
+# cannot match a control-flow construct (`if (x) {`, `for (...) {`, `catch
+# (Exception e) {`, ...), which never has a separate NAME token between its
+# keyword and `(`. Deliberately independent of METHOD_RE / the main loop's
+# Function-node and route bookkeeping below -- this feeds ONLY the grading
+# pass's taint set, never a node, edge, or route link.
+_CSHARP_PARAM_DECL_RE = re.compile(
+    r"\b(?:(?:public|private|protected|internal)\s+)?(?:static\s+|async\s+|virtual\s+|override\s+)*"
+    r"[\w<>\[\],.\s]+?\s+[A-Za-z_]\w*\s*\((?P<params>[^;{]*)\)\s*\{"
+)
+# Matches a sink call the general dotted CALL_RE misses: a constructor `new
+# Ctor(` or a method call `.method(` (including one that follows a `)` in a
+# chain). Run over the whole `source` (not per-line) so a chained call after a
+# `)` is still found.
+_CSHARP_SINK_CALL_RE = re.compile(
+    r"\bnew\s+(?P<ctor>[A-Z]\w*)\s*\(|\.(?P<method>[A-Za-z_]\w*)\s*\("
+)
 ATTR_ROUTE_RE = re.compile(
     r"\[(?:Http(?P<verb>Get|Post|Put|Patch|Delete)|Route)\s*(?:\(\s*\"(?P<path>[^\"]*)\")?"
 )
@@ -86,6 +120,12 @@ def analyze_csharp_file(
     pending_route: dict | None = None
     current_function: str | None = None
     tainted_by_function: dict[str, dict[str, str]] = {}
+    # The owning function key (or `rel` at file scope) for each 1-based line,
+    # recorded as the main loop attributes sinks/taint to `sink_source` --
+    # reused by the second-pass sink-call matcher below so a call the general
+    # `CALL_RE` cannot see (a constructor, or a chained call after `)`) is
+    # still attributed to the right function and taint set.
+    line_owner: list[str] = []
     for line_no, line in enumerate(lines, start=1):
         attr_match = ATTR_ROUTE_RE.search(line)
         if attr_match:
@@ -135,6 +175,7 @@ def analyze_csharp_file(
                 pending_route = None
 
         sink_source = current_function or rel
+        line_owner.append(sink_source)
         tainted = tainted_by_function.setdefault(sink_source, {})
         lowered_line = line.lower()
         code_line = code_lines[line_no - 1] if line_no - 1 < len(code_lines) else line
@@ -175,7 +216,11 @@ def analyze_csharp_file(
                         {"reason": "secret passed to exposure sink"},
                     )
                 )
-            if _is_sink(call_name, custom_sinks):
+            # A call_name whose bare tail resolves to a registered sink is graded
+            # by the dedicated matcher/second pass below instead -- skip it here
+            # so the same sink never double-emits (once as this legacy inventory
+            # finding, once as a graded verdict).
+            if _is_sink(call_name, custom_sinks) and lookup_sink(call_name, "csharp") is None:
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 taint_source = source_key or _tainted_source_for_line(line, tainted)
                 if taint_source:
@@ -202,6 +247,7 @@ def analyze_csharp_file(
                         )
                     )
 
+    _grade_csharp_sinks(source, lines, rel, line_owner, tainted_by_function, edges, findings)
     return nodes, edges, findings
 
 
@@ -279,6 +325,189 @@ def _tainted_source_for_line(line: str, tainted: dict[str, str]) -> str:
         if re.search(rf"\b{re.escape(name)}\b", line):
             return key
     return ""
+
+
+def _grade_csharp_sinks(
+    source: str,
+    lines: list[str],
+    rel: str,
+    line_owner: list[str],
+    tainted_by_function: dict[str, dict[str, str]],
+    edges: list[Edge],
+    findings: list[Finding],
+) -> None:
+    """Second pass: grade every sink `_CSHARP_SINK_CALL_RE`/`CALL_RE` finds into a
+    real verdict.
+
+    Matching runs over `code` -- `strip_code(source, "csharp")` rejoined, so
+    every comment AND every string literal (except a live interpolation hole)
+    is blanked -- so a commented-out sink call is invisible here, never graded
+    as live, and a call-shaped fragment sitting inside a string literal cannot
+    be mistaken for a real one. `code` is exactly as long as `source` (each
+    input character maps to exactly one output character, and `source` was
+    already read with universal newlines, so a `"\\n".join` of the split lines
+    reproduces `source` verbatim short of a possible single trailing
+    newline) -- so `line_no`/`open_paren` computed against it are equally
+    valid used against `source`.
+
+    Argument extraction, though, runs against RAW `source`, not `code`: `code`
+    blanks a plain/interpolated string's own quotes and literal text (keeping
+    only an interpolation hole's expression live), which is exactly the
+    content `classify`/`assess` need to tell LITERAL from COMPOSED -- grading
+    off `code` would see a proven-literal query as an empty, unreadable
+    argument and misreport it as UNKNOWN. Position alignment with `code` makes
+    this safe: `open_paren` in `code` is also `open_paren` in `source`.
+
+    `_CSHARP_SINK_CALL_RE` catches a constructor (`new SqlCommand(...)`) or a
+    bare `.method(` the dotted `CALL_RE` misses; `CALL_RE` is ALSO run here
+    (in addition to its per-line use above) so a fully-qualified code-exec
+    name (`Microsoft.CodeAnalysis.CSharp.Scripting.CSharpScript.EvaluateAsync`)
+    still resolves -- `lookup_sink` only exact-matches a NON-bare sink's full
+    name (`CSharpScript.EvaluateAsync`, not the whole namespace chain), so the
+    last two dotted segments are tried too. Both regexes can match the SAME
+    physical call (e.g. `.Start(` via one, the fully dotted `Process.Start` via
+    the other); `candidates` is keyed by `open_paren` so each call is graded
+    exactly once.
+    """
+    code = "\n".join(strip_code(source, "csharp"))
+    declared_params = _declared_param_names(code)
+
+    candidates: dict[int, tuple[str, object]] = {}
+    for call in _CSHARP_SINK_CALL_RE.finditer(code):
+        name = call.group("ctor") or call.group("method")
+        sink = lookup_sink(name, "csharp")
+        if sink is not None:
+            candidates.setdefault(call.end() - 1, (name, sink))
+    for call in CALL_RE.finditer(code):
+        call_name = call.group("name")
+        sink = lookup_sink(call_name, "csharp")
+        if sink is None:
+            tail2 = ".".join(call_name.split(".")[-2:])
+            sink = lookup_sink(tail2, "csharp")
+        if sink is not None:
+            candidates.setdefault(call.end() - 1, (call_name, sink))
+
+    for open_paren in sorted(candidates):
+        name, sink = candidates[open_paren]
+        line_no = code.count("\n", 0, open_paren) + 1
+        owner = line_owner[line_no - 1] if 0 < line_no <= len(line_owner) else rel
+        tainted_map = tainted_by_function.get(owner, {})
+        line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+
+        # Zero-argument guard: `cmd.ExecuteReader()`/`ProcessStartInfo.Start()`
+        # have empty parens and are not a string-injection sink call -- the
+        # query/command lives elsewhere (`new SqlCommand("...", conn)` / a
+        # separately-constructed `ProcessStartInfo`), matched and assessed
+        # separately. Deserialization is exempt: `.Deserialize(stream)` is the
+        # normal, always-one-argument form, so it must always be graded. An
+        # unbalanced/unreadable arg list is NOT genuinely empty and must still
+        # be assessed as unknown, not skipped.
+        if sink.vuln_class != "deserialize" and _call_is_empty(code, open_paren) is True:
+            continue
+
+        edges.append(Edge(EDGE_REACHES_SINK, owner, name, rel, line_no))
+        taint_key = _tainted_source_for_line(line_text, tainted_map)
+        if taint_key:
+            edges.append(
+                Edge(
+                    EDGE_TAINTS, taint_key, name, rel, line_no,
+                    {"function": owner, "reason": "tainted argument"},
+                )
+            )
+
+        tainted_names = set(tainted_map) | declared_params
+        if sink.vuln_class == "deserialize":
+            verdict = assess_deserialization(bool(taint_key))
+        elif sink.vuln_class == "command":
+            verdict = assess_command(extract_all_args(source, open_paren), tainted_names)
+        else:  # sql / path / code
+            verdict = assess(sink, extract_first_arg(source, open_paren), tainted_names)
+
+        finding = _csharp_verdict_finding(sink, verdict, rel, line_no, line_text)
+        if finding is not None and not is_inline_suppressed(lines, line_no, finding.rule_id):
+            findings.append(finding)
+
+
+def _declared_param_names(code: str) -> set[str]:
+    """Every identifier that is a declared parameter of some method-like
+    signature anywhere in the file, per `_CSHARP_PARAM_DECL_RE`.
+
+    Used only to widen grading's taint set (see `_grade_csharp_sinks`): an
+    ASP.NET method's own parameters are commonly request-bound even without an
+    explicit route attribute or `[FromQuery]`/`[FromBody]`, and this repo's C#
+    taint is already weak/intra-method by design. File-wide rather than
+    per-function is a deliberate, disclosed over-approximation (a same-named
+    parameter on an unrelated method in the same file would also count) --
+    conservative in the direction this module already commits to: never a
+    confident SAFE on an unresolved variable, so widening what counts as
+    "resolved" only ever moves UNKNOWN towards UNSAFE, never SAFE away from a
+    real finding.
+    """
+    names: set[str] = set()
+    for match in _CSHARP_PARAM_DECL_RE.finditer(code):
+        for raw_param in match.group("params").split(","):
+            param = raw_param.strip()
+            if not param:
+                continue
+            idents = re.findall(r"[A-Za-z_]\w*", param)
+            if idents:
+                names.add(idents[-1])
+    return names
+
+
+def _call_is_empty(source: str, open_paren: int) -> bool | None:
+    """True for a genuinely empty `()`, False if it has content, None if unbalanced.
+
+    Quote/bracket-aware, mirroring `extract_first_arg`'s scan -- so a `)`/`,`
+    inside a nested string literal never mistakenly closes the call early.
+    `None` (unbalanced) is deliberately distinct from `True`: the zero-arg
+    guard must only fire on a call *proven* to take no arguments, never on one
+    that merely could not be read.
+    """
+    depth = 0
+    quote: str | None = None
+    i = open_paren
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return not source[open_paren + 1 : i].strip()
+        i += 1
+    return None
+
+
+def _csharp_verdict_finding(
+    sink, verdict: str, rel: str, line_no: int, line: str
+) -> Finding | None:
+    if verdict == VERDICT_SAFE:
+        return None
+    unsafe = verdict == VERDICT_UNSAFE
+    return Finding(
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}-UNVERIFIED",
+        severity=sink.severity if unsafe else "medium",
+        message=(f"`{sink.name}` {sink.plain}" if unsafe
+                 else f"`{sink.name}` {sink.plain}, and CyberGraph could not confirm "
+                      "the value is safe"),
+        file_path=rel,
+        line_start=line_no,
+        cwe=sink.cwe,
+        evidence=line.strip(),
+    )
 
 
 def _classify_csharp_name(name: str) -> dict[str, bool]:
