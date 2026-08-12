@@ -124,9 +124,24 @@ def _interp_holes(arg_text: str) -> list[str] | None:
 
 def _strip_interp_suffix(expr: str) -> str:
     """Drop a C# interpolation `,alignment` / `:format` suffix, ignoring commas/
-    colons inside quotes, (), [] or {}."""
+    colons inside quotes, (), [] or {}.
+
+    A top-level `:` is a `:format` separator ONLY when it is not a ternary
+    conditional's colon -- `{cond ? a : b}` must keep its whole expression as
+    the operand, or the attacker-controlled branch (commonly the `: evil`
+    side) is silently dropped and the surviving `cond ? a` fragment -- often
+    just keywords/digits -- is misread as a proven literal. `ternary_depth`
+    tracks pending `?`s: each top-level `?` increments it, and a top-level `:`
+    while one is pending is consumed as that ternary's colon (decremented,
+    scanning continues) rather than treated as a format separator. This also
+    correctly threads nested ternaries (`a ? b : c ? d : e`) and errs
+    conservative on `??`/`?.`/a nullable-type `?` -- worst case they inflate
+    `ternary_depth` and cause a later genuine `:format` colon to be kept as
+    part of the operand too, never the reverse.
+    """
     depth = 0
     quote: str | None = None
+    ternary_depth = 0
     for k, ch in enumerate(expr):
         if quote is not None:
             if ch == quote:
@@ -138,7 +153,14 @@ def _strip_interp_suffix(expr: str) -> str:
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        elif depth == 0 and ch in ",:":
+        elif depth == 0 and ch == "?":
+            ternary_depth += 1
+        elif depth == 0 and ch == ":":
+            if ternary_depth > 0:
+                ternary_depth -= 1
+                continue
+            return expr[:k].strip()
+        elif depth == 0 and ch == ",":
             return expr[:k].strip()
     return expr.strip()
 

@@ -7,7 +7,6 @@ from cybergraph.analysis.csharp_provenance import (
     classify,
     variable_names,
 )
-
 from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNKNOWN, VERDICT_UNSAFE
 from cybergraph.security.sinks import lookup_sink
 
@@ -51,6 +50,31 @@ def test_classify_interpolation_with_hole_is_composed():
 
 def test_variable_names_reports_interpolation_holes():
     assert "id" in variable_names('$"id = {id}"')
+
+
+# --- ternary colon must not be mistaken for a `:format` separator ----------
+def test_interpolation_ternary_colon_is_not_format_suffix():
+    assert assess(_sql(), '$"{true ? 1 : userInput}"', {"userInput"}) == VERDICT_UNSAFE
+    assert assess(_sql(), '$"{false ? 2 : userInput}"', {"userInput"}) == VERDICT_UNSAFE
+
+def test_interpolation_ternary_colon_in_sql_is_unsafe():
+    assert (
+        assess(_sql(), '$"SELECT * FROM u WHERE id={true ? 1 : userId}"', {"userId"})
+        == VERDICT_UNSAFE
+    )
+
+def test_interpolation_nested_ternary_colon_is_not_format_suffix():
+    assert assess(_sql(), '$"{a ? b : c ? d : userInput}"', {"userInput"}) == VERDICT_UNSAFE
+
+def test_variable_names_reports_ternary_branch():
+    assert "userId" in variable_names('$"id={true ? 1 : userId}"')
+
+def test_interpolation_genuine_format_suffix_still_stripped():
+    assert assess(_sql(), '$"{x:D2}"', {"x"}) == VERDICT_UNSAFE
+    assert assess(_sql(), '$"total = {total,10:C}"', {"total"}) == VERDICT_UNSAFE
+
+def test_interpolation_bare_constant_hole_is_safe():
+    assert assess(_sql(), '$"{true}"', set()) == VERDICT_SAFE
 
 
 # --- inherited (ported from java) ------------------------------------------
