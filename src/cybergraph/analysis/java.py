@@ -11,7 +11,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from cybergraph.analysis import _source_text
 from cybergraph.analysis._source_text import strip_code
+from cybergraph.analysis.java_provenance import (
+    assess,
+    assess_command,
+    assess_deserialization,
+    extract_all_args,
+    extract_first_arg,
+)
 from cybergraph.graph import Edge, Finding, Node
 from cybergraph.security.ontology import (
     EDGE_EXPOSES_ENTRYPOINT,
@@ -22,6 +30,8 @@ from cybergraph.security.ontology import (
     EDGE_TAINTS,
     EDGE_USES_SECRET,
 )
+from cybergraph.security.predicates import VERDICT_SAFE, VERDICT_UNSAFE
+from cybergraph.security.sinks import lookup_sink
 from cybergraph.suppressions import is_inline_suppressed
 
 # Method declarations: optional annotations are matched separately; this matches
@@ -36,6 +46,10 @@ SPRING_ROUTE_RE = re.compile(
     r"\s*(?:\(\s*(?:value\s*=\s*)?\"(?P<path>[^\"]*)\")?"
 )
 CALL_RE = re.compile(r"(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)\s*\(")
+# Matches a sink call the general CALL_RE misses: a constructor `new Ctor(` or a
+# method call `.method(` (including one that follows a `)` in a chain). Run over
+# the whole `source` (not per-line) so a chained call after a `)` is still found.
+_JAVA_SINK_CALL_RE = re.compile(r"\bnew\s+(?P<ctor>[A-Z]\w*)\s*\(|\.(?P<method>[A-Za-z_]\w*)\s*\(")
 ASSIGN_RE = re.compile(
     r"\b(?:final\s+)?(?:var|String|int|long|boolean|Path|File|[\w<>]+)"
     r"\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>.+)"
@@ -85,6 +99,12 @@ def analyze_java_file(
     pending_route: dict | None = None
     current_function: str | None = None
     tainted_by_function: dict[str, dict[str, str]] = {}
+    # The owning function key (or `rel` at file scope) for each 1-based line,
+    # recorded as the main loop attributes sinks/taint to `sink_source` -- reused
+    # by the second-pass sink-call matcher below so a call the general `CALL_RE`
+    # cannot see (a constructor, or a chained call after `)`) is still attributed
+    # to the right function and taint set.
+    line_owner: list[str] = []
     for line_no, line in enumerate(lines, start=1):
         route_match = SPRING_ROUTE_RE.search(line)
         if route_match:
@@ -123,6 +143,7 @@ def analyze_java_file(
                 pending_route = None
 
         sink_source = current_function or rel
+        line_owner.append(sink_source)
         tainted = tainted_by_function.setdefault(sink_source, {})
         lowered_line = line.lower()
         code_line = code_lines[line_no - 1] if line_no - 1 < len(code_lines) else line
@@ -163,7 +184,11 @@ def analyze_java_file(
                         {"reason": "secret passed to exposure sink"},
                     )
                 )
-            if _is_sink(call_name, custom_sinks):
+            # A call_name whose bare tail resolves to a registered sink is graded
+            # by the dedicated matcher/second pass below instead -- skip it here
+            # so the same sink never double-emits (once as this legacy inventory
+            # finding, once as a graded verdict).
+            if _is_sink(call_name, custom_sinks) and lookup_sink(call_name, "java") is None:
                 edges.append(Edge(EDGE_REACHES_SINK, sink_source, call_name, rel, line_no))
                 taint_source = source_key or _tainted_source_for_line(line, tainted)
                 if taint_source:
@@ -190,6 +215,7 @@ def analyze_java_file(
                         )
                     )
 
+    _grade_java_sinks(source, lines, rel, line_owner, tainted_by_function, edges, findings)
     return nodes, edges, findings
 
 
@@ -267,6 +293,176 @@ def _tainted_source_for_line(line: str, tainted: dict[str, str]) -> str:
         if re.search(rf"\b{re.escape(name)}\b", line):
             return key
     return ""
+
+
+def _grade_java_sinks(
+    source: str,
+    lines: list[str],
+    rel: str,
+    line_owner: list[str],
+    tainted_by_function: dict[str, dict[str, str]],
+    edges: list[Edge],
+    findings: list[Finding],
+) -> None:
+    """Second pass: grade every sink `_JAVA_SINK_CALL_RE` finds into a real verdict.
+
+    Runs over the whole `source` (not per-line) so a constructor (`new File(...)`)
+    or a chained call after a `)` (`Runtime.getRuntime().exec(...)`) -- both
+    invisible to `CALL_RE` -- is still located. Taint is fully known by the time
+    this runs, so each match's line is mapped to its owning function via
+    `line_owner` (built by the main per-line loop) rather than re-tracking
+    `current_function`.
+
+    Matches, the zero-arg check, and argument extraction all run against
+    `code` -- `source` with `//`/`/* */` comments blanked (string/char literals
+    left untouched) -- not raw `source`, so a commented-out sink call is
+    invisible here and never graded as live. `code` is exactly as long as
+    `source` (comment text becomes spaces, line boundaries are kept), so every
+    offset computed against it -- `line_no`, `open_paren` -- is equally valid
+    used against `source`; nothing needs translating.
+    """
+    code = _blank_java_comments(source)
+    for call in _JAVA_SINK_CALL_RE.finditer(code):
+        name = call.group("ctor") or call.group("method")
+        sink = lookup_sink(name, "java")
+        if sink is None:
+            continue  # not a registered sink -- left to the legacy inventory scan
+        line_no = code.count("\n", 0, call.start()) + 1
+        open_paren = call.end() - 1
+        owner = line_owner[line_no - 1] if 0 < line_no <= len(line_owner) else rel
+        tainted_map = tainted_by_function.get(owner, {})
+        line_text = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+
+        # Zero-argument guard: `ps.executeQuery()`/`pb.start()` have empty parens
+        # and are not a string-injection sink call -- the query/command lives
+        # elsewhere (`prepareStatement("...")` / `new ProcessBuilder(...)`),
+        # matched and assessed separately. Deserialization is exempt:
+        # `readObject()`/`readUnshared()` are zero-argument by nature. An
+        # unbalanced/unreadable arg list is NOT genuinely empty and must still
+        # be assessed as unknown, not skipped. Checked against `code` too, so a
+        # call with only a comment between its parens (`executeQuery(/* n/a */)`)
+        # reads as empty rather than as an opaque, unreadable argument.
+        if sink.vuln_class != "deserialize" and _call_is_empty(code, open_paren) is True:
+            continue
+
+        edges.append(Edge(EDGE_REACHES_SINK, owner, name, rel, line_no))
+        taint_key = _tainted_source_for_line(line_text, tainted_map)
+        if taint_key:
+            edges.append(
+                Edge(
+                    EDGE_TAINTS, taint_key, name, rel, line_no,
+                    {"function": owner, "reason": "tainted argument"},
+                )
+            )
+
+        if sink.vuln_class == "deserialize":
+            verdict = assess_deserialization(bool(taint_key))
+        elif sink.vuln_class == "command":
+            verdict = assess_command(extract_all_args(code, open_paren), set(tainted_map))
+        else:  # sql / path
+            verdict = assess(sink, extract_first_arg(code, open_paren), set(tainted_map))
+
+        finding = _java_verdict_finding(sink, verdict, rel, line_no, line_text)
+        if finding is not None and not is_inline_suppressed(lines, line_no, finding.rule_id):
+            findings.append(finding)
+
+
+def _blank_java_comments(source: str) -> str:
+    """Blank `//` and `/* */` comments; leave everything else -- including every
+    string, char literal, and Java 15+ text block (`\"\"\"...\"\"\"`) -- untouched,
+    character-for-character.
+
+    A commented-out sink call must not be graded as live (a `//`/`/* */`'d out
+    `new File(tainted)` is dead code), but a REAL sink's string-literal argument
+    must survive completely intact for `extract_first_arg`/`assess` to classify
+    -- so, unlike `strip_code` (which also blanks string/text-block content, for
+    a different consumer), this only ever blanks comment text.
+
+    Deliberately reuses `_source_text`'s Java tokenizer (`_SYNTAX["java"]`,
+    `_consume_comment`, `_string_at`, `_consume_string`) rather than a
+    hand-rolled quote scan: a single-quote-parity tracker has no notion of a
+    text block, so an ODD number of unescaped `"` inside one desyncs its
+    parity state and every `//`/`/*` for the rest of the file stops being
+    recognised as a comment opener at all -- the false positive this function
+    exists to close (a genuinely commented-out sink still graded as live).
+    `_consume_string` is asked to blank into a throwaway buffer purely to
+    learn where the literal ends; the original text is copied back verbatim
+    into `out`. Same length as `source`, with line boundaries preserved
+    (`_consume_comment` blanks in place, and a copied-back literal carries its
+    own real newlines), so a position computed against the result is equally
+    valid used against `source`.
+    """
+    syntax = _source_text._SYNTAX["java"]
+    out: list[str] = []
+    i = 0
+    n = len(source)
+    while i < n:
+        nxt = _source_text._consume_comment(source, i, syntax, out)
+        if nxt is not None:
+            i = nxt
+            continue
+        kind = _source_text._string_at(source, i, syntax)
+        if kind is not None:
+            end = _source_text._consume_string(source, i, kind, [])
+            out.append(source[i:end])
+            i = end
+            continue
+        out.append(source[i])
+        i += 1
+    return "".join(out)
+
+
+def _call_is_empty(source: str, open_paren: int) -> bool | None:
+    """True for a genuinely empty `()`, False if it has content, None if unbalanced.
+
+    Quote/bracket-aware, mirroring `extract_first_arg`'s scan -- so a `)`/`,`
+    inside a nested string literal never mistakenly closes the call early.
+    `None` (unbalanced) is deliberately distinct from `True`: the zero-arg
+    guard must only fire on a call *proven* to take no arguments, never on one
+    that merely could not be read.
+    """
+    depth = 0
+    quote: str | None = None
+    i = open_paren
+    while i < len(source):
+        c = source[i]
+        if quote is not None:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+        elif c == "(":
+            depth += 1
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return not source[open_paren + 1 : i].strip()
+        i += 1
+    return None
+
+
+def _java_verdict_finding(sink, verdict: str, rel: str, line_no: int, line: str) -> Finding | None:
+    if verdict == VERDICT_SAFE:
+        return None
+    unsafe = verdict == VERDICT_UNSAFE
+    return Finding(
+        rule_id=sink.rule_id if unsafe else f"{sink.rule_id}-UNVERIFIED",
+        severity=sink.severity if unsafe else "medium",
+        message=(f"`{sink.name}` {sink.plain}" if unsafe
+                 else f"`{sink.name}` {sink.plain}, and CyberGraph could not confirm "
+                      "the value is safe"),
+        file_path=rel,
+        line_start=line_no,
+        cwe=sink.cwe,
+        evidence=line.strip(),
+    )
 
 
 def _classify_java_name(name: str) -> dict[str, bool]:

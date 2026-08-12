@@ -24,8 +24,11 @@ def test_unparseable_file_is_failed_not_clean(tmp_path: Path):
 
 
 def test_language_without_an_analyzer_is_unsupported(tmp_path: Path):
-    (tmp_path / "Main.java").write_text("class Main {}\n", encoding="utf-8")
-    assert _status(tmp_path, ("Main.java",)) == {"Main.java": "unsupported"}
+    # Ruby has no analyzer -- recognised as source (SOURCE_GLOBS) but not in the
+    # verified gate. (Java used to be the example here; it is now analyzed, see
+    # test_java_is_analyzed_now_it_has_a_partial_analyzer.)
+    (tmp_path / "app.rb").write_text("puts 'hi'\n", encoding="utf-8")
+    assert _status(tmp_path, ("app.rb",)) == {"app.rb": "unsupported"}
 
 
 def test_go_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
@@ -36,6 +39,15 @@ def test_go_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
     NOT_SUPPORTED for Go (see test_go_verdicts_e2e.py)."""
     (tmp_path / "main.go").write_text("package main\n", encoding="utf-8")
     assert _status(tmp_path, ("main.go",)) == {"main.go": "analyzed"}
+
+
+def test_java_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
+    """Java joined the verified gate (sql/command/path/deserialization sinks); it
+    is no longer a file-coverage blind spot. As with Go, the capability-level
+    honesty guarantee still holds -- `source_analysis_support` stays
+    NOT_SUPPORTED for Java (see test_java_verdicts_e2e.py)."""
+    (tmp_path / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+    assert _status(tmp_path, ("Main.java",)) == {"Main.java": "analyzed"}
 
 
 def test_deleted_file_is_missing_not_failed(tmp_path: Path):

@@ -314,16 +314,19 @@ the CI SARIF filter until each language gets its own Phase-2 sink registry/predi
 the project takes on a parsing dependency, which is the tradeoff already recorded above
 against §3.2's zero-dependency moat).
 
-**Note (2026-08-11): resolved for JS (core four) and Go (SQL/command/path); Java/C# and
-other classes remain inventory-grade.** Without a JS or Go parser, a structural,
+**Note (2026-08-11, updated 2026-08-12): resolved for JS, Go, and Java core sink classes;
+C# and other classes remain inventory-grade.** Without a JS/Go/Java parser, a structural,
 statement-local classifier per language (`analysis/js_provenance.py`,
-`analysis/go_provenance.py`) now grades sink arguments as SAFE (all-literal/constant
-construction only), UNSAFE (a construction containing a variable that line-based
-intra-function taint confirms), or UNKNOWN (a variable it cannot resolve — never SAFE)
-rather than emitting the flat `CG-{JS,GO}-SINK-CALL` inventory row. JS covers four sink
+`analysis/go_provenance.py`, `analysis/java_provenance.py`) now grades sink arguments as SAFE
+(all-literal/constant construction only), UNSAFE (a construction containing a variable that
+line-based intra-function taint confirms), or UNKNOWN (a variable it cannot resolve — never SAFE)
+rather than emitting the flat `CG-{JS,GO,JAVA}-SINK-CALL` inventory row. JS covers four sink
 classes (SQL, command, code-exec, path); Go covers three (SQL, command, path — Go has no
-registered code-exec sink). Java and C# are unchanged, and other JS/TS sink classes (beyond
-SQL/command/code/path) still fall back to the pre-rewrite inventory rule. §4.5 stays OPEN.
+registered code-exec sink); Java covers four (SQL, command, path, and native deserialization —
+deserialization takes no argument to classify, so it is never SAFE, only UNSAFE/UNKNOWN). C# is
+unchanged and still emits its `CG-CSHARP-SINK-CALL` inventory row behind the CI SARIF filter
+(§4.1), and other sink classes not listed above still fall back to the pre-rewrite inventory
+rule. §4.5 stays OPEN.
 
 ### 4.6 MEDIUM — benchmark claims drift from the committed artifact
 
