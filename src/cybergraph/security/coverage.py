@@ -20,6 +20,7 @@ from cybergraph.graph import GraphStore
 from cybergraph.security.capability import (
     CONFIG_GLOBS,
     GO_GLOBS,
+    JAVA_GLOBS,
     SOURCE_GLOBS,
     VERIFIED_GLOBS,
     WEB_GLOBS,
@@ -75,7 +76,9 @@ def assess_coverage(
             results.append(FileCoverage(file, STATUS_FAILED, "the file could not be read"))
         elif not any(
             fnmatch(file, pattern)
-            for pattern in VERIFIED_GLOBS + CONFIG_GLOBS + WEB_GLOBS + GO_GLOBS
+            for pattern in (
+                VERIFIED_GLOBS + CONFIG_GLOBS + WEB_GLOBS + GO_GLOBS + JAVA_GLOBS
+            )
         ):
             results.append(
                 FileCoverage(file, STATUS_UNSUPPORTED, "no analyzer for this language yet")

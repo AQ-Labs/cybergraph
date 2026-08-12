@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import subprocess
+
 from cybergraph.analysis.java import analyze_java_file
+from cybergraph.security.capability import CAPABILITIES, FAIL, NOT_SUPPORTED
+from cybergraph.security.check import check_change
+from cybergraph.security.verdict import STATE_REVIEW
 
 
 def _rules(tmp_path, src):
@@ -190,3 +195,44 @@ def test_readobject_never_safe(tmp_path):
            "  return ois.readObject(); } }\n")
     rules = _rules(tmp_path, src)
     assert "CG-DESERIALIZE" in rules or "CG-DESERIALIZE-UNVERIFIED" in rules
+
+
+def _cap(cid):
+    return next(c for c in CAPABILITIES if c.id == cid)
+
+
+def test_four_capabilities_cover_java():
+    for cid in ("sql_construction", "command_execution", "path_access", "deserialization"):
+        assert "*.java" in _cap(cid).covers, cid
+    assert "*.java" not in _cap("code_execution").covers
+
+
+def _repo(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    for a in (["init", "-q"], ["config", "user.email", "t@e.com"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(repo), *a], check=True)
+    (repo / "README.md").write_text("# x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "base"], check=True)
+    return repo
+
+
+def test_java_sqli_reviews(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "A.java").write_text(
+        "class A { void h(java.sql.Statement st, javax.servlet.http.HttpServletRequest req) "
+        "throws Exception {\n"
+        "  String id = req.getParameter(\"id\");\n"
+        "  st.executeQuery(\"SELECT * FROM u WHERE id = \" + id); } }\n", encoding="utf-8")
+    v = check_change(repo, mode="worktree")
+    assert v.state == STATE_REVIEW
+    assert any(c.capability_id == "sql_construction" and c.status == FAIL for c in v.checks)
+
+
+def test_java_still_not_supported_overall(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "A.java").write_text("class A { int x = 1; }\n", encoding="utf-8")
+    v = check_change(repo, mode="worktree")
+    assert any(c.capability_id == "source_analysis_support" and c.status == NOT_SUPPORTED
+               for c in v.checks)
