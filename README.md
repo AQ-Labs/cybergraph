@@ -1,13 +1,24 @@
 # CyberGraph
 
-**Verify and monitor your code's security on every change — deterministic ACCEPT/REVIEW verdicts, fully offline, zero tokens.**
+## AI writes. CyberGraph verifies.
 
-AI agents now write a large and growing share of code, and every change is a chance to introduce a vulnerability. The reflexive fix — spending more model tokens asking an LLM *"is this safe?"* — is slow, nondeterministic, and expensive. CyberGraph replaces that with a deterministic verifier: it decides whether a change is safe to ship and returns an **ACCEPT** or **REVIEW** verdict with cited evidence, computed entirely offline with no API keys and no tokens. Install it as a hook and it runs the moment a change is made — so security review stops burning tokens and becomes free, repeatable, and instant.
+Your AI coding agent wrote the change. Should the same AI be the only thing that reviews it?
 
-Under the hood it maps your repository into a cybersecurity knowledge graph — reachability, taint, trust boundaries, construction-provenance — which is what makes the verdicts precise enough to trust: a query built from a variable is UNSAFE, an all-literal one is SAFE, and anything it cannot prove it marks UNKNOWN rather than guessing. **The graph is the engine; the verdict is the product.**
+CyberGraph is an **independent, offline security verifier for code changes**. It checks each change against your application's security rules and returns an **ACCEPT** or **REVIEW** verdict with cited evidence — computed deterministically on your machine, with **no cloud upload, no mandatory LLM, and no per-check token cost**.
 
-> **🔒 No API keys. Fully offline. Zero tokens. Your code never leaves your machine.**
-> `pip install cybergraph` and you get the complete toolkit — the change verifier, git/agent hooks, the interactive HTML report, attack-path graphs, cited findings, and SARIF export — with **zero API keys, zero signup, and zero network calls**. There are no runtime dependencies. An LLM is entirely optional and only rephrases answers the graph has already grounded in evidence; nothing about the analysis requires one.
+- **ACCEPT** — the supported checks ran and found nothing.
+- **REVIEW** — something changed, or a relevant check couldn't be verified.
+
+It never turns *"didn't look"* into a pass: every capability reports `PASS`, `UNKNOWN`, `NOT_SUPPORTED`, or `NOT_APPLICABLE` explicitly, so a blind spot is visible, not silent. **Uncertainty never becomes safety** — if CyberGraph cannot prove a check passed, it tells you, rather than issue a false ACCEPT.
+
+Install it as a hook and it runs the moment an agent finishes a turn or a commit is made — verification that doesn't depend on the agent choosing to check itself:
+
+```text
+AI writes  →  CyberGraph checks  →  ACCEPT / REVIEW  →  shows why (cited evidence)
+```
+
+> **No cloud upload · No mandatory LLM · No per-check token cost · No silent blind spots**
+> `pip install cybergraph` — zero API keys, zero signup, zero network calls, zero runtime dependencies. Under the hood CyberGraph maps your repository into a cybersecurity knowledge graph (reachability, taint, trust boundaries, construction-provenance) — the engine that makes each verdict precise. An LLM is optional and only rephrases evidence the graph has already grounded; nothing about the analysis or the verdict requires one.
 
 ## See it in action
 
@@ -36,9 +47,9 @@ Two problems collide. Security scanners are noisy and flat — a file, a line, a
 - Did this pull request affect a security boundary?
 - Which scanner findings matter first?
 
-And now AI agents generate code faster than anyone can review it, so those questions arrive on every change — and answering them by spending more LLM tokens is slow, nondeterministic, and doesn't scale.
+And now AI agents generate code faster than anyone can review it, so those questions arrive on every change — and having the same class of model that wrote the code also review it is nondeterministic, spends tokens on every turn, and doesn't scale.
 
-CyberGraph connects the dots and turns the answer into a **decision**. It **verifies** each change against the security guarantees it can check and returns a single ACCEPT/REVIEW verdict, and it **monitors** the codebase over time — what regressed, what was fixed, what a change moved across a trust boundary. Because it is deterministic and offline, that verification is effectively free: no tokens, no keys, no network — a gate you can run on every commit and every agent turn without thinking about cost.
+CyberGraph connects the dots and turns the answer into a **decision** made *independently* of the coding model. It **verifies** each change against the security guarantees it can check and returns a single ACCEPT/REVIEW verdict, and it **monitors** the codebase over time — what regressed, what was fixed, what a change moved across a trust boundary. The security decision is deterministic and local, with **no per-check LLM or API cost** — cheap enough to run on every commit and every agent turn.
 
 ## Current capabilities
 
@@ -231,25 +242,33 @@ cybergraph policy --repo .            # show the declared policy and which entit
 cybergraph policy --repo . --baseline # print a proposed baseline without writing anything
 ```
 
-**Which languages are verdict-grade today:** Python, JavaScript/TypeScript, Go, and Java each
-have verdict-grade injection detection — an exact-match sink registry plus a construction
-classifier and intra-function taint that grade a sink's argument **SAFE / UNSAFE / UNKNOWN**
-from how the value was built, never a bare keyword match. Their findings (`CG-SQL-EXEC`,
-`CG-CMD-EXEC`, `CG-PATH-TRAVERSAL`, `CG-CODE-EXEC`, `CG-DESERIALIZE`, plus `CG-TEMPLATE-INJECT`
-for Python) are confirmed or explicitly abstain (`-UNVERIFIED`) — never a guess — and the
-graded set is held to a labelled precision/recall/abstention benchmark
-(`benchmark/run_precision.py`). C# verdicts (adding a code-execution class, and handling C#
-string interpolation) land in the same shape. Any language or sink class not yet upgraded stays
-**inventory-grade**: a `*-SINK-CALL` row that marks "a sensitive sink is used here" from a
-regex analyzer with no parse tree and no taint requirement — a map of where sensitive calls
-live, not a verdict. CI's SARIF export deliberately filters the inventory rules out of code
-scanning uploads until each graduates; graded verdict rules are never filtered and always reach
-code scanning.
+**Language coverage — and how far each is validated.** CyberGraph runs five-language security
+analysis, but assurance is not yet uniform across them, and it says so rather than implying
+parity:
 
-The cardinal rule across every language is the same: **only an all-literal / constant
-construction can read SAFE.** A value built from a variable is UNSAFE when taint confirms it and
-UNKNOWN otherwise; native deserialization is never SAFE. Uncertainty never becomes safety — the
-tool abstains (`-UNVERIFIED`, which drives REVIEW) rather than issue a false ACCEPT.
+| Language | Injection verdicts | Validation |
+|---|---|---|
+| Python | SQL · command · path · code-exec · deserialization · template | **Labelled precision/recall/abstention benchmark ✓** |
+| JavaScript / TypeScript | SQL · command · code-exec · path | Beta |
+| Go | SQL · command · path | Beta |
+| Java | SQL · command · path · deserialization | Beta |
+| C# | SQL · command · path · deserialization · code-exec | Beta |
+
+Python currently carries the strongest validated coverage: it is the language held to a labelled
+benchmark (`benchmark/run_precision.py`) that gates every change. The other four grade a sink's
+argument the same way — **SAFE / UNSAFE / UNKNOWN** from how the value was constructed and
+intra-function taint, never a bare keyword match — and are **Beta** until each earns its own
+labelled benchmark. Whole-file source-analysis support (`source_analysis_support`) is Python-only
+by design; the others are structural, line-based classifiers, so they stay `NOT_SUPPORTED` at
+that capability level even while their injection verdicts are graded. Any sink class not yet
+upgraded stays **inventory-grade** — a `*-SINK-CALL` map of where sensitive calls live, not a
+verdict — and is filtered from code-scanning uploads until it graduates; graded verdict rules are
+never filtered.
+
+The cardinal rule is the same in every language: **only an all-literal / constant construction
+can read SAFE.** A value built from a variable is UNSAFE when taint confirms it and UNKNOWN
+otherwise; native deserialization is never SAFE. **Uncertainty never becomes safety** — the tool
+abstains (`-UNVERIFIED`, which drives REVIEW) rather than issue a false ACCEPT.
 
 ### Run the check automatically — `cybergraph hook`
 

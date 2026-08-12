@@ -8,10 +8,13 @@ short pitch see the [README](../README.md); for architecture internals see
 
 ## 1. What CyberGraph is
 
-CyberGraph is an **offline security verifier and monitor for code changes**. Its headline job is
-simple: given a change to a repository, decide whether it is safe to ship and return a single
-verdict — **ACCEPT** (the checks that ran found nothing) or **REVIEW** (a human should look) —
-with cited evidence and an explicit list of what could not be checked.
+CyberGraph is an **offline security verifier and monitor for code changes**, run *independently*
+of the model that wrote the code. Its headline job: given a change to a repository, check it
+against the security guarantees CyberGraph can verify and return a single verdict — **ACCEPT**
+(the supported checks ran and found nothing) or **REVIEW** (something changed, or a relevant
+check could not be verified) — with cited evidence and an explicit list of what could not be
+checked. ACCEPT is not a certification that the change is secure; it is the narrower, honest
+claim that the guarantees CyberGraph understands were preserved.
 
 It does this **deterministically and entirely offline**: no API keys, no signup, no network
 calls, no runtime dependencies, and — critically — **no LLM tokens**. A large language model is
@@ -23,23 +26,26 @@ routes, guards, sinks, secrets, cloud resources, and the edges between them (cal
 flow, reaches-sink, uses/exposes-secret). That graph is the engine that makes the verdicts
 precise. It is not the pitch; the verdict is.
 
-### Why it saves tokens
+### Zero-token verification, independent of the coding model
 
 AI coding agents now write a large and growing share of code, and each change can introduce a
-vulnerability. The common way to guard that — asking an LLM to re-review every change — spends
-tokens on every turn, is nondeterministic, and gets slower and costlier as the codebase and the
-change rate grow. CyberGraph moves that verification **off the token meter**:
+vulnerability. The common way to guard that — having the same class of model that wrote the code
+also review it — is nondeterministic, spends tokens on every turn, and gets slower and costlier
+as the codebase and change rate grow. CyberGraph moves that verification **off the token meter**:
 
-- **The verdict is free and instant.** A deterministic graph-and-rules check costs no tokens and
-  runs in seconds, so you can gate every commit and every agent turn without weighing the cost.
-- **It catches regressions at the cheapest moment** — as the change is made — instead of after
-  tokens have been spent building on top of an insecure change, or after it reaches production.
-- **It keeps the LLM on the work only an LLM can do.** When a model *is* in the loop, CyberGraph
-  narrows it to grounded evidence (cited findings, reachable paths), so you are not paying for a
-  model to re-derive what a graph already knows.
+- **No per-check LLM or API cost.** The security decision is a deterministic graph-and-rules
+  check, so verifying a change consumes no tokens — you can run it on every commit and every
+  agent turn without a per-check cost to weigh. (Wall-clock varies with repo size and which
+  analyses run — a graph rebuild, SCA, or history pass is not instantaneous — but none of it
+  bills against a model.)
+- **An independent reviewer.** The verdict does not come from the model under review, so it is
+  not vulnerable to the same blind spot that produced the code.
+- **It keeps the LLM on the work only an LLM can do.** When a model *is* in the loop (optional
+  phrasing/triage), CyberGraph narrows it to grounded evidence, so you are not paying a model to
+  re-derive what the graph already knows.
 
-The net effect is indirect but real: security review shifts from a recurring per-change token
-cost to a free, repeatable, local gate.
+The claim here is a *property* — zero-token, deterministic verification — not a measured savings
+figure; any "X% fewer tokens" number would need an end-to-end benchmark, which is future work.
 
 ---
 
@@ -106,13 +112,19 @@ a variable hole is UNSAFE, an all-literal `"SELECT 1"` is SAFE — not from a ke
 CyberGraph analyzes **five languages** through a shared analyzer contract, with graceful
 fallback for the rest.
 
-| Language | Frameworks understood | Verdict grade |
-|---|---|---|
-| Python | FastAPI, Flask, Django | **Verdict-grade** — exact-match sink registry + per-sink taint predicates; the only language in the labelled precision/recall benchmark |
-| JavaScript / TypeScript | Express, Next.js | **Verdict-grade** — SQL / command / code-exec / path |
-| Go | net/http, Gin, Echo | **Verdict-grade** — SQL / command / path (no code-exec sink in Go) |
-| Java | Spring, JDBC | **Verdict-grade** — SQL / command / path / deserialization |
-| C# | ASP.NET Core, ADO.NET | **Verdict-grade** — SQL / command / path / deserialization / code-execution (incl. string interpolation) |
+| Language | Frameworks understood | Injection verdicts | Validation |
+|---|---|---|---|
+| Python | FastAPI, Flask, Django | SQL · command · path · code-exec · deserialization · template | **Labelled precision/recall/abstention benchmark ✓** |
+| JavaScript / TypeScript | Express, Next.js | SQL · command · code-exec · path | Beta |
+| Go | net/http, Gin, Echo | SQL · command · path (no code-exec sink in Go) | Beta |
+| Java | Spring, JDBC | SQL · command · path · deserialization | Beta |
+| C# | ASP.NET Core, ADO.NET | SQL · command · path · deserialization · code-execution (incl. string interpolation) | Beta |
+
+Assurance is **not** uniform across the five. Python carries the strongest validated coverage —
+it is the only language held to a labelled precision/recall/abstention benchmark
+(`benchmark/run_precision.py`) that gates every change. The other four grade sink arguments in
+the same shape (below) and are **Beta** until each earns its own labelled benchmark; the docs and
+UI say so rather than implying identical assurance.
 
 **Verdict-grade vs inventory-grade.** A verdict-grade class grades the sink argument
 SAFE/UNSAFE/UNKNOWN. Any language or sink class not yet upgraded is **inventory-grade**: a
