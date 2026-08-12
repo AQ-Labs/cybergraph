@@ -155,7 +155,9 @@ def test_java_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -> 
     assert _input_nodes(nodes), "genuine getParameter must create an Input source"
     assert any(e.kind == "READS_INPUT" for e in edges)
     assert any(e.kind == "TAINTS" for e in edges)
-    assert any(f.rule_id == "CG-JAVA-SINK-CALL" for f in findings)
+    # executeQuery is now a graded verdict sink (Task 3), not the legacy
+    # CG-JAVA-SINK-CALL inventory finding: a tainted concatenated query is unsafe.
+    assert any(f.rule_id == "CG-SQL-EXEC" for f in findings)
 
 
 def test_java_genuine_source_beside_string_marker_still_detected(tmp_path: Path) -> None:
