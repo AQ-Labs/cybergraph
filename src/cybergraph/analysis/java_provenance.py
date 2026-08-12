@@ -344,6 +344,28 @@ def _chain_receiver(leading_gap: str) -> str | None:
     return prefix
 
 
+def _is_bare_call_receiver(leading_gap: str) -> bool:
+    """True when ``leading_gap`` is a bare call NAME with no receiver before it
+    (`currentQuery`, `buildQuery`, `format`) -- i.e. the case `_chain_receiver`
+    treats as inert via its "bare call: no receiver" branch.
+
+    `_chain_receiver` returns None for four shapes (empty gap, bare call,
+    `String`, allowlisted `new`); this isolates the bare-call one so the caller
+    can distinguish an opaque method-call receiver (whose unknown return value
+    is NOT provably literal) from the genuinely-inert `String`/`new` forms.
+    """
+    g = leading_gap.strip()
+    if not g:
+        return False
+    method = _TRAILING_IDENT_RE.search(g)
+    if method is None:
+        return False
+    prefix = g[: method.start()].strip()
+    if prefix.endswith("."):
+        prefix = prefix[:-1].strip()
+    return prefix == ""
+
+
 def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
     """Candidate variable names from EVERY call in a dotted call chain --
     ``String.format(...)``, a ``StringBuilder``/``.append`` chain, or any mix,
@@ -381,7 +403,8 @@ def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
     unresolved = False
     cursor = 0
     n = len(text)
-    for open_paren in _call_open_parens_generic(text):
+    calls = _call_open_parens_generic(text)
+    for idx, open_paren in enumerate(calls):
         if open_paren < cursor:
             continue  # already inside a call span consumed above
         gap = text[cursor:open_paren]
@@ -400,6 +423,14 @@ def _chain_operand_candidates(text: str) -> tuple[list[str], bool]:
             receiver = _chain_receiver(gap)
             if receiver is not None:
                 operands.append(receiver)
+            elif idx < len(calls) - 1 and _is_bare_call_receiver(gap):
+                # A leading BARE call (`currentQuery()`, no receiver, not
+                # `String` / `new StringBuilder`) whose result is CONSUMED by a
+                # further chained call is an opaque, unmodelled value: its return
+                # is not provably literal, so the whole chain can never read
+                # SAFE. (A terminal bare call -- `format("%s", x)` -- keeps its
+                # SAFE-eligibility; its own args are the operands examined below.)
+                unresolved = True
         close_paren = _matching_close_paren(text, open_paren)
         if close_paren is None:
             unresolved = True

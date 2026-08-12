@@ -37,6 +37,19 @@ def test_prepared_statement_is_safe(tmp_path):
     assert "CG-SQL-EXEC-UNVERIFIED" not in rules
 
 
+def test_opaque_call_receiver_chain_is_not_reported_clean(tmp_path):
+    # Whole-branch review C1: an opaque bare-call receiver seeding an append
+    # chain (`currentQuery().append(" LIMIT 1").toString()`) must not read a
+    # confirmed-SAFE verdict end-to-end. It now surfaces as UNVERIFIED (UNKNOWN)
+    # rather than being silently dropped as clean.
+    src = ("class A { void h(java.sql.Statement st) throws Exception {\n"
+           "  st.executeQuery(currentQuery().append(\" LIMIT 1\").toString());\n"
+           "} }\n")
+    rules = _rules(tmp_path, src)
+    assert "CG-SQL-EXEC" not in rules  # not falsely confirmed
+    assert "CG-SQL-EXEC-UNVERIFIED" in rules  # surfaced as UNKNOWN, not absent
+
+
 def test_prepared_statement_concat_is_unsafe(tmp_path):
     src = ("class A { void h(java.sql.Connection c, "
            "javax.servlet.http.HttpServletRequest req) throws Exception {\n"

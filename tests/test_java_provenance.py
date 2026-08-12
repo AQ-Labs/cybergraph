@@ -173,6 +173,38 @@ def test_assess_non_allowlisted_new_receiver_tainted_arg_unsafe():
     )
 
 
+def test_assess_opaque_call_receiver_chain_never_safe():
+    # A leading BARE call whose result is CONSUMED by a further chained call
+    # (`currentQuery().append("lit").toString()`) is an opaque, unmodelled value:
+    # its return is not provably literal, so even with all-literal appended
+    # operands the chain must NOT read SAFE. (Whole-branch review C1: this was
+    # the last fail-open of the "reaches SAFE without proving the whole text is
+    # literal" family -- a bare-call receiver was wrongly treated as inert.)
+    for text in (
+        'currentQuery().append(" LIMIT 1").toString()',
+        'base().append(" LIMIT 1").toString()',
+        'getSql().append("a").append("b")',
+    ):
+        assert assess(_sql(), text, set()) == VERDICT_UNKNOWN, text
+
+
+def test_assess_opaque_call_receiver_chain_tainted_arg_unsafe():
+    # An explicitly tainted appended operand on top of the opaque receiver is
+    # still surfaced as UNSAFE (never swallowed by the opaque seed).
+    assert (
+        assess(_sql(), 'currentQuery().append(evil).toString()', {"evil"})
+        == VERDICT_UNSAFE
+    )
+
+
+def test_assess_terminal_bare_call_still_evaluated():
+    # A TERMINAL bare call (no chained call consuming its result) keeps its
+    # normal evaluation -- the fix must not over-correct every bare call into
+    # UNKNOWN. `String.format(...)` (the allowlisted static form) with all
+    # literal args stays SAFE.
+    assert assess(_sql(), 'String.format("%s", "a")', set()) == VERDICT_SAFE
+
+
 def test_assess_append_unbalanced_string_swallows_real_call_not_safe():
     # `"a` never closes, so the single-pass quote-tracking scan reads the
     # rest of the text -- including the real `.append(userInput)` -- as
