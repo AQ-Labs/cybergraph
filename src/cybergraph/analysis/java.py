@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from cybergraph.analysis import _source_text
 from cybergraph.analysis._source_text import strip_code
 from cybergraph.analysis.java_provenance import (
     assess,
@@ -368,54 +369,45 @@ def _grade_java_sinks(
 
 def _blank_java_comments(source: str) -> str:
     """Blank `//` and `/* */` comments; leave everything else -- including every
-    string/char literal -- untouched, character-for-character.
+    string, char literal, and Java 15+ text block (`\"\"\"...\"\"\"`) -- untouched,
+    character-for-character.
 
     A commented-out sink call must not be graded as live (a `//`/`/* */`'d out
     `new File(tainted)` is dead code), but a REAL sink's string-literal argument
     must survive completely intact for `extract_first_arg`/`assess` to classify
-    -- so, unlike `strip_code` (which also blanks string literals, for a
-    different consumer), this only ever blanks comment text. Quote-aware so a
-    `//`/`/*` inside a string or char literal (`"http://x"`) is never mistaken
-    for a comment opener; escape-aware so `'\\''` does not end a char literal
-    early. Same length as `source`, with line boundaries preserved, so a
-    position computed against the result is equally valid against `source`.
+    -- so, unlike `strip_code` (which also blanks string/text-block content, for
+    a different consumer), this only ever blanks comment text.
+
+    Deliberately reuses `_source_text`'s Java tokenizer (`_SYNTAX["java"]`,
+    `_consume_comment`, `_string_at`, `_consume_string`) rather than a
+    hand-rolled quote scan: a single-quote-parity tracker has no notion of a
+    text block, so an ODD number of unescaped `"` inside one desyncs its
+    parity state and every `//`/`/*` for the rest of the file stops being
+    recognised as a comment opener at all -- the false positive this function
+    exists to close (a genuinely commented-out sink still graded as live).
+    `_consume_string` is asked to blank into a throwaway buffer purely to
+    learn where the literal ends; the original text is copied back verbatim
+    into `out`. Same length as `source`, with line boundaries preserved
+    (`_consume_comment` blanks in place, and a copied-back literal carries its
+    own real newlines), so a position computed against the result is equally
+    valid used against `source`.
     """
+    syntax = _source_text._SYNTAX["java"]
     out: list[str] = []
-    quote: str | None = None
     i = 0
     n = len(source)
     while i < n:
-        c = source[i]
-        if quote is not None:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(source[i + 1])
-                i += 2
-                continue
-            if c == quote:
-                quote = None
-            i += 1
+        nxt = _source_text._consume_comment(source, i, syntax, out)
+        if nxt is not None:
+            i = nxt
             continue
-        if c in "\"'":
-            quote = c
-            out.append(c)
-            i += 1
-            continue
-        if source.startswith("//", i):
-            j = i
-            while j < n and source[j] not in "\n\r":
-                out.append(" ")
-                j += 1
-            i = j
-            continue
-        if source.startswith("/*", i):
-            end = source.find("*/", i + 2)
-            end = n if end == -1 else end + 2
-            for k in range(i, end):
-                out.append(source[k] if source[k] in "\n\r" else " ")
+        kind = _source_text._string_at(source, i, syntax)
+        if kind is not None:
+            end = _source_text._consume_string(source, i, kind, [])
+            out.append(source[i:end])
             i = end
             continue
-        out.append(c)
+        out.append(source[i])
         i += 1
     return "".join(out)
 

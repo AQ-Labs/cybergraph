@@ -10,6 +10,13 @@ def _rules(tmp_path, src):
     return [f.rule_id for f in findings]
 
 
+def _findings(tmp_path, src):
+    p = tmp_path / "A.java"
+    p.write_text(src, encoding="utf-8")
+    _n, _e, findings = analyze_java_file(p, tmp_path)
+    return findings
+
+
 def test_prepared_statement_is_safe(tmp_path):
     src = ("class A { void h(java.sql.Connection c, String id) throws Exception {\n"
            "  var ps = c.prepareStatement(\"SELECT * FROM u WHERE id = ?\");\n"
@@ -67,6 +74,91 @@ def test_comment_only_parens_read_as_empty_not_unverified(tmp_path):
     rules = _rules(tmp_path, src)
     assert "CG-SQL-EXEC" not in rules
     assert "CG-SQL-EXEC-UNVERIFIED" not in rules
+
+
+def test_text_block_with_odd_quotes_then_commented_sink_is_not_flagged(tmp_path):
+    # Round 2 regression: a text block whose body contains an ODD number of
+    # unescaped `"` desyncs a naive single-quote-parity scanner, so a later
+    # `//` stops being recognised as a comment opener at all and a genuinely
+    # commented-out sink gets graded as live.
+    src = ('class A { void h(javax.servlet.http.HttpServletRequest req) throws Exception {\n'
+           '  String id = req.getParameter("id");\n'
+           '  String block = """\n'
+           '    she said "hi\n'
+           '    """;\n'
+           '  // new java.io.File(id);\n'
+           '} }\n')
+    rules = _rules(tmp_path, src)
+    assert "CG-PATH-TRAVERSAL" not in rules
+    assert "CG-PATH-TRAVERSAL-UNVERIFIED" not in rules
+
+
+def test_text_block_with_odd_quotes_then_real_sink_is_flagged(tmp_path):
+    # Same text block as above, but the sink on the next line is live (not
+    # commented out) -- proves the text-block fix does not over-correct into
+    # dropping a real sink after one.
+    src = ('class A { void h(javax.servlet.http.HttpServletRequest req) throws Exception {\n'
+           '  String id = req.getParameter("id");\n'
+           '  String block = """\n'
+           '    she said "hi\n'
+           '    """;\n'
+           '  new java.io.File(id);\n'
+           '} }\n')
+    assert "CG-PATH-TRAVERSAL" in _rules(tmp_path, src)
+
+
+def test_slash_slash_inside_string_literal_still_flags_concat(tmp_path):
+    # A `//` inside a real string literal must not be mistaken for a comment
+    # opener -- it must not blank the `+ id` that follows it on the same line.
+    src = ('class A { void h(java.sql.Statement st, '
+           'javax.servlet.http.HttpServletRequest req) throws Exception {\n'
+           '  String id = req.getParameter("id");\n'
+           '  st.executeQuery("... \'http://host/\' ..." + id); } }\n')
+    assert "CG-SQL-EXEC" in _rules(tmp_path, src)
+
+
+def test_block_comment_token_inside_string_literal_still_flags_concat(tmp_path):
+    # A `/*` inside a real string literal must not be mistaken for a comment
+    # opener -- it must not swallow the `+ id` that follows it.
+    src = ('class A { void h(java.sql.Statement st, '
+           'javax.servlet.http.HttpServletRequest req) throws Exception {\n'
+           '  String id = req.getParameter("id");\n'
+           '  st.executeQuery("a /* b" + id); } }\n')
+    assert "CG-SQL-EXEC" in _rules(tmp_path, src)
+
+
+def test_trailing_line_comment_after_real_sink_still_flags(tmp_path):
+    # A genuine trailing `// note` must be blanked (it is a real comment), but
+    # the live sink call earlier on the same line must still be graded.
+    src = ('class A { void h(java.sql.Statement st, '
+           'javax.servlet.http.HttpServletRequest req) throws Exception {\n'
+           '  String id = req.getParameter("id");\n'
+           '  st.executeQuery("q" + id); // note\n'
+           '} }\n')
+    assert "CG-SQL-EXEC" in _rules(tmp_path, src)
+
+
+def test_block_comment_spanning_lines_preserves_sink_line_number(tmp_path):
+    # A multi-line `/* ... */` block comment must not shift line numbers: a
+    # real sink several lines later must report ITS OWN line, not one offset
+    # by however many lines the comment blanking touched.
+    src = (
+        'class A { void h(java.sql.Statement st, '
+        'javax.servlet.http.HttpServletRequest req) throws Exception {\n'  # line 1
+        '  String id = req.getParameter("id");\n'                          # line 2
+        '  /* start of a\n'                                                # line 3
+        '     multi-line\n'                                                # line 4
+        '     comment */\n'                                                # line 5
+        '  int x = 1;\n'                                                   # line 6
+        '  int y = 2;\n'                                                   # line 7
+        '  int z = 3;\n'                                                   # line 8
+        '  st.executeQuery("SELECT " + id);\n'                             # line 9
+        '} }\n'                                                           # line 10
+    )
+    findings = _findings(tmp_path, src)
+    sql = [f for f in findings if f.rule_id == "CG-SQL-EXEC"]
+    assert len(sql) == 1
+    assert sql[0].line_start == 9
 
 
 def test_concat_sqli_is_unsafe(tmp_path):
