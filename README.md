@@ -1,11 +1,13 @@
 # CyberGraph
 
-Security review for codebases, powered by knowledge graphs.
+**Verify and monitor your code's security on every change — deterministic ACCEPT/REVIEW verdicts, fully offline, zero tokens.**
 
-CyberGraph maps a repository into a cybersecurity knowledge graph so developers can inspect security layers, risky code paths, scanner findings, and evidence-backed answers without reading the whole codebase by hand.
+AI agents now write a large and growing share of code, and every change is a chance to introduce a vulnerability. The reflexive fix — spending more model tokens asking an LLM *"is this safe?"* — is slow, nondeterministic, and expensive. CyberGraph replaces that with a deterministic verifier: it decides whether a change is safe to ship and returns an **ACCEPT** or **REVIEW** verdict with cited evidence, computed entirely offline with no API keys and no tokens. Install it as a hook and it runs the moment a change is made — so security review stops burning tokens and becomes free, repeatable, and instant.
 
-> **🔒 No API keys. Fully offline. Your code never leaves your machine.**
-> `pip install cybergraph` and you get the complete toolkit — the interactive HTML report, attack-path graphs, cited findings, and SARIF export — with **zero API keys, zero signup, and zero network calls**. There are no runtime dependencies. An LLM is entirely optional and only rephrases answers the graph has already grounded in evidence; nothing about the analysis requires one.
+Under the hood it maps your repository into a cybersecurity knowledge graph — reachability, taint, trust boundaries, construction-provenance — which is what makes the verdicts precise enough to trust: a query built from a variable is UNSAFE, an all-literal one is SAFE, and anything it cannot prove it marks UNKNOWN rather than guessing. **The graph is the engine; the verdict is the product.**
+
+> **🔒 No API keys. Fully offline. Zero tokens. Your code never leaves your machine.**
+> `pip install cybergraph` and you get the complete toolkit — the change verifier, git/agent hooks, the interactive HTML report, attack-path graphs, cited findings, and SARIF export — with **zero API keys, zero signup, and zero network calls**. There are no runtime dependencies. An LLM is entirely optional and only rephrases answers the graph has already grounded in evidence; nothing about the analysis requires one.
 
 ## See it in action
 
@@ -27,14 +29,16 @@ Generate this for any repo with `cybergraph visualize path/to/repo` (dark theme 
 
 ## Why this exists
 
-Security scanners are useful, but their output is usually flat: a file, a line, a rule, and a warning. Developers still have to answer the hard questions:
+Two problems collide. Security scanners are noisy and flat — a file, a line, a rule, a warning — leaving developers to answer the hard questions themselves:
 
 - Is this issue reachable from production code?
 - Is there authentication before this sensitive action?
 - Did this pull request affect a security boundary?
 - Which scanner findings matter first?
 
-CyberGraph is designed to connect those dots.
+And now AI agents generate code faster than anyone can review it, so those questions arrive on every change — and answering them by spending more LLM tokens is slow, nondeterministic, and doesn't scale.
+
+CyberGraph connects the dots and turns the answer into a **decision**. It **verifies** each change against the security guarantees it can check and returns a single ACCEPT/REVIEW verdict, and it **monitors** the codebase over time — what regressed, what was fixed, what a change moved across a trust boundary. Because it is deterministic and offline, that verification is effectively free: no tokens, no keys, no network — a gate you can run on every commit and every agent turn without thinking about cost.
 
 ## Current capabilities
 
@@ -195,7 +199,7 @@ Suppressions hide findings, but the graph still keeps edges such as `REACHES_SIN
 
 **Phase 1 contract — the sentence this work is judged against:**
 
-> Given a supported AI-generated Python change, CyberGraph can tell whether the specific security guarantees it understands were preserved — and explicitly admit what it could not verify.
+> Given a supported AI-generated code change, CyberGraph can tell whether the specific security guarantees it understands were preserved — and explicitly admit what it could not verify.
 
 `cybergraph check` is the command that evaluates a change against that contract. It compares
 the current state of a repository against a base ref (`--mode merge-base|worktree|range`) and
@@ -227,18 +231,25 @@ cybergraph policy --repo .            # show the declared policy and which entit
 cybergraph policy --repo . --baseline # print a proposed baseline without writing anything
 ```
 
-**Which languages are verified today:** Python is the only language with verdict-grade
-detection — an exact-match sink registry with per-sink taint predicates, gated by a labelled
-precision/recall/abstention benchmark (`benchmark/run_precision.py`). Its findings (`CG-SQL-EXEC`,
-`CG-CMD-EXEC`, `CG-PATH-TRAVERSAL`, `CG-TEMPLATE-INJECT`, `CG-CODE-EXEC`, `CG-DESERIALIZE`) are
-confirmed or explicitly abstain (`-UNVERIFIED`) — never a bare guess. Go, JavaScript/TypeScript,
-Java, and C# are still **inventory-grade**: their sink findings (`CG-GO-SINK-CALL`,
-`CG-JS-SINK-CALL`, `CG-JAVA-SINK-CALL`, `CG-CSHARP-SINK-CALL`) mark "a sensitive sink is used
-here" from a regex-based analyzer with no parse tree and no taint requirement, useful as a map
-of where sensitive calls live but not as a confirmed verdict. CI's SARIF export deliberately
-filters those four inventory rules out of code scanning uploads until each language gets the
-same exact-match-plus-predicate treatment Python already has; Python's verdict rules are never
-filtered and always reach code scanning.
+**Which languages are verdict-grade today:** Python, JavaScript/TypeScript, Go, and Java each
+have verdict-grade injection detection — an exact-match sink registry plus a construction
+classifier and intra-function taint that grade a sink's argument **SAFE / UNSAFE / UNKNOWN**
+from how the value was built, never a bare keyword match. Their findings (`CG-SQL-EXEC`,
+`CG-CMD-EXEC`, `CG-PATH-TRAVERSAL`, `CG-CODE-EXEC`, `CG-DESERIALIZE`, plus `CG-TEMPLATE-INJECT`
+for Python) are confirmed or explicitly abstain (`-UNVERIFIED`) — never a guess — and the
+graded set is held to a labelled precision/recall/abstention benchmark
+(`benchmark/run_precision.py`). C# verdicts (adding a code-execution class, and handling C#
+string interpolation) land in the same shape. Any language or sink class not yet upgraded stays
+**inventory-grade**: a `*-SINK-CALL` row that marks "a sensitive sink is used here" from a
+regex analyzer with no parse tree and no taint requirement — a map of where sensitive calls
+live, not a verdict. CI's SARIF export deliberately filters the inventory rules out of code
+scanning uploads until each graduates; graded verdict rules are never filtered and always reach
+code scanning.
+
+The cardinal rule across every language is the same: **only an all-literal / constant
+construction can read SAFE.** A value built from a variable is UNSAFE when taint confirms it and
+UNKNOWN otherwise; native deserialization is never SAFE. Uncertainty never becomes safety — the
+tool abstains (`-UNVERIFIED`, which drives REVIEW) rather than issue a false ACCEPT.
 
 ### Run the check automatically — `cybergraph hook`
 
@@ -301,9 +312,10 @@ Available tools:
 
 The MCP surface is an **interoperability surface, not automatic verification**: nothing forces
 a connected agent to call `check_change_tool` before or after making a change, and an agent may
-decline to call it entirely. Reliable, always-invoked checking needs a client-side hook, which
-is future work — treat these tools as available context an agent can pull, not a gate it must
-pass.
+decline to call it entirely. For reliable, always-invoked checking, install a client-side hook
+(`cybergraph hook install claude-code|pre-commit`, above) so the verdict fires on every agent
+turn or commit regardless of whether the agent opts in. Treat these MCP tools as context an
+agent can pull, and the hook as the gate it cannot skip.
 
 ## Project direction
 
@@ -311,6 +323,7 @@ CyberGraph is intentionally security-first. It is not trying to be a general cod
 
 See:
 
+- [Features & capabilities](docs/features.md) — the detailed reference to everything CyberGraph does
 - [Architecture](docs/architecture.md)
 - [Getting started](docs/getting-started.md)
 - [Five-minute tutorial](docs/tutorial.md)
