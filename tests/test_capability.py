@@ -59,3 +59,18 @@ def test_no_capability_claims_everything():
     for capability in CAPABILITIES:
         assert capability.covers != ("*",), capability.id
         assert capability.covers and capability.label
+
+
+def test_five_capabilities_cover_csharp():
+    from cybergraph.security.capability import CAPABILITIES
+
+    covers = {c.id: c.covers for c in CAPABILITIES}
+    for cid in ("sql_construction", "command_execution", "path_access",
+                "deserialization", "code_execution"):
+        assert "*.cs" in covers[cid], cid
+
+
+def test_csharp_not_in_verified_globs():
+    from cybergraph.security.capability import VERIFIED_GLOBS
+
+    assert "*.cs" not in VERIFIED_GLOBS  # C# stays NOT_SUPPORTED for source_analysis_support

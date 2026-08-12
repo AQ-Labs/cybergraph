@@ -19,6 +19,7 @@ from pathlib import Path
 from cybergraph.graph import GraphStore
 from cybergraph.security.capability import (
     CONFIG_GLOBS,
+    CSHARP_GLOBS,
     GO_GLOBS,
     JAVA_GLOBS,
     SOURCE_GLOBS,
@@ -78,6 +79,7 @@ def assess_coverage(
             fnmatch(file, pattern)
             for pattern in (
                 VERIFIED_GLOBS + CONFIG_GLOBS + WEB_GLOBS + GO_GLOBS + JAVA_GLOBS
+                + CSHARP_GLOBS
             )
         ):
             results.append(

@@ -50,6 +50,15 @@ def test_java_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
     assert _status(tmp_path, ("Main.java",)) == {"Main.java": "analyzed"}
 
 
+def test_csharp_is_analyzed_now_it_has_a_partial_analyzer(tmp_path: Path):
+    """C# joined the verified gate (sql/command/path/deserialization/code-exec
+    sinks); it is no longer a file-coverage blind spot. As with Go/Java, the
+    capability-level honesty guarantee still holds -- `source_analysis_support`
+    stays NOT_SUPPORTED for C# (see test_csharp_not_in_verified_globs)."""
+    (tmp_path / "A.cs").write_text("class A {}\n", encoding="utf-8")
+    assert _status(tmp_path, ("A.cs",)) == {"A.cs": "analyzed"}
+
+
 def test_deleted_file_is_missing_not_failed(tmp_path: Path):
     (tmp_path / "good.py").write_text(GOOD, encoding="utf-8")
     build_graph(tmp_path)
