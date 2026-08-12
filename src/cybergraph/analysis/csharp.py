@@ -38,24 +38,6 @@ METHOD_RE = re.compile(
     r"[\w<>\[\],.\s]+?\s+(?P<name>[A-Za-z_]\w*)\s*\([^;{]*\)\s*\{"
 )
 METHOD_PARAMS_RE = re.compile(r"\((?P<params>[^)]*)\)")
-# Same "TYPE NAME(params) {" shape as METHOD_RE, but with the access-modifier
-# prefix OPTIONAL: a minimal top-level/local handler (`void H(string user) {
-# ... }`, no `public`/`private`) is common in ASP.NET minimal-API style code
-# and in test fixtures alike, and its parameters are exactly as
-# request-bindable as an attributed action's -- C# taint is already
-# weak/intra-method by design (see csharp_provenance's module docstring), so
-# seeding grading's taint set from every declared parameter name in the file
-# this way is one more conservative, fail-toward-flagging heuristic, not a
-# precision loss: a `\b`-anchored, whitespace-then-a-distinct-name shape still
-# cannot match a control-flow construct (`if (x) {`, `for (...) {`, `catch
-# (Exception e) {`, ...), which never has a separate NAME token between its
-# keyword and `(`. Deliberately independent of METHOD_RE / the main loop's
-# Function-node and route bookkeeping below -- this feeds ONLY the grading
-# pass's taint set, never a node, edge, or route link.
-_CSHARP_PARAM_DECL_RE = re.compile(
-    r"\b(?:(?:public|private|protected|internal)\s+)?(?:static\s+|async\s+|virtual\s+|override\s+)*"
-    r"[\w<>\[\],.\s]+?\s+[A-Za-z_]\w*\s*\((?P<params>[^;{]*)\)\s*\{"
-)
 # Matches a sink call the general dotted CALL_RE misses: a constructor `new
 # Ctor(` or a method call `.method(` (including one that follows a `)` in a
 # chain). Run over the whole `source` (not per-line) so a chained call after a
@@ -370,7 +352,6 @@ def _grade_csharp_sinks(
     exactly once.
     """
     code = "\n".join(strip_code(source, "csharp"))
-    declared_params = _declared_param_names(code)
 
     candidates: dict[int, tuple[str, object]] = {}
     for call in _CSHARP_SINK_CALL_RE.finditer(code):
@@ -415,7 +396,7 @@ def _grade_csharp_sinks(
                 )
             )
 
-        tainted_names = set(tainted_map) | declared_params
+        tainted_names = set(tainted_map)
         if sink.vuln_class == "deserialize":
             verdict = assess_deserialization(bool(taint_key))
         elif sink.vuln_class == "command":
@@ -426,33 +407,6 @@ def _grade_csharp_sinks(
         finding = _csharp_verdict_finding(sink, verdict, rel, line_no, line_text)
         if finding is not None and not is_inline_suppressed(lines, line_no, finding.rule_id):
             findings.append(finding)
-
-
-def _declared_param_names(code: str) -> set[str]:
-    """Every identifier that is a declared parameter of some method-like
-    signature anywhere in the file, per `_CSHARP_PARAM_DECL_RE`.
-
-    Used only to widen grading's taint set (see `_grade_csharp_sinks`): an
-    ASP.NET method's own parameters are commonly request-bound even without an
-    explicit route attribute or `[FromQuery]`/`[FromBody]`, and this repo's C#
-    taint is already weak/intra-method by design. File-wide rather than
-    per-function is a deliberate, disclosed over-approximation (a same-named
-    parameter on an unrelated method in the same file would also count) --
-    conservative in the direction this module already commits to: never a
-    confident SAFE on an unresolved variable, so widening what counts as
-    "resolved" only ever moves UNKNOWN towards UNSAFE, never SAFE away from a
-    real finding.
-    """
-    names: set[str] = set()
-    for match in _CSHARP_PARAM_DECL_RE.finditer(code):
-        for raw_param in match.group("params").split(","):
-            param = raw_param.strip()
-            if not param:
-                continue
-            idents = re.findall(r"[A-Za-z_]\w*", param)
-            if idents:
-                names.add(idents[-1])
-    return names
 
 
 def _call_is_empty(source: str, open_paren: int) -> bool | None:

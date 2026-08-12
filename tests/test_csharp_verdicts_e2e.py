@@ -26,7 +26,8 @@ def test_constructor_stream_reader_tainted_is_flagged(tmp_path):
 
 
 def test_process_start_shell_arg_is_flagged(tmp_path):
-    src = ('class A { void H(string user) {\n'
+    src = ('class A { void H(Microsoft.AspNetCore.Http.HttpRequest request) {\n'
+           '  var user = request.Query["user"];\n'
            '  System.Diagnostics.Process.Start("cmd.exe", $"/c {user}"); } }\n')
     assert "CG-CMD-EXEC" in _rules(tmp_path, src)
 
@@ -42,7 +43,8 @@ def test_binaryformatter_deserialize_never_safe(tmp_path):
 
 
 def test_csharp_script_eval_is_code_exec(tmp_path):
-    src = ('class A { void H(string code) {\n'
+    src = ('class A { void H(Microsoft.AspNetCore.Http.HttpRequest request) {\n'
+           '  var code = request.Query["code"];\n'
            '  Microsoft.CodeAnalysis.CSharp.Scripting.CSharpScript.EvaluateAsync(code); } }\n')
     assert "CG-CODE-EXEC" in _rules(tmp_path, src)
 
