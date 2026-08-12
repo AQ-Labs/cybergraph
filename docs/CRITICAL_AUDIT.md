@@ -314,19 +314,33 @@ the CI SARIF filter until each language gets its own Phase-2 sink registry/predi
 the project takes on a parsing dependency, which is the tradeoff already recorded above
 against §3.2's zero-dependency moat).
 
-**Note (2026-08-11, updated 2026-08-12): resolved for JS, Go, and Java core sink classes;
-C# and other classes remain inventory-grade.** Without a JS/Go/Java parser, a structural,
-statement-local classifier per language (`analysis/js_provenance.py`,
-`analysis/go_provenance.py`, `analysis/java_provenance.py`) now grades sink arguments as SAFE
-(all-literal/constant construction only), UNSAFE (a construction containing a variable that
-line-based intra-function taint confirms), or UNKNOWN (a variable it cannot resolve — never SAFE)
-rather than emitting the flat `CG-{JS,GO,JAVA}-SINK-CALL` inventory row. JS covers four sink
-classes (SQL, command, code-exec, path); Go covers three (SQL, command, path — Go has no
-registered code-exec sink); Java covers four (SQL, command, path, and native deserialization —
-deserialization takes no argument to classify, so it is never SAFE, only UNSAFE/UNKNOWN). C# is
-unchanged and still emits its `CG-CSHARP-SINK-CALL` inventory row behind the CI SARIF filter
-(§4.1), and other sink classes not listed above still fall back to the pre-rewrite inventory
-rule. §4.5 stays OPEN.
+**Note (2026-08-11, updated 2026-08-12): resolved for JS, Go, Java, and C# core sink
+classes; other/unlisted classes remain inventory-grade.** Without a JS/Go/Java/C# parser, a
+structural, statement-local classifier per language (`analysis/js_provenance.py`,
+`analysis/go_provenance.py`, `analysis/java_provenance.py`, `analysis/csharp_provenance.py`)
+now grades sink arguments as SAFE (all-literal/constant construction only), UNSAFE (a
+construction containing a variable that line-based intra-function taint confirms), or
+UNKNOWN (a variable it cannot resolve — never SAFE) rather than emitting the flat
+`CG-{JS,GO,JAVA,CSHARP}-SINK-CALL` inventory row. JS covers four sink classes (SQL, command,
+code-exec, path); Go covers three (SQL, command, path — Go has no registered code-exec sink);
+Java covers four (SQL, command, path, and native deserialization — deserialization takes no
+argument to classify, so it is never SAFE, only UNSAFE/UNKNOWN); C# covers all five (SQL,
+command, path, native deserialization, and code-execution — `CSharpScript.EvaluateAsync`/
+`RunAsync`/`Create`, `CSharpCodeProvider.CompileAssemblyFromSource` — the one core class Java's
+registry does not have), plus its own dominant injection idiom, string interpolation
+(`$"...{expr}..."`/`$@"..."`/`@$"..."`), classified as a COMPOSED construction with each `{}`
+hole graded like any other operand.
+
+C# was the last non-Python language planned in this line of work, so all five analyzers now
+have a construction-provenance pass over their core sink classes — but **§4.5 still stays
+OPEN, not CLOSED.** Two gaps this note's scope does not touch remain: (1) sink classes not
+listed above (e.g. template injection, currently registered for Python only) still fall back
+to the pre-rewrite inventory rule for every non-Python language, C# included; (2) the
+underlying fact the section title names — JS/Go/Java/C# analyzers are regex-based, not real
+parse trees (`analysis/csharp.py` still has no AST, only a structural constructor/chained-call
+matcher) — is unchanged, and `VERIFIED_GLOBS` (§4.1's `source_analysis_support` capability)
+stays Python-only by design, so all four non-Python languages remain honestly
+`NOT_SUPPORTED` for whole-file source analysis regardless of the sink-argument verdicts above.
 
 ### 4.6 MEDIUM — benchmark claims drift from the committed artifact
 

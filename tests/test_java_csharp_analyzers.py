@@ -212,7 +212,9 @@ def test_csharp_genuine_source_still_detected_and_reaches_sink(tmp_path: Path) -
     assert _input_nodes(nodes), "genuine Request.Query must create an Input source"
     assert any(e.kind == "READS_INPUT" for e in edges)
     assert any(e.kind == "TAINTS" for e in edges)
-    assert any(f.rule_id == "CG-CSHARP-SINK-CALL" for f in findings)
+    # new SqlCommand(...) is now a graded verdict sink (Task 3), not the legacy
+    # CG-CSHARP-SINK-CALL inventory finding: a tainted concatenated query is unsafe.
+    assert any(f.rule_id == "CG-SQL-EXEC" for f in findings)
 
 
 def test_csharp_interpolation_hole_source_is_detected(tmp_path: Path) -> None:
