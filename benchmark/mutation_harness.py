@@ -691,6 +691,54 @@ MUTATIONS: list[Mutation] = [
         tests=("tests/test_java_provenance.py::test_deserialization_never_safe",),
         note="native deserialization can never be proven safe from construction alone",
     ),
+    # -- D9: the C# verdict assessor must never fail open --------------------
+    Mutation(
+        id="D9-csharp-tainted-sink-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/csharp_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_csharp_provenance.py::test_concat_tainted_is_unsafe",),
+        note="a taint-confirmed C# sink operand must not read safe",
+    ),
+    Mutation(
+        id="D9-csharp-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/csharp_provenance.py",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
+        tests=(
+            "tests/test_csharp_provenance.py"
+            "::test_stringbuilder_all_literal_variable_receiver_never_safe",
+        ),
+        note="a C# variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-csharp-deser-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/csharp_provenance.py",
+        old="    return VERDICT_UNSAFE if tainted_present else VERDICT_UNKNOWN",
+        new="    return VERDICT_SAFE",
+        tests=("tests/test_csharp_provenance.py::test_deserialization_is_never_safe",),
+        note="native deserialization can never be proven safe from construction alone",
+    ),
+    Mutation(
+        id="D9-csharp-interp-hole-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/csharp_provenance.py",
+        old="                names, unresolved = _operand_candidates(holes)",
+        new="                names, unresolved = [], False",
+        tests=("tests/test_csharp_provenance.py::test_interpolation_tainted_hole_is_unsafe",),
+        note="a tainted C# string-interpolation hole must not read safe",
+    ),
 ]
 
 
