@@ -655,6 +655,42 @@ MUTATIONS: list[Mutation] = [
         note="a taint-confirmed command argument (`exec.Command(\"sh\", \"-c\", userCmd)` "
         "with tainted userCmd) must not read safe",
     ),
+    # -- D9: the Java verdict assessor must never fail open ------------------
+    Mutation(
+        id="D9-java-tainted-sink-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/java_provenance.py",
+        old="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_UNSAFE",
+        new="        if any(n in tainted_names for n in names):\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_java_provenance.py::test_assess_sql_concat_tainted_unsafe",),
+        note="a taint-confirmed Java sink operand must not read safe",
+    ),
+    Mutation(
+        id="D9-java-unresolved-var-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/java_provenance.py",
+        old="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_UNKNOWN",
+        new="        if names or unresolved:\n"
+        "            # a candidate variable (resolved or not) or an operand we could not\n"
+        "            # prove literal -> never read as safe\n"
+        "            return VERDICT_SAFE",
+        tests=("tests/test_java_provenance.py::test_assess_sql_unresolved_unknown",),
+        note="a Java variable CyberGraph cannot resolve must read UNKNOWN, never SAFE",
+    ),
+    Mutation(
+        id="D9-java-deser-reads-safe",
+        disaster="D9",
+        file="cybergraph/analysis/java_provenance.py",
+        old="    return VERDICT_UNSAFE if tainted_present else VERDICT_UNKNOWN",
+        new="    return VERDICT_SAFE",
+        tests=("tests/test_java_provenance.py::test_deserialization_never_safe",),
+        note="native deserialization can never be proven safe from construction alone",
+    ),
 ]
 
 
