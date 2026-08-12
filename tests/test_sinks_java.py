@@ -10,6 +10,8 @@ from cybergraph.security.sinks import lookup_sink
     ("stmt.executeUpdate", "CG-SQL-EXEC", "sql"),
     ("em.createNativeQuery", "CG-SQL-EXEC", "sql"),
     ("jdbcTemplate.query", "CG-SQL-EXEC", "sql"),
+    ("conn.prepareStatement", "CG-SQL-EXEC", "sql"),
+    ("conn.prepareCall", "CG-SQL-EXEC", "sql"),
     ("Runtime.exec", "CG-CMD-EXEC", "command"),
     ("pb.start", "CG-CMD-EXEC", "command"),
     ("File", "CG-PATH-TRAVERSAL", "path"),

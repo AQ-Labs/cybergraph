@@ -311,13 +311,22 @@ def _grade_java_sinks(
     this runs, so each match's line is mapped to its owning function via
     `line_owner` (built by the main per-line loop) rather than re-tracking
     `current_function`.
+
+    Matches, the zero-arg check, and argument extraction all run against
+    `code` -- `source` with `//`/`/* */` comments blanked (string/char literals
+    left untouched) -- not raw `source`, so a commented-out sink call is
+    invisible here and never graded as live. `code` is exactly as long as
+    `source` (comment text becomes spaces, line boundaries are kept), so every
+    offset computed against it -- `line_no`, `open_paren` -- is equally valid
+    used against `source`; nothing needs translating.
     """
-    for call in _JAVA_SINK_CALL_RE.finditer(source):
+    code = _blank_java_comments(source)
+    for call in _JAVA_SINK_CALL_RE.finditer(code):
         name = call.group("ctor") or call.group("method")
         sink = lookup_sink(name, "java")
         if sink is None:
             continue  # not a registered sink -- left to the legacy inventory scan
-        line_no = source.count("\n", 0, call.start()) + 1
+        line_no = code.count("\n", 0, call.start()) + 1
         open_paren = call.end() - 1
         owner = line_owner[line_no - 1] if 0 < line_no <= len(line_owner) else rel
         tainted_map = tainted_by_function.get(owner, {})
@@ -329,8 +338,10 @@ def _grade_java_sinks(
         # matched and assessed separately. Deserialization is exempt:
         # `readObject()`/`readUnshared()` are zero-argument by nature. An
         # unbalanced/unreadable arg list is NOT genuinely empty and must still
-        # be assessed as unknown, not skipped.
-        if sink.vuln_class != "deserialize" and _call_is_empty(source, open_paren) is True:
+        # be assessed as unknown, not skipped. Checked against `code` too, so a
+        # call with only a comment between its parens (`executeQuery(/* n/a */)`)
+        # reads as empty rather than as an opaque, unreadable argument.
+        if sink.vuln_class != "deserialize" and _call_is_empty(code, open_paren) is True:
             continue
 
         edges.append(Edge(EDGE_REACHES_SINK, owner, name, rel, line_no))
@@ -346,13 +357,67 @@ def _grade_java_sinks(
         if sink.vuln_class == "deserialize":
             verdict = assess_deserialization(bool(taint_key))
         elif sink.vuln_class == "command":
-            verdict = assess_command(extract_all_args(source, open_paren), set(tainted_map))
+            verdict = assess_command(extract_all_args(code, open_paren), set(tainted_map))
         else:  # sql / path
-            verdict = assess(sink, extract_first_arg(source, open_paren), set(tainted_map))
+            verdict = assess(sink, extract_first_arg(code, open_paren), set(tainted_map))
 
         finding = _java_verdict_finding(sink, verdict, rel, line_no, line_text)
         if finding is not None and not is_inline_suppressed(lines, line_no, finding.rule_id):
             findings.append(finding)
+
+
+def _blank_java_comments(source: str) -> str:
+    """Blank `//` and `/* */` comments; leave everything else -- including every
+    string/char literal -- untouched, character-for-character.
+
+    A commented-out sink call must not be graded as live (a `//`/`/* */`'d out
+    `new File(tainted)` is dead code), but a REAL sink's string-literal argument
+    must survive completely intact for `extract_first_arg`/`assess` to classify
+    -- so, unlike `strip_code` (which also blanks string literals, for a
+    different consumer), this only ever blanks comment text. Quote-aware so a
+    `//`/`/*` inside a string or char literal (`"http://x"`) is never mistaken
+    for a comment opener; escape-aware so `'\\''` does not end a char literal
+    early. Same length as `source`, with line boundaries preserved, so a
+    position computed against the result is equally valid against `source`.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    n = len(source)
+    while i < n:
+        c = source[i]
+        if quote is not None:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(source[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in "\"'":
+            quote = c
+            out.append(c)
+            i += 1
+            continue
+        if source.startswith("//", i):
+            j = i
+            while j < n and source[j] not in "\n\r":
+                out.append(" ")
+                j += 1
+            i = j
+            continue
+        if source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            for k in range(i, end):
+                out.append(source[k] if source[k] in "\n\r" else " ")
+            i = end
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def _call_is_empty(source: str, open_paren: int) -> bool | None:

@@ -155,6 +155,14 @@ _JAVA: tuple[Sink, ...] = (
     Sink("update", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
     Sink("createNativeQuery", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
     Sink("createQuery", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    # `Statement.prepareStatement`/`prepareCall` build the query text itself --
+    # a concatenated argument here is exactly as unsafe as `executeQuery` on the
+    # concatenated string; the parameterized `?`-placeholder form is the safe
+    # idiom, which is why grading these (rather than the argument-less
+    # `.executeQuery()` that follows) is what actually catches a concatenated
+    # PreparedStatement.
+    Sink("prepareStatement", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
+    Sink("prepareCall", "CG-SQL-EXEC", "CWE-89", SEVERITY_HIGH, _SQL, "sql", bare=True),
     # Command (bare; Runtime.exec / ProcessBuilder / .start)
     Sink("exec", "CG-CMD-EXEC", "CWE-78", SEVERITY_CRITICAL, _CMD, "command",
          bare=True, shell=SHELL_CONDITIONAL),
