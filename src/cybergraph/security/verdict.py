@@ -18,7 +18,20 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from cybergraph.graph import Finding, GraphStore
+from cybergraph.graph import UNVERIFIED_SUFFIX, Finding, GraphStore
+from cybergraph.security.assurance import (
+    EVIDENCE_NONE,
+    EVIDENCE_PARTIAL,
+    EVIDENCE_STRONG,
+    EVIDENCE_WEAK,
+    REASON_CONFIRMED_REGRESSION,
+    REASON_UNRESOLVED,
+    REASON_UNSUPPORTED,
+    STATUS_CONFIRMED,
+    STATUS_UNRESOLVED,
+    STATUS_UNSUPPORTED,
+    assurance_for,
+)
 from cybergraph.security.capability import (
     FAIL,
     NOT_SUPPORTED,
@@ -27,8 +40,10 @@ from cybergraph.security.capability import (
     CheckResult,
     label_for,
     triggers_review,
+    unverified_source_files,
 )
-from cybergraph.security.policy import PolicyChange
+from cybergraph.security.checks import backing_finding, capability_files, escalated_risk_deltas
+from cybergraph.security.policy import PolicyChange, ProtectedSet
 
 STATE_ACCEPT = "accept"
 STATE_REVIEW = "review"
@@ -67,6 +82,175 @@ class Reason:
     reason_class: str = ""
 
 
+# --- Epistemics: map a `CheckResult` the engine already produced onto the
+# vocabulary in `cybergraph.security.assurance`. No new analysis: every input
+# below (a `Finding`, a `RiskDelta`, the changed files, the declared
+# `ProtectedSet`) is a signal `evaluate_capabilities` already computed.
+
+_STATUS_BY_CHECK_STATUS = {
+    FAIL: STATUS_CONFIRMED,
+    UNKNOWN: STATUS_UNRESOLVED,
+    NOT_SUPPORTED: STATUS_UNSUPPORTED,
+}
+
+_REASON_CLASS_BY_STATUS = {
+    STATUS_CONFIRMED: REASON_CONFIRMED_REGRESSION,
+    STATUS_UNRESOLVED: REASON_UNRESOLVED,
+    STATUS_UNSUPPORTED: REASON_UNSUPPORTED,
+}
+
+# Extension -> language, exactly the cells the brief names. Anything else
+# (`.jsx`, `.tsx`, an unrecognised extension, no backing finding at all)
+# stays `None` and lands on `assurance_for`'s own beta fallback -- today's
+# matrix already treats every non-Python injection language as beta, so no
+# language here is under- or over-claimed by staying unmapped.
+_LANGUAGE_BY_EXTENSION = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".go": "go",
+    ".java": "java",
+    ".cs": "csharp",
+}
+
+_VALID_IMPACTS = ("critical", "high", "medium", "low")
+_IMPACT_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0, "": -1}
+_REASON_CLASS_RANK = {
+    REASON_CONFIRMED_REGRESSION: 2,
+    REASON_UNRESOLVED: 1,
+    REASON_UNSUPPORTED: 0,
+}
+
+
+def _language_for(file_path: str) -> str | None:
+    return _LANGUAGE_BY_EXTENSION.get(Path(file_path).suffix.lower())
+
+
+def _evidence_for(finding: Finding | None) -> str:
+    if finding is None:
+        return EVIDENCE_NONE
+    if finding.rule_id.endswith(UNVERIFIED_SUFFIX):
+        return EVIDENCE_PARTIAL
+    return EVIDENCE_STRONG if finding.evidence else EVIDENCE_WEAK
+
+
+def _normalize_impact(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    return lowered if lowered in _VALID_IMPACTS else "medium"
+
+
+def _impact_for(check: CheckResult, finding: Finding | None, risk_deltas: list) -> str:
+    if finding is not None:
+        return _normalize_impact(finding.severity)
+    if check.capability_id == "reachable_data_paths" and check.status == FAIL:
+        escalated = escalated_risk_deltas(risk_deltas)
+        if escalated:
+            return _normalize_impact(escalated[0].risk_label)
+    if check.capability_id == "declared_login_rules" and check.status == FAIL:
+        # A declared login rule with nothing guarding it is broken access
+        # control by definition -- there is no lesser-severity reading of it.
+        return "critical"
+    if check.status in (UNKNOWN, NOT_SUPPORTED):
+        # Impact-if-true, not a certainty claim: an unresolved or unsupported
+        # change could hide anything up to the worst case, so it is never
+        # allowed to rank milder than a confirmed regression of known impact.
+        return "critical"
+    return ""
+
+
+def _protected_boundary(
+    check: CheckResult,
+    finding: Finding | None,
+    changed_files: tuple[str, ...],
+    protected_set: ProtectedSet,
+) -> bool:
+    """Whether the file behind this reason is one the declared policy protects."""
+    entity_files = {e.file_path for e in protected_set.entities.values() if e.file_path}
+    if not entity_files:
+        return False
+    if check.capability_id == "declared_login_rules" and check.status == FAIL:
+        return True
+    if finding is not None:
+        return finding.file_path in entity_files
+    if check.status == NOT_SUPPORTED:
+        files = unverified_source_files(capability_files(check.capability_id, changed_files))
+        if not files:
+            files = capability_files(check.capability_id, changed_files)
+        return any(file in entity_files for file in files)
+    return False
+
+
+def _reason_for_check(
+    check: CheckResult,
+    findings: list[Finding],
+    changed_files: tuple[str, ...],
+    protected_set: ProtectedSet,
+    risk_deltas: list,
+) -> tuple[Reason | None, bool]:
+    """Build the reason (plus its protected-boundary flag) for one check result.
+
+    Returns ``(None, False)`` for PASS/NOT_APPLICABLE, the two statuses that
+    already produce no reason at all in ``decide``'s check loop.
+    """
+    status = _STATUS_BY_CHECK_STATUS.get(check.status)
+    if status is None:
+        return None, False
+
+    label = label_for(check.capability_id)
+    if check.status == FAIL:
+        headline, kind = f"{label}: {check.detail}", "check_failed"
+    elif check.status == UNKNOWN:
+        detail = f" {check.detail}" if check.detail else ""
+        headline = f"CyberGraph could not check {label.lower()}.{detail}"
+        kind = "check_unknown"
+    else:
+        headline = (
+            f"This change touches things CyberGraph cannot verify yet ({label.lower()})."
+        )
+        kind = "check_unsupported"
+
+    finding = backing_finding(check.capability_id, findings)
+    language = _language_for(finding.file_path) if finding is not None else None
+    # assurance_for is case-sensitive and fails closed -- lowercase before calling
+    # it even though our own language table already only yields lowercase names.
+    assurance = assurance_for(check.capability_id, (language or "").lower() or None, None)
+    reason = Reason(
+        headline=headline,
+        rule_id=check.capability_id,
+        kind=kind,
+        status=status,
+        evidence=_evidence_for(finding),
+        assurance=assurance,
+        impact=_impact_for(check, finding, risk_deltas),
+        reason_class=_REASON_CLASS_BY_STATUS[status],
+    )
+    return reason, _protected_boundary(check, finding, changed_files, protected_set)
+
+
+def _primary_reason(reasons: list[Reason], protected_flags: list[bool]) -> str:
+    """The reason maximizing ``(impact_rank, protected_boundary, reason_severity)``.
+
+    Not a fixed enum-order pick (design §4): a critical unsupported change on a
+    protected boundary can outrank a low-impact confirmed regression.
+    """
+    candidates = [
+        (reason, protected)
+        for reason, protected in zip(reasons, protected_flags, strict=True)
+        if reason.reason_class
+    ]
+    if not candidates:
+        return ""
+    best_reason, _ = max(
+        candidates,
+        key=lambda pair: (
+            _IMPACT_RANK.get(pair[0].impact, -1),
+            pair[1],
+            _REASON_CLASS_RANK.get(pair[0].reason_class, -1),
+        ),
+    )
+    return best_reason.reason_class
+
+
 @dataclass(frozen=True)
 class Provenance:
     tool_version: str = ""
@@ -92,9 +276,23 @@ def decide(
     checks: list[CheckResult],
     policy_changes: list[PolicyChange],
     provenance: Provenance,
+    findings: list[Finding] = (),
+    protected_set: ProtectedSet = ProtectedSet(),
+    changed_files: tuple[str, ...] = (),
+    risk_deltas: list = (),
 ) -> Verdict:
-    """Combine capability results and policy changes into one decision."""
+    """Combine capability results and policy changes into one decision.
+
+    ``findings``/``protected_set``/``changed_files``/``risk_deltas`` are the
+    same signals ``evaluate_capabilities`` already consumed to produce
+    ``checks`` -- passed again here only so each reason's epistemics
+    (``status``/``evidence``/``assurance``/``impact``/``reason_class``) and
+    ``primary_reason`` can be derived from them. All default to empty, so
+    existing callers keep working; without them every check-based reason
+    simply carries the least it can honestly claim (``evidence=none``).
+    """
     reasons: list[Reason] = []
+    protected_flags: list[bool] = []
 
     for change in policy_changes:
         template = _POLICY_HEADLINES.get(change.kind, "")
@@ -109,34 +307,25 @@ def decide(
                 kind=change.kind,
             )
         )
+        protected_flags.append(False)
 
     for check in checks:
-        label = label_for(check.capability_id)
-        if check.status == FAIL:
-            reasons.append(
-                Reason(headline=f"{label}: {check.detail}",
-                       rule_id=check.capability_id, kind="check_failed")
-            )
-        elif check.status == UNKNOWN:
-            detail = f" {check.detail}" if check.detail else ""
-            reasons.append(
-                Reason(headline=f"CyberGraph could not check {label.lower()}.{detail}",
-                       rule_id=check.capability_id, kind="check_unknown")
-            )
-        elif check.status == NOT_SUPPORTED:
-            reasons.append(
-                Reason(
-                    headline=f"This change touches things CyberGraph cannot verify yet "
-                             f"({label.lower()}).",
-                    rule_id=check.capability_id, kind="check_unsupported",
-                )
-            )
+        reason, protected = _reason_for_check(
+            check, findings, changed_files, protected_set, risk_deltas
+        )
+        if reason is None:
+            continue
+        reasons.append(reason)
+        protected_flags.append(protected)
 
     state = STATE_REVIEW if (reasons or triggers_review(checks)) else STATE_ACCEPT
     not_evaluated = tuple(
         label_for(check.capability_id) for check in checks if check.status == NOT_SUPPORTED
     )
-    return Verdict(state, tuple(reasons), tuple(checks), not_evaluated, provenance)
+    return Verdict(
+        state, tuple(reasons), tuple(checks), not_evaluated, provenance,
+        primary_reason=_primary_reason(reasons, protected_flags),
+    )
 
 
 def format_verdict(verdict: Verdict) -> str:

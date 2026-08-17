@@ -1,11 +1,21 @@
+from cybergraph.graph import Finding
 from cybergraph.security.assurance import (
     ASSURANCE_BENCHMARKED,
+    ASSURANCE_BETA,
+    ASSURANCE_INVENTORY,
+    EVIDENCE_NONE,
+    EVIDENCE_PARTIAL,
     EVIDENCE_STRONG,
+    EVIDENCE_WEAK,
     REASON_CONFIRMED_REGRESSION,
+    REASON_UNRESOLVED,
+    REASON_UNSUPPORTED,
     STATUS_CONFIRMED,
+    STATUS_UNRESOLVED,
+    STATUS_UNSUPPORTED,
 )
 from cybergraph.security.capability import FAIL, NOT_SUPPORTED, PASS, UNKNOWN, CheckResult
-from cybergraph.security.policy import PolicyChange
+from cybergraph.security.policy import PolicyChange, ProtectedEntity, ProtectedSet
 from cybergraph.security.verdict import (
     STATE_ACCEPT,
     STATE_REVIEW,
@@ -153,3 +163,85 @@ def test_verdict_to_dict_is_schema_v2_with_epistemic_blocks():
 
 def test_gate_defaults_empty_until_policy_sets_it():
     assert verdict_to_dict(_sample_review_verdict())["gate"] in ("", None)
+
+
+# --- Task 4: epistemics populated from existing signals --------------------
+
+_SQL_CHECK = [CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1)]
+
+
+def test_confirmed_python_sql_regression_is_strong_benchmark_backed():
+    """A resolved-path Python finding is CyberGraph's best-established case."""
+    finding = Finding("CG-SQL-EXEC", "critical", "unsafe query", "app.py", 7,
+                       evidence="app.py:7 -> cursor.execute")
+    verdict = decide(_SQL_CHECK, [], PROV, findings=[finding])
+    reason = verdict.reasons[0]
+    assert reason.status == STATUS_CONFIRMED
+    assert reason.evidence == EVIDENCE_STRONG
+    assert reason.assurance == ASSURANCE_BENCHMARKED
+    assert reason.reason_class == REASON_CONFIRMED_REGRESSION
+    assert reason.impact == "critical"
+
+
+def test_confirmed_js_sql_regression_is_beta():
+    """Same rule, same evidence shape, a language CyberGraph has not benchmarked."""
+    finding = Finding("CG-SQL-EXEC", "high", "unsafe query", "app.js", 7,
+                       evidence="app.js:7 -> db.query")
+    verdict = decide(_SQL_CHECK, [], PROV, findings=[finding])
+    reason = verdict.reasons[0]
+    assert reason.evidence == EVIDENCE_STRONG
+    assert reason.assurance == ASSURANCE_BETA
+
+
+def test_unverified_finding_is_partial_evidence_and_unresolved():
+    finding = Finding("CG-SQL-EXEC-UNVERIFIED", "medium", "could not confirm", "app.py", 7)
+    checks = [CheckResult("sql_construction", UNKNOWN, "could not confirm", evidence_count=1)]
+    verdict = decide(checks, [], PROV, findings=[finding])
+    reason = verdict.reasons[0]
+    assert reason.status == STATUS_UNRESOLVED
+    assert reason.evidence == EVIDENCE_PARTIAL
+    assert reason.reason_class == REASON_UNRESOLVED
+
+
+def test_confirmed_finding_with_no_resolved_path_is_weak_evidence():
+    finding = Finding("CG-SQL-EXEC", "high", "unsafe query", "app.py", 7, evidence="")
+    verdict = decide(_SQL_CHECK, [], PROV, findings=[finding])
+    assert verdict.reasons[0].evidence == EVIDENCE_WEAK
+
+
+def test_check_with_no_backing_finding_is_evidence_none():
+    checks = [CheckResult("declared_login_rules", FAIL, "`/admin/x` has no login check", 1)]
+    verdict = decide(checks, [], PROV)
+    reason = verdict.reasons[0]
+    assert reason.evidence == EVIDENCE_NONE
+    assert reason.impact == "critical"
+
+
+def test_not_supported_change_is_reason_class_unsupported():
+    checks = [CheckResult("source_analysis_support", NOT_SUPPORTED, "no analyzer yet for x.rb", 1)]
+    verdict = decide(checks, [], PROV)
+    reason = verdict.reasons[0]
+    assert reason.status == STATUS_UNSUPPORTED
+    assert reason.reason_class == REASON_UNSUPPORTED
+    assert reason.assurance == ASSURANCE_INVENTORY
+
+
+def test_primary_reason_prefers_protected_unsupported_over_low_impact_confirmed():
+    """Spec §4: a critical unsupported change on a protected boundary can outrank
+    a low-impact confirmed regression -- primary_reason is computed, not fixed-order."""
+    protected = ProtectedSet(
+        {"app.rb::h": ProtectedEntity("app.rb::h", "/x", "app.rb", 1, True)}
+    )
+    checks = [
+        CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),
+        CheckResult("source_analysis_support", NOT_SUPPORTED, "no analyzer yet for app.rb", 1),
+    ]
+    low_finding = Finding("CG-SQL-EXEC", "low", "minor", "other.py", 3,
+                          evidence="other.py:3 -> cursor.execute")
+    verdict = decide(
+        checks, [], PROV,
+        findings=[low_finding],
+        protected_set=protected,
+        changed_files=("other.py", "app.rb"),
+    )
+    assert verdict.primary_reason == REASON_UNSUPPORTED

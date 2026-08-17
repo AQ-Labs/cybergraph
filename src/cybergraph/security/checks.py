@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatch
 
-from cybergraph.graph import Finding
+from cybergraph.graph import UNVERIFIED_SUFFIX, Finding
 from cybergraph.security.capability import (
     CAPABILITIES,
     FAIL,
@@ -106,6 +106,50 @@ def _capability_files(capability_id: str, changed_files: tuple[str, ...]) -> tup
     )
 
 
+def capability_files(capability_id: str, changed_files: tuple[str, ...]) -> tuple[str, ...]:
+    """Public wrapper around :func:`_capability_files`.
+
+    ``verdict.decide`` needs the same capability-scoped file list (for a
+    ``NOT_SUPPORTED`` reason's protected-boundary check) without duplicating
+    the scoping rule.
+    """
+    return _capability_files(capability_id, changed_files)
+
+
+def backing_finding(capability_id: str, findings: list[Finding]) -> Finding | None:
+    """The single :class:`Finding` that backs a rule-based capability's result.
+
+    Mirrors the precedence ``_evaluate`` already uses to choose FAIL over
+    UNKNOWN: a confirmed finding wins over an ``-UNVERIFIED`` one for the same
+    rule. Capabilities with no entry in ``_FINDING_RULES`` (``declared_login_rules``,
+    ``reachable_data_paths``, ``source_analysis_support``) are never backed by a
+    finding and always return ``None`` here -- their FAIL/UNKNOWN comes from the
+    policy or coverage inputs instead.
+    """
+    rule = _FINDING_RULES.get(capability_id)
+    if rule is None:
+        return None
+    rules = rule if isinstance(rule, set) else {rule}
+    for finding in findings:
+        if finding.rule_id in rules:
+            return finding
+    unverified_rules = {f"{r}{UNVERIFIED_SUFFIX}" for r in rules}
+    for finding in findings:
+        if finding.rule_id in unverified_rules:
+            return finding
+    return None
+
+
+def escalated_risk_deltas(risk_deltas: list) -> list:
+    """The subset of ``risk_deltas`` that make ``reachable_data_paths`` FAIL.
+
+    Same filter ``_evaluate`` applies inline below, exposed so
+    ``verdict.decide`` can recover the same delta (for its ``risk_label``)
+    without re-deriving the rule.
+    """
+    return [d for d in risk_deltas if getattr(d, "status", "") in {"added", "worsened"}]
+
+
 def _coverage_summary(
     relevant_files: tuple[str, ...], coverage: tuple[FileCoverage, ...]
 ) -> tuple[tuple[str, ...], list[FileCoverage], list[FileCoverage]]:
@@ -188,7 +232,7 @@ def _evaluate(
                 "CyberGraph found no web routes in this project, so it cannot tell "
                 "what is reachable from the internet",
             )
-        escalated = [d for d in risk_deltas if getattr(d, "status", "") in {"added", "worsened"}]
+        escalated = escalated_risk_deltas(risk_deltas)
         if escalated:
             delta = escalated[0]
             return CheckResult(
