@@ -15,6 +15,8 @@ codebase. Later tasks build on the vocabulary defined here.
 
 from __future__ import annotations
 
+import re
+
 # --- Evidence strength -------------------------------------------------
 EVIDENCE_STRONG = "strong"
 EVIDENCE_PARTIAL = "partial"
@@ -89,7 +91,86 @@ def phrase_for(status: str, evidence: str, assurance: str) -> str:
     return "possible"
 
 
+# --- Assurance matrix: today's honest maturity map ------------------------
+# Capability ids that produce verdicts today via per-language injection
+# analyzers (SQL/command/code-execution/deserialization/path). These match
+# the ids in cybergraph.security.capability.CAPABILITIES, duplicated as
+# literals here rather than imported -- this module stays dependency-free
+# (see module docstring).
+_INJECTION_CAPABILITIES: frozenset[str] = frozenset(
+    {
+        "sql_construction",
+        "command_execution",
+        "code_execution",
+        "deserialization",
+        "path_access",
+    }
+)
+
+# Other capability.py ids: posture/coverage capabilities that exist but do
+# not carry a per-language injection-verdict maturity story.
+_NON_INJECTION_CAPABILITIES: frozenset[str] = frozenset(
+    {
+        "declared_login_rules",
+        "reachable_data_paths",
+        "source_analysis_support",
+        "client_secret_boundary",
+        "cloud_configuration",
+        "cross_origin_policy",
+    }
+)
+
+# Python frameworks (or none declared) whose injection analysis is actually
+# benchmarked today.
+_PYTHON_BENCHMARKED_FRAMEWORKS: frozenset[str | None] = frozenset(
+    {"fastapi", "flask", "django", None}
+)
+
+# Other languages with an injection analyzer, but not yet benchmarked --
+# every injection capability is beta for each of these regardless of
+# framework.
+_BETA_LANGUAGES: frozenset[str] = frozenset(
+    {"javascript", "typescript", "go", "java", "csharp"}
+)
+
+# capability_id -> language -> assurance tier, for the injection
+# capabilities only. This is today's honest maturity map, not an
+# aspiration: only Python on a benchmarked framework reaches
+# ASSURANCE_BENCHMARKED (handled separately in ``assurance_for``); every
+# other language known to have an analyzer defaults to ASSURANCE_BETA here.
+_MATRIX: dict[str, dict[str, str]] = {
+    capability_id: dict.fromkeys(_BETA_LANGUAGES, ASSURANCE_BETA)
+    for capability_id in _INJECTION_CAPABILITIES
+}
+
+
+def assurance_for(capability_id: str, language: str | None, framework: str | None) -> str:
+    """Return the ASSURANCE_* tier for a capability/language/framework cell.
+
+    Conservative by construction (Law 3): ASSURANCE_BENCHMARKED is reached
+    only by Python on a framework CyberGraph has actually benchmarked its
+    injection analyzers against. Every other cell is graded down --
+    other-language injection analyzers to ASSURANCE_BETA, non-injection
+    capabilities to ASSURANCE_INVENTORY, and anything unrecognized to
+    ASSURANCE_UNSUPPORTED. Unknown languages never upgrade a cell; they can
+    only ever land on ASSURANCE_BETA at best.
+    """
+    if capability_id in _INJECTION_CAPABILITIES:
+        if language == "python":
+            if framework in _PYTHON_BENCHMARKED_FRAMEWORKS:
+                return ASSURANCE_BENCHMARKED
+            return ASSURANCE_BETA
+        return _MATRIX[capability_id].get(language, ASSURANCE_BETA)
+    if capability_id in _NON_INJECTION_CAPABILITIES:
+        return ASSURANCE_INVENTORY
+    return ASSURANCE_UNSUPPORTED
+
+
 # --- Law 1 lint: forbidden language on unconfirmed findings ---------------
+# Word-stems rather than exact phrases, so natural paraphrases ("appears
+# vulnerable", "was exploited", "can compromise") are caught, not just the
+# literal phrases below. Kept here (not just in the regex) as the readable
+# source of truth for what "confirmed-sounding" means.
 FORBIDDEN_ON_UNCONFIRMED: frozenset[str] = frozenset(
     {
         "confirmed",
@@ -101,15 +182,33 @@ FORBIDDEN_ON_UNCONFIRMED: frozenset[str] = frozenset(
     }
 )
 
+# Stems matched with a trailing \w* so conjugations/derivations count too:
+# "vulnerab" -> vulnerable, vulnerability; "exploit" -> exploited,
+# exploitable, exploits; "compromis" -> compromise, compromised,
+# compromising; "confirm" -> confirmed, confirms; "breach" -> breached,
+# breaches.
+_FORBIDDEN_STEMS: tuple[str, ...] = ("confirm", "vulnerab", "exploit", "compromis", "breach")
+
+# Matched as a whole word only (no stemming) -- "will" must not fire on
+# "willow" or "goodwill".
+_FORBIDDEN_WORDS: tuple[str, ...] = ("will",)
+
+_FORBIDDEN_PATTERN = re.compile(
+    r"\b(?:" + "|".join(_FORBIDDEN_STEMS) + r")\w*\b"
+    r"|\b(?:" + "|".join(_FORBIDDEN_WORDS) + r")\b",
+    re.IGNORECASE,
+)
+
 
 def has_epistemic_upgrade(text: str, status: str) -> bool:
     """Detect language that overstates confidence relative to ``status``.
 
-    Case-insensitive substring scan against ``FORBIDDEN_ON_UNCONFIRMED``.
-    Always False when ``status == STATUS_CONFIRMED`` — those phrases are
-    warranted once a finding is actually confirmed.
+    Word-boundary, case-insensitive match against confirmed-sounding
+    stems/words (see ``_FORBIDDEN_PATTERN``). Always False when
+    ``status == STATUS_CONFIRMED`` — those phrases are warranted once a
+    finding is actually confirmed. Missing a real upgrade is the dangerous
+    direction, so this errs toward flagging paraphrases.
     """
     if status == STATUS_CONFIRMED:
         return False
-    lowered = text.lower()
-    return any(phrase in lowered for phrase in FORBIDDEN_ON_UNCONFIRMED)
+    return bool(_FORBIDDEN_PATTERN.search(text))
