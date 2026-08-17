@@ -378,35 +378,53 @@ def _claim_text(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
     return _guarded(f"{phrase.capitalize()}: {body}", reason.status)
 
 
-def _select_primary(confirmed: list[Reason], primary_reason: str) -> Reason:
-    """The reason ``decide`` already ranked highest, re-found among the confirmed
-    ones by its ``reason_class`` (falling back to impact alone if none match)."""
-    pool = [r for r in confirmed if r.reason_class == primary_reason] or confirmed
+def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
+    """The reason ``decide`` already ranked highest (impact x protected-boundary
+    x severity), re-found by its ``reason_class`` across the FULL epistemic set --
+    confirmed, unresolved, and unsupported reasons alike (falling back to impact
+    alone if none match).
+
+    A thin reason can rank above a low-impact confirmed one -- a CRITICAL
+    unsupported/unresolved change on a protected boundary outranks a low-impact
+    confirmed regression (spec §4, ``decide``'s own ``_primary_reason``). The
+    headline the reader sees must say so: searching only the confirmed subset
+    here would silently downgrade that top risk to a secondary "gap" line
+    whenever any confirmed reason -- however minor -- also happened to exist.
+    """
+    pool = [r for r in epistemic if r.reason_class == primary_reason] or epistemic
     return max(pool, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
 
 
 def _trust_gap(reason: Reason) -> str:
     """What keeps a lone confirmed reason short of full ``confirmed`` trust --
-    used only when no other reason names a sharper gap."""
+    used only when no other reason names a sharper gap. Guarded like every
+    other rendered reason line even though these fixed strings never trip the
+    Law 1 lint today -- the check should be universal, not case-by-case."""
     if reason.assurance != ASSURANCE_BENCHMARKED:
-        return "CyberGraph has not benchmarked this analysis for this language yet."
+        return _guarded(
+            "CyberGraph has not benchmarked this analysis for this language yet.",
+            reason.status,
+        )
     if reason.evidence != EVIDENCE_STRONG:
-        return "The evidence trail behind this finding is incomplete."
+        return _guarded("The evidence trail behind this finding is incomplete.", reason.status)
     return ""
 
 
 def _top_gap(
     epistemic: list[Reason], primary: Reason, checks: tuple[CheckResult, ...]
 ) -> str:
-    """The single most load-bearing evidence gap alongside the primary reason:
-    the highest-impact unresolved/unsupported reason other than the primary one,
-    or -- when there is none -- what keeps the primary reason itself short of
-    full confirmation."""
-    others = [r for r in epistemic if r is not primary and r.status in _THIN_STATUSES]
+    """The single most load-bearing thing left unsaid by the headline: the
+    highest-impact reason other than the primary one -- confirmed or thin
+    alike, so a secondary confirmed regression is never dropped just because
+    a thin reason led the headline -- or, when there is no other reason, what
+    keeps a confirmed primary itself short of full confirmation."""
+    others = [r for r in epistemic if r is not primary]
     if others:
         top = max(others, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
         return _claim_text(top, checks)
-    return _trust_gap(primary)
+    if primary.status == STATUS_CONFIRMED:
+        return _trust_gap(primary)
+    return ""
 
 
 def _verbose_block(verdict: Verdict) -> list[str]:
@@ -469,7 +487,10 @@ def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
         lines.append("")
 
         if confirmed:
-            primary = _select_primary(confirmed, verdict.primary_reason)
+            # Headline honors decide()'s FULL-reason-set ranking, not "any
+            # confirmed reason wins": a protected-boundary CRITICAL unsupported
+            # change must still lead over a low-impact confirmed one.
+            primary = _select_primary(epistemic, verdict.primary_reason)
             lines.append(_claim_text(primary, verdict.checks))
             gap = _top_gap(epistemic, primary, verdict.checks)
             if gap:
@@ -483,7 +504,7 @@ def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
             lines.extend(f"  - {_claim_text(reason, verdict.checks)}" for reason in thin)
 
         for reason in policy_reasons:
-            lines.append(f"  - {reason.headline}{_where(reason)}")
+            lines.append(_guarded(f"  - {reason.headline}{_where(reason)}", reason.status))
 
         lines.append("")
         lines.append(

@@ -416,3 +416,45 @@ def test_verbose_mode_prints_the_full_epistemic_block():
 def test_verbose_names_not_established_coverage_gaps():
     out = format_verdict(_sample_all_unresolved_review(), verbose=True)
     assert label_for("source_analysis_support") in out
+
+
+# --- Task 5 fix round 1: headline must honor primary_reason across the FULL
+# reason set, not "any confirmed reason wins" ---------------------------------
+
+
+def test_headline_honors_primary_reason_even_when_a_confirmed_reason_exists():
+    """Regression for the priority-inversion bug: decide() ranked a CRITICAL
+    unsupported change on a protected boundary above a low-impact confirmed
+    SQL finding (see test_primary_reason_prefers_protected_unsupported_over_
+    low_impact_confirmed). The rendered HEADLINE must say so too -- a reader
+    who reads only the collapsed headline must not be misled into thinking the
+    low-impact confirmed finding is the top risk."""
+    protected = ProtectedSet(
+        {"app.rb::h": ProtectedEntity("app.rb::h", "/x", "app.rb", 1, True)}
+    )
+    checks = [
+        CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),
+        CheckResult("source_analysis_support", NOT_SUPPORTED, "no analyzer yet for app.rb", 1),
+    ]
+    low_finding = Finding("CG-SQL-EXEC", "low", "minor", "other.py", 3,
+                          evidence="other.py:3 -> cursor.execute")
+    verdict = decide(
+        checks, [], PROV,
+        findings=[low_finding],
+        protected_set=protected,
+        changed_files=("other.py", "app.rb"),
+    )
+    assert verdict.primary_reason == REASON_UNSUPPORTED  # decide()'s ranking (unchanged)
+
+    out = format_verdict(verdict)
+    lines = out.splitlines()
+    headline = lines[2]  # after the count line and its trailing blank line
+
+    assert label_for("source_analysis_support") in headline
+    assert "not evaluated" in headline.lower()
+    assert label_for("sql_construction") not in headline
+    assert "confirmed" not in headline.lower()
+
+    # Nothing is dropped (Law 5): the low-impact confirmed reason still
+    # surfaces in the body, just not as the headline.
+    assert label_for("sql_construction") in out
