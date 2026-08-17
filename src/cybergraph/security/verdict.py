@@ -60,6 +60,11 @@ class Reason:
     line: int = 0
     rule_id: str = ""
     kind: str = ""
+    status: str = ""
+    evidence: str = ""
+    assurance: str = ""
+    impact: str = ""
+    reason_class: str = ""
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,8 @@ class Verdict:
     checks: tuple[CheckResult, ...] = ()
     not_evaluated: tuple[str, ...] = ()
     provenance: Provenance = Provenance()
+    gate: str = ""
+    primary_reason: str = ""
 
 
 def decide(
@@ -159,12 +166,33 @@ def format_verdict(verdict: Verdict) -> str:
 
 
 def verdict_to_dict(verdict: Verdict) -> dict:
-    """Machine-readable form. Identical for the CLI and the MCP tool."""
+    """Machine-readable form. Identical for the CLI and the MCP tool.
+
+    Schema v2: adds ``schema_version``, ``decision`` (alias of ``state``),
+    ``gate``, and ``primary_reason`` at the top level, and epistemic fields
+    (``status``, ``evidence``, ``assurance``, ``impact``, ``reason_class``)
+    on each reason. All v1 keys are kept unchanged so existing consumers
+    don't break (spec open-Q4 compatibility window).
+    """
     return {
+        "schema_version": 2,
         "state": verdict.state,
+        "decision": verdict.state,
+        "gate": verdict.gate,
+        "primary_reason": verdict.primary_reason,
         "reasons": [
-            {"headline": r.headline, "file": r.file_path, "line": r.line,
-             "rule": r.rule_id, "kind": r.kind}
+            {
+                "headline": r.headline,
+                "file": r.file_path,
+                "line": r.line,
+                "rule": r.rule_id,
+                "kind": r.kind,
+                "status": r.status,
+                "evidence": r.evidence,
+                "assurance": r.assurance,
+                "impact": r.impact,
+                "reason_class": r.reason_class,
+            }
             for r in verdict.reasons
         ],
         "checks": [asdict(check) for check in verdict.checks],

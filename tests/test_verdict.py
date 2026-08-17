@@ -1,9 +1,17 @@
+from cybergraph.security.assurance import (
+    ASSURANCE_BENCHMARKED,
+    EVIDENCE_STRONG,
+    REASON_CONFIRMED_REGRESSION,
+    STATUS_CONFIRMED,
+)
 from cybergraph.security.capability import FAIL, NOT_SUPPORTED, PASS, UNKNOWN, CheckResult
 from cybergraph.security.policy import PolicyChange
 from cybergraph.security.verdict import (
     STATE_ACCEPT,
     STATE_REVIEW,
     Provenance,
+    Reason,
+    Verdict,
     decide,
     format_verdict,
     verdict_to_dict,
@@ -11,6 +19,29 @@ from cybergraph.security.verdict import (
 
 PROV = Provenance("0.1.0", "abc123", "def456", "worktree", "hash", ("sql_construction",))
 PASSING = [CheckResult("sql_construction", PASS, evidence_count=4)]
+
+
+def _sample_review_verdict() -> Verdict:
+    reason = Reason(
+        headline="SQL query built from unsanitized input.",
+        file_path="app.py",
+        line=3,
+        rule_id="sql_construction",
+        kind="check_failed",
+        status=STATUS_CONFIRMED,
+        evidence=EVIDENCE_STRONG,
+        assurance=ASSURANCE_BENCHMARKED,
+        impact="An attacker could read or modify data.",
+        reason_class=REASON_CONFIRMED_REGRESSION,
+    )
+    return Verdict(
+        STATE_REVIEW,
+        (reason,),
+        (CheckResult("sql_construction", FAIL, "unsafe query"),),
+        (),
+        PROV,
+        primary_reason=REASON_CONFIRMED_REGRESSION,
+    )
 
 
 def test_all_passing_accepts():
@@ -107,3 +138,18 @@ def test_load_changed_findings_is_scoped(tmp_path):
     assert load_changed_findings(tmp_path, ("app.py",))
     assert load_changed_findings(tmp_path, ("other.py",)) == []
     assert load_changed_findings(tmp_path, ()) == []
+
+
+def test_verdict_to_dict_is_schema_v2_with_epistemic_blocks():
+    v = _sample_review_verdict()  # helper builds a Verdict with one confirmed_regression reason
+    d = verdict_to_dict(v)
+    assert d["schema_version"] == 2
+    assert d["decision"] == d["state"] == "review"
+    r = d["reasons"][0]
+    for k in ("headline", "status", "evidence", "assurance", "impact", "reason_class"):
+        assert k in r
+    assert d["primary_reason"] in {rr["reason_class"] for rr in d["reasons"]}
+
+
+def test_gate_defaults_empty_until_policy_sets_it():
+    assert verdict_to_dict(_sample_review_verdict())["gate"] in ("", None)
