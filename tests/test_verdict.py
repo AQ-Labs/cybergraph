@@ -150,6 +150,57 @@ def test_load_changed_findings_is_scoped(tmp_path):
     assert load_changed_findings(tmp_path, ()) == []
 
 
+def test_load_changed_findings_carries_the_stored_evidence(tmp_path):
+    """Regression: the SELECT once dropped the `evidence` column, so every
+    finding load_changed_findings reconstructed came back with evidence="" no
+    matter what the analyzer resolved and stored in the findings table."""
+    from cybergraph.build import build_graph
+    from cybergraph.security.verdict import load_changed_findings
+
+    (tmp_path / "app.py").write_text(
+        '@app.route("/x")\ndef h(request):\n'
+        '    return db.execute("select " + request.args["q"])\n',
+        encoding="utf-8",
+    )
+    build_graph(tmp_path)
+    findings = load_changed_findings(tmp_path, ("app.py",))
+    assert findings
+    assert any(f.evidence for f in findings), findings
+
+
+def test_confirmed_python_sql_regression_is_strong_end_to_end(tmp_path):
+    """The real CLI/MCP path: check_change -> load_changed_findings -> decide.
+
+    The hand-built-Finding tests above construct `Finding(..., evidence=...)`
+    directly and never call load_changed_findings, which is exactly how a
+    dropped `evidence` column in its SQL slipped past every other test. This
+    one goes through the real query.
+    """
+    import subprocess
+
+    from cybergraph.security.check import check_change
+
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("hi\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+        cwd=tmp_path, check=True,
+    )
+    (tmp_path / "app.py").write_text(
+        '@app.route("/x")\ndef h(request):\n'
+        '    return db.execute("select " + request.args["q"])\n',
+        encoding="utf-8",
+    )
+
+    verdict = check_change(tmp_path)
+
+    confirmed = [r for r in verdict.reasons if r.rule_id == "sql_construction"]
+    assert confirmed, verdict.reasons
+    assert confirmed[0].status == STATUS_CONFIRMED
+    assert confirmed[0].evidence == EVIDENCE_STRONG
+
+
 def test_verdict_to_dict_is_schema_v2_with_epistemic_blocks():
     v = _sample_review_verdict()  # helper builds a Verdict with one confirmed_regression reason
     d = verdict_to_dict(v)

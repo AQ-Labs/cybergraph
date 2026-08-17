@@ -398,7 +398,7 @@ def load_changed_findings(repo_root: Path, changed_files: tuple[str, ...]) -> li
     try:
         placeholders = ",".join("?" for _ in changed_files)
         rows = store.conn.execute(
-            f"SELECT rule_id, severity, message, file_path, line_start, cwe "
+            f"SELECT rule_id, severity, message, file_path, line_start, cwe, evidence "
             f"FROM findings WHERE file_path IN ({placeholders})",
             changed_files,
         ).fetchall()
@@ -407,6 +407,6 @@ def load_changed_findings(repo_root: Path, changed_files: tuple[str, ...]) -> li
     return [
         Finding(rule_id=r["rule_id"], severity=r["severity"], message=r["message"],
                 file_path=r["file_path"], line_start=r["line_start"] or 0,
-                cwe=r["cwe"] or "")
+                cwe=r["cwe"] or "", evidence=r["evidence"] or "")
         for r in rows
     ]
