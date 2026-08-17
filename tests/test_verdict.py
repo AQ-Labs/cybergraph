@@ -13,8 +13,16 @@ from cybergraph.security.assurance import (
     STATUS_CONFIRMED,
     STATUS_UNRESOLVED,
     STATUS_UNSUPPORTED,
+    has_epistemic_upgrade,
 )
-from cybergraph.security.capability import FAIL, NOT_SUPPORTED, PASS, UNKNOWN, CheckResult
+from cybergraph.security.capability import (
+    FAIL,
+    NOT_SUPPORTED,
+    PASS,
+    UNKNOWN,
+    CheckResult,
+    label_for,
+)
 from cybergraph.security.policy import PolicyChange, ProtectedEntity, ProtectedSet
 from cybergraph.security.verdict import (
     STATE_ACCEPT,
@@ -296,3 +304,115 @@ def test_primary_reason_prefers_protected_unsupported_over_low_impact_confirmed(
         changed_files=("other.py", "app.rb"),
     )
     assert verdict.primary_reason == REASON_UNSUPPORTED
+
+
+# --- Task 5: collapsed default projection + claim-language enforcement ------
+
+
+def _sample_beta_sql_review() -> Verdict:
+    """A confirmed finding in a language CyberGraph has not benchmarked: the
+    epistemics warrant "possible", never "confirmed" (Laws 1 & 3)."""
+    reason = Reason(
+        headline=f"{label_for('sql_construction')}: unsafe query built from request input.",
+        file_path="app.js",
+        line=7,
+        rule_id="sql_construction",
+        kind="check_failed",
+        status=STATUS_CONFIRMED,
+        evidence=EVIDENCE_STRONG,
+        assurance=ASSURANCE_BETA,
+        impact="high",
+        reason_class=REASON_CONFIRMED_REGRESSION,
+    )
+    return Verdict(
+        STATE_REVIEW,
+        (reason,),
+        (CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),),
+        (),
+        PROV,
+        primary_reason=REASON_CONFIRMED_REGRESSION,
+    )
+
+
+def _sample_all_unresolved_review() -> Verdict:
+    """No confirmed regression -- a thin result naming every unresolved/
+    unsupported gap by its own reason string, never a bare status token."""
+    reasons = (
+        Reason(
+            headline="CyberGraph could not check unsafe database queries.",
+            rule_id="sql_construction",
+            kind="check_unknown",
+            status=STATUS_UNRESOLVED,
+            evidence=EVIDENCE_PARTIAL,
+            assurance=ASSURANCE_BETA,
+            impact="critical",
+            reason_class=REASON_UNRESOLVED,
+        ),
+        Reason(
+            headline="This change touches things CyberGraph cannot verify yet "
+                     "(languages cybergraph can read).",
+            rule_id="source_analysis_support",
+            kind="check_unsupported",
+            status=STATUS_UNSUPPORTED,
+            evidence=EVIDENCE_NONE,
+            assurance=ASSURANCE_INVENTORY,
+            impact="critical",
+            reason_class=REASON_UNSUPPORTED,
+        ),
+    )
+    checks = (
+        CheckResult("sql_construction", UNKNOWN,
+                    "dynamic dispatch prevented call resolution", 1),
+        CheckResult("source_analysis_support", NOT_SUPPORTED,
+                    "framework authorization pattern not recognized", 1),
+    )
+    return Verdict(
+        STATE_REVIEW,
+        reasons,
+        checks,
+        (label_for("source_analysis_support"),),
+        PROV,
+        primary_reason=REASON_UNSUPPORTED,
+    )
+
+
+def _line_for(out: str, reason: Reason) -> str:
+    """The rendered line that speaks for a given reason -- matched by its
+    capability's human label, which appears in every reason line format_verdict
+    renders (the claim line and each thin-result bullet alike)."""
+    needle = label_for(reason.rule_id)
+    for line in out.splitlines():
+        if needle in line:
+            return line
+    return ""
+
+
+def test_default_projection_is_collapsed_and_language_bounded():
+    out = format_verdict(_sample_beta_sql_review())      # beta capability
+    assert "possible" in out.lower() and "confirmed" not in out.lower()  # Law 1 + Law 3
+    assert out.count("\n") <= 8               # collapsed: headline + reason + top gap + [Why?]
+    assert "Why?" in out or "why" in out.lower()
+
+
+def test_thin_result_names_the_gaps_not_bare_unknown():
+    out = format_verdict(_sample_all_unresolved_review())
+    assert "could not" in out.lower()
+    assert "UNKNOWN" not in out            # never a bare UNKNOWN in the default view
+
+
+def test_no_forbidden_upgrade_in_any_rendered_reason():
+    for v in (_sample_beta_sql_review(), _sample_all_unresolved_review()):
+        out = format_verdict(v)
+        for r in v.reasons:
+            assert not has_epistemic_upgrade(_line_for(out, r), r.status)
+
+
+def test_verbose_mode_prints_the_full_epistemic_block():
+    out = format_verdict(_sample_beta_sql_review(), verbose=True)
+    for field in ("Status:", "Evidence:", "Assurance:", "Impact:"):
+        assert field in out
+
+
+def test_verbose_names_not_established_coverage_gaps():
+    out = format_verdict(_sample_all_unresolved_review(), verbose=True)
+    assert label_for("source_analysis_support") in out

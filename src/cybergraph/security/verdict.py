@@ -20,6 +20,7 @@ from pathlib import Path
 
 from cybergraph.graph import UNVERIFIED_SUFFIX, Finding, GraphStore
 from cybergraph.security.assurance import (
+    ASSURANCE_BENCHMARKED,
     EVIDENCE_NONE,
     EVIDENCE_PARTIAL,
     EVIDENCE_STRONG,
@@ -31,6 +32,8 @@ from cybergraph.security.assurance import (
     STATUS_UNRESOLVED,
     STATUS_UNSUPPORTED,
     assurance_for,
+    has_epistemic_upgrade,
+    phrase_for,
 )
 from cybergraph.security.capability import (
     FAIL,
@@ -328,28 +331,168 @@ def decide(
     )
 
 
-def format_verdict(verdict: Verdict) -> str:
-    """Render for a terminal reader. Never claims more than was checked."""
+_THIN_STATUSES = (STATUS_UNRESOLVED, STATUS_UNSUPPORTED)
+
+
+def _where(reason: Reason) -> str:
+    return f" ({reason.file_path}:{reason.line})" if reason.file_path else ""
+
+
+def _guarded(text: str, status: str) -> str:
+    """Assert Law 1 holds before a reason line is ever handed back to a caller.
+
+    ``has_epistemic_upgrade`` is always False for ``STATUS_CONFIRMED`` (that
+    language is warranted there) -- this only ever fires for a non-confirmed
+    reason, and only when a forbidden verb has slipped past ``phrase_for``.
+    A regression here is a bug in this module, not bad input, so it asserts
+    rather than degrading the text.
+    """
+    assert not has_epistemic_upgrade(text, status), (
+        f"Law 1 violation: epistemic upgrade in a non-confirmed reason line: {text!r}"
+    )
+    return text
+
+
+def _detail_for(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
+    """The reason string behind an unresolved/unsupported reason.
+
+    Always ``CheckResult.detail`` when one exists -- never the bare
+    ``UNKNOWN``/``NOT_SUPPORTED`` status token -- falling back to the
+    reason's own headline only when no matching check is found.
+    """
+    for check in checks:
+        if check.capability_id == reason.rule_id and check.detail:
+            return check.detail
+    return reason.headline
+
+
+def _claim_text(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
+    """`<Phrase>: <what happened>` -- the verb is always ``assurance.phrase_for``'s,
+    never hand-written, so it can never claim more than ``status``/``evidence``/
+    ``assurance`` warrant (Laws 1 & 3)."""
+    phrase = phrase_for(reason.status, reason.evidence, reason.assurance)
+    if reason.status == STATUS_CONFIRMED:
+        body = f"{reason.headline}{_where(reason)}"
+    else:
+        body = f"{label_for(reason.rule_id)}: {_detail_for(reason, checks)}{_where(reason)}"
+    return _guarded(f"{phrase.capitalize()}: {body}", reason.status)
+
+
+def _select_primary(confirmed: list[Reason], primary_reason: str) -> Reason:
+    """The reason ``decide`` already ranked highest, re-found among the confirmed
+    ones by its ``reason_class`` (falling back to impact alone if none match)."""
+    pool = [r for r in confirmed if r.reason_class == primary_reason] or confirmed
+    return max(pool, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
+
+
+def _trust_gap(reason: Reason) -> str:
+    """What keeps a lone confirmed reason short of full ``confirmed`` trust --
+    used only when no other reason names a sharper gap."""
+    if reason.assurance != ASSURANCE_BENCHMARKED:
+        return "CyberGraph has not benchmarked this analysis for this language yet."
+    if reason.evidence != EVIDENCE_STRONG:
+        return "The evidence trail behind this finding is incomplete."
+    return ""
+
+
+def _top_gap(
+    epistemic: list[Reason], primary: Reason, checks: tuple[CheckResult, ...]
+) -> str:
+    """The single most load-bearing evidence gap alongside the primary reason:
+    the highest-impact unresolved/unsupported reason other than the primary one,
+    or -- when there is none -- what keeps the primary reason itself short of
+    full confirmation."""
+    others = [r for r in epistemic if r is not primary and r.status in _THIN_STATUSES]
+    if others:
+        top = max(others, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
+        return _claim_text(top, checks)
+    return _trust_gap(primary)
+
+
+def _verbose_block(verdict: Verdict) -> list[str]:
+    """The full epistemic block behind ``[Why?]`` (Law 5: drill-down, never hidden).
+
+    Every field a reason carries, plus the confirmed/not-established evidence
+    split -- passed checks and the capabilities this change touched but
+    CyberGraph could not evaluate.
+    """
+    lines = ["", "[Why?]", f"  Decision: {verdict.state.upper()}"]
+    if verdict.primary_reason:
+        lines.append(f"  Primary reason: {verdict.primary_reason}")
+    for reason in verdict.reasons:
+        lines.append(
+            f"  - Status: {reason.status or 'n/a'}  Evidence: {reason.evidence or 'n/a'}  "
+            f"Assurance: {reason.assurance or 'n/a'}  Impact: {reason.impact or 'n/a'}"
+        )
+        lines.append(f"      {reason.headline}{_where(reason)}")
+
+    passed = [check for check in verdict.checks if check.status == PASS]
+    if passed:
+        lines.extend(["", "Confirmed (checks that ran and found nothing):"])
+        lines.extend(f"  ok  {label_for(check.capability_id)}" for check in passed)
+
+    if verdict.not_evaluated:
+        lines.extend(["", "Not established (CyberGraph could not evaluate these):"])
+        lines.extend(f"  --  {label}" for label in verdict.not_evaluated)
+
+    return lines
+
+
+def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
+    """Render for a terminal reader. Never claims more than was checked.
+
+    Collapsed by default (spec §3): a decision line, then a single warranted
+    reason (``primary_reason``, worded via ``assurance.phrase_for`` so the verb
+    is always bounded by trust) plus the single most load-bearing evidence gap,
+    then a ``[Why?]`` affordance. A thin result -- no confirmed regression, only
+    unresolved/unsupported checks -- is a first-class outcome: every gap is
+    named with its own reason string, never a bare status token.
+
+    Pass ``verbose=True`` for the full epistemic block (status/evidence/
+    assurance/impact plus the confirmed/not-established evidence split).
+    Detail collapses; a limitation is never hidden even in the default view
+    (Law 5) -- a declared-policy regression is always listed, and the default
+    view always names *some* warranted reason when one exists.
+    """
     lines: list[str] = []
     if verdict.state == STATE_ACCEPT:
         lines.append("No issues found in the checks CyberGraph ran.")
     else:
+        epistemic = [r for r in verdict.reasons if r.reason_class]
+        policy_reasons = [r for r in verdict.reasons if not r.reason_class]
+        confirmed = [r for r in epistemic if r.status == STATUS_CONFIRMED]
+        thin = [r for r in epistemic if r.status in _THIN_STATUSES]
+
         count = len(verdict.reasons)
         noun = "thing needs" if count == 1 else "things need"
         lines.append(f"{count} {noun} your attention before shipping.")
         lines.append("")
-        for reason in verdict.reasons:
-            where = f" ({reason.file_path}:{reason.line})" if reason.file_path else ""
-            lines.append(f"  - {reason.headline}{where}")
 
-    passed = [check for check in verdict.checks if check.status == PASS]
-    if passed:
-        lines.extend(["", "Verified:"])
-        lines.extend(f"  ok  {label_for(check.capability_id)}" for check in passed)
+        if confirmed:
+            primary = _select_primary(confirmed, verdict.primary_reason)
+            lines.append(_claim_text(primary, verdict.checks))
+            gap = _top_gap(epistemic, primary, verdict.checks)
+            if gap:
+                lines.append(gap)
+        elif thin:
+            plural = "thing" if len(thin) == 1 else "things"
+            lines.append(
+                f"Verification incomplete: no confirmed regressions, but {len(thin)} "
+                f"{plural} could not be fully evaluated:"
+            )
+            lines.extend(f"  - {_claim_text(reason, verdict.checks)}" for reason in thin)
 
-    if verdict.not_evaluated:
-        lines.extend(["", "Not evaluated:"])
-        lines.extend(f"  --  {label}" for label in verdict.not_evaluated)
+        for reason in policy_reasons:
+            lines.append(f"  - {reason.headline}{_where(reason)}")
+
+        lines.append("")
+        lines.append(
+            "[Why?] Pass verbose=True (or --verbose) for the full evidence, "
+            "coverage, and impact detail."
+        )
+
+    if verbose:
+        lines.extend(_verbose_block(verdict))
 
     return "\n".join(lines)
 
