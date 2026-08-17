@@ -30,3 +30,6 @@ build/
 # be checked against a committed artifact is the failure this project exists to
 # avoid. Regenerate with `python benchmark/run_eval.py` and
 # `python benchmark/run_precision.py`.
+
+# Internal, non-public notes (strategy, GTM) — never commit
+internal/
