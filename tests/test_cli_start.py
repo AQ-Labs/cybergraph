@@ -13,7 +13,7 @@ Two paths, dispatched on whether there is a pending change to check:
 import subprocess
 from pathlib import Path
 
-from cybergraph.cli import main
+from cybergraph.cli import _has_pending_change, main
 
 FASTAPI_SINK_APP = '''
 from fastapi import FastAPI
@@ -170,3 +170,35 @@ def test_clean_tree_with_no_findings_is_still_a_scan_not_an_accept(tmp_path, cap
     assert "Verdict: ACCEPT" not in out
     assert "No issues found in the checks CyberGraph ran." not in out
     assert "scanned the current code" in out.lower()
+
+
+def test_non_git_directory_takes_the_scan_path_not_a_bare_accept(tmp_path, capsys):
+    """The most extreme form of the bug this task fixed: a plain directory
+    with no ``.git`` at all (no base to ever diff against) must never route
+    through the change-verdict path. ``resolve_revisions`` reports
+    ``changed_files=()`` for a non-git dir, so ``_has_pending_change`` must
+    be False, and ``_run_start`` must take the standing-code scan path --
+    never printing a bare change-style ACCEPT."""
+    (tmp_path / "app.py").write_text(CLEAN_APP, encoding="utf-8")
+    assert not (tmp_path / ".git").exists()
+
+    assert _has_pending_change(tmp_path) is False
+
+    rc = main([str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "not a change verdict" in out.lower()
+    assert "scanned the current code" in out.lower()
+    assert "Verdict: ACCEPT" not in out
+    assert "No issues found in the checks CyberGraph ran." not in out
+
+
+def test_frameworkless_repo_reports_framework_unknown(tmp_path, capsys):
+    """A repo with no web framework and no dependency manifest renders the
+    new fallback label ``"Framework: unknown"`` -- not just the absence of
+    the old, wrong "No web framework detected" string, but the presence of
+    the correct one."""
+    _write_clean_committed_repo(tmp_path)
+    main([str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "Framework: unknown" in out
