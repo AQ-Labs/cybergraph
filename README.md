@@ -54,6 +54,15 @@ CyberGraph connects the dots and turns the answer into a **decision** made *inde
 ## Current capabilities
 
 - Builds a local SQLite graph in `.cybergraph/graph.db`.
+- **One-command verdict** — `cybergraph .` detects a pending change, verifies it, and prints a
+  *collapsed* verdict: a decision line plus the single most load-bearing reason, worded in
+  language **bounded by how well that finding is validated** — "Confirmed" only when the evidence
+  is strong *and* the capability is benchmark-backed, otherwise "Possible" or "could not verify."
+  On a clean tree it scans the current code and says so, rather than printing a bare ACCEPT on
+  un-diffed history.
+- **Policy gate for CI** — a declared `[verification]` policy turns a verdict into a
+  `block` / `warn` / `info` gate, *without ever changing the verdict itself* (no configuration can
+  turn a REVIEW into an ACCEPT); `--fail-on-review` now fails the build only when the gate blocks.
 - Analyzes **five languages**: Python (FastAPI/Flask/Django), JavaScript/TypeScript (Express/Next.js), Go (net/http, Gin, Echo), Java (Spring), and C# (ASP.NET Core) — through a shared analyzer contract with graceful fallback for the rest.
 - Extracts functions, calls, route entrypoints, auth/authz guards, validators, user-input/data-flow edges, secret access/exposure, cloud resources, and sensitive sink calls.
 - **Config posture** — open Firebase security rules, Supabase tables with row-level
@@ -107,6 +116,7 @@ Supported Python: 3.10, 3.11, 3.12, 3.13.
 
 ```bash
 cybergraph quickstart .        # zero-to-report: init, build, analyze, open report
+cybergraph .                   # one command: verify a pending change, or scan the current code if there's none
 cybergraph init .
 cybergraph doctor .
 cybergraph check .            # does this change preserve the guarantees CyberGraph can verify?
@@ -145,12 +155,19 @@ Built security graph for examples/vulnerable-fastapi
 Nodes: 15 | Edges: 28 | Findings: 1
 ```
 
-Typical PR comment sections:
+Typical PR comment — projected from the canonical verdict, so it leads with the decision, the
+single primary reason in trust-bounded language, and the policy gate, then keeps the "what
+changed" delta below:
 
 ```text
-Risk: medium
-What Changed: CyberGraph detected 2 entrypoints, 1 sensitive sink edge, 1 finding in changed files.
-What To Check Next: Confirm changed entrypoints require authentication or authorization when needed.
+## CyberGraph Security Review
+Decision: REVIEW
+Confirmed: Unsafe database queries: `execute` sends this value to the database as part of a query
+_1 more item surfaced by this check — run `cybergraph check --json` for the full list._
+Gate: block
+
+### What Changed
+CyberGraph detected 1 changed file, 1 entrypoint, 1 sensitive sink edge, 1 finding in changed files, 1 worsened reachable risk.
 ```
 
 Import scanner results:
@@ -221,6 +238,15 @@ there is positive evidence it was analyzed. `--json` emits the same structure a 
 step can consume; the CI workflow (`.github/workflows/cybergraph.yml`) runs it on every pull
 request as a non-gating notification (no `--fail-on-review`) until the field false-positive
 rate is measured.
+
+**Enforcement is a separate layer from the verdict.** The verdict says what CyberGraph found;
+an optional `[verification]` policy in `cybergraph.policy.toml` decides what CI does about it,
+producing a `block` / `warn` / `info` **gate**. By design the gate never rewrites the verdict —
+no policy setting can turn a REVIEW into an ACCEPT — it only sets whether the build should stop.
+Defaults block a confirmed regression and an unknown on a protected route, and treat a general
+"couldn't fully verify" review as advisory. Because of this, `cybergraph check --fail-on-review`
+now exits non-zero **only when the gate blocks**, not on every REVIEW; a change that is a REVIEW
+purely because something couldn't be evaluated no longer fails the build unless you ask it to.
 
 `cybergraph check` verifies against a declared **security policy** — the routes/functions that
 are expected to require authentication, ownership checks, or other guards. Bootstrap one from
