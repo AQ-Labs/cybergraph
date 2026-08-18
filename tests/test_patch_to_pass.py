@@ -25,10 +25,24 @@ sys.path.insert(0, str(BENCHMARK_DIR))
 
 from patch_to_pass import (  # noqa: E402
     EVASIONS,
+    GENUINE_FIX_CASE,
     IDENTITY_SANITIZER_CASE,
     KNOWN_GAPS,
     _flips_to_accept,
 )
+
+
+def test_genuine_fix_flips_to_accept(tmp_path):
+    """Non-vacuity control: a real fix (taint actually removed) MUST flip.
+
+    Without this, "no adversarial case flips" is indistinguishable from "no
+    case can ever flip" -- e.g. some unrelated reason forcing every verdict
+    in this module to REVIEW regardless of what the SQL detector found. This
+    proves ACCEPT is genuinely reachable, so the two tests below are
+    evidence the evasions/sanitizer were caught, not an artifact of a
+    structurally-unreachable ACCEPT branch.
+    """
+    assert _flips_to_accept(tmp_path, GENUINE_FIX_CASE) is True
 
 
 def test_detector_evasion_does_not_flip_review_to_accept(tmp_path):

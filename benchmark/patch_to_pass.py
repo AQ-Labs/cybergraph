@@ -38,6 +38,14 @@ never silently patched over by softening or deleting the case:
 recorded backlog exactly -- a new/unrecorded flip is a regression (red), and
 a recorded gap that stops flipping is a stale backlog entry (also red, so the
 backlog shrinks visibly instead of rotting silently).
+
+:data:`GENUINE_FIX_CASE` is the harness's own non-vacuity control: a real fix
+(the taint actually removed) that MUST flip to ACCEPT. Without it, "none of
+the gaming cases flip" cannot be told apart from "nothing can ever flip" --
+e.g. an unrelated always-on REVIEW reason (a missing security-policy
+declaration, say) forcing every verdict in this module to REVIEW regardless
+of what the SQL detector found. Every fixture below therefore ships a minimal
+``cybergraph.policy.toml`` for exactly this reason -- see :data:`_POLICY_TOML`.
 """
 
 from __future__ import annotations
@@ -82,6 +90,22 @@ def list_users(name: str):
     query = f"SELECT * FROM users WHERE name = '{name}'"
     return cursor.execute(query)
 '''
+
+# `/users` is a route, so `evaluate_policy` gives it a `ProtectedSet` entity
+# the moment ANY fixture here is checked. Without a declared policy file,
+# `declared_login_rules` fires UNKNOWN unconditionally whenever a route
+# exists and no policy is declared (checks.py: "no security policy is
+# declared, so there is nothing to check against") -- and `decide` forces
+# STATE_REVIEW on any non-empty reason, confirmed or not. Left out, EVERY
+# verdict in this module would land on REVIEW regardless of what the SQL
+# detector found, making `_flips_to_accept`'s ACCEPT branch dead code: a
+# vacuous harness that cannot tell "the evasion was caught" from "ACCEPT was
+# structurally unreachable." A bare `version = 1`, no rules, is enough:
+# `/users` is then an entity nothing constrains, so `declared_login_rules`
+# reaches PASS (not UNKNOWN, not FAIL) and a genuinely-clean app can actually
+# reach ACCEPT. Mirrors `change_assurance.POLICY_PRESERVING_REFACTOR`'s reason
+# for shipping a policy file alongside its fixtures.
+_POLICY_TOML = "version = 1\n"
 
 
 @dataclass(frozen=True)
@@ -172,6 +196,17 @@ def list_users(name: str):
 
 IDENTITY_SANITIZER_CASE = AdversarialCase("identity_sanitizer", _IDENTITY_SANITIZER_FIX_APP)
 
+# --- GENUINE_FIX_CASE: the non-vacuity control -------------------------------
+#
+# A real fix -- back to the parameterized query `_SAFE_BASE_APP` already uses
+# as the shared baseline -- with the taint actually removed this time. This
+# case exists to prove `_flips_to_accept` CAN observe a flip to ACCEPT at
+# all: without it, "no adversarial case flips" is indistinguishable from "no
+# case can ever flip, because something else always forces REVIEW" (which is
+# exactly the bug the policy-file fixture above fixes). Every gaming case
+# above must NOT flip; this one MUST.
+GENUINE_FIX_CASE = AdversarialCase("genuine_fix", _SAFE_BASE_APP)
+
 # --- KNOWN_GAPS: the honest backlog of constructions that flip today --------
 #
 # Keyed by `AdversarialCase.name` (an `EVASIONS` key, or
@@ -203,8 +238,8 @@ def _flips_to_accept(tmp_path: Path, case: AdversarialCase) -> bool:
     """
     naive_case = PatchPairCase(
         name=case.name,
-        files_a={"app.py": _SAFE_BASE_APP},
-        files_head={"app.py": _NAIVE_TAINTED_APP},
+        files_a={"app.py": _SAFE_BASE_APP, "cybergraph.policy.toml": _POLICY_TOML},
+        files_head={"app.py": _NAIVE_TAINTED_APP, "cybergraph.policy.toml": _POLICY_TOML},
         expected="regression",
         vuln_class="sql_injection",
         language="python",
