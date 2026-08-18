@@ -24,6 +24,7 @@ from cybergraph.security.capability import (
     label_for,
 )
 from cybergraph.security.policy import PolicyChange, ProtectedEntity, ProtectedSet
+from cybergraph.security.review import RiskDelta
 from cybergraph.security.verdict import (
     STATE_ACCEPT,
     STATE_REVIEW,
@@ -458,3 +459,93 @@ def test_headline_honors_primary_reason_even_when_a_confirmed_reason_exists():
     # Nothing is dropped (Law 5): the low-impact confirmed reason still
     # surfaces in the body, just not as the headline.
     assert label_for("sql_construction") in out
+
+
+# --- Task 5 fix round 2: ranking is TRUST-FIRST, not impact-first, once
+# protected_boundary ties -------------------------------------------------
+
+
+def test_headline_prefers_confirmed_benchmarked_over_inventory_possible_of_higher_impact():
+    """Checkpoint regression: three reasons fire on the same tainted execute() --
+    a benchmark-backed CONFIRMED sql_construction (impact=high), an
+    inventory-grade CONFIRMED reachable_data_paths (impact=critical), and an
+    inventory-grade UNRESOLVED declared_login_rules (impact=critical). None of
+    these sit on a protected boundary, so trust must break the tie: the
+    substantiated confirmed SQL finding leads, never collapsed behind a
+    merely-inventory "possible"/"could not verify" reason of higher nominal
+    impact."""
+    sql_finding = Finding("CG-SQL-EXEC", "high", "unsafe query", "app.py", 7,
+                          evidence="app.py:7 -> cursor.execute")
+    risk_deltas = [
+        RiskDelta("added", "sig", "entry", "sink", 90, "critical", True, ("app.py",))
+    ]
+    checks = [
+        CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),
+        CheckResult("reachable_data_paths", FAIL, "new route reaches sensitive code", 1),
+        CheckResult("declared_login_rules", UNKNOWN, "could not resolve the guard", 1),
+    ]
+    verdict = decide(checks, [], PROV, findings=[sql_finding], risk_deltas=risk_deltas)
+    assert verdict.primary_reason == REASON_CONFIRMED_REGRESSION
+
+    out = format_verdict(verdict)
+    headline = out.splitlines()[2]  # after the count line and its trailing blank line
+
+    assert "Confirmed" in headline
+    assert label_for("sql_construction") in headline
+    assert label_for("reachable_data_paths") not in headline
+
+    # Present in the collapsed default view, not only behind [Why?].
+    assert label_for("sql_construction") in out
+    assert "[Why?]" in out
+
+
+def test_protected_boundary_still_outranks_trust():
+    """Trust must NOT override protected_boundary: a critical unsupported
+    change on a protected boundary still headlines over a benchmark-backed
+    confirmed regression elsewhere (no regression on the existing ranking
+    guarantee -- see test_primary_reason_prefers_protected_unsupported_over_
+    low_impact_confirmed for the decide()-level assertion)."""
+    protected = ProtectedSet(
+        {"app.rb::h": ProtectedEntity("app.rb::h", "/x", "app.rb", 1, True)}
+    )
+    checks = [
+        CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),
+        CheckResult("source_analysis_support", NOT_SUPPORTED, "no analyzer yet for app.rb", 1),
+    ]
+    low_finding = Finding("CG-SQL-EXEC", "low", "minor", "other.py", 3,
+                          evidence="other.py:3 -> cursor.execute")
+    verdict = decide(
+        checks, [], PROV,
+        findings=[low_finding],
+        protected_set=protected,
+        changed_files=("other.py", "app.rb"),
+    )
+    assert verdict.primary_reason == REASON_UNSUPPORTED
+
+    out = format_verdict(verdict)
+    headline = out.splitlines()[2]
+    assert label_for("source_analysis_support") in headline
+    assert label_for("sql_construction") not in headline
+
+
+def test_trust_outranks_impact_when_neither_reason_is_protected():
+    """Edge case named by the checkpoint review: a benchmark-backed CONFIRMED
+    LOW-impact reason vs. an inventory-grade CONFIRMED CRITICAL-impact reason,
+    neither on a protected boundary -- trust wins before impact."""
+    low_finding = Finding("CG-SQL-EXEC", "low", "minor", "app.py", 3,
+                          evidence="app.py:3 -> cursor.execute")
+    risk_deltas = [
+        RiskDelta("added", "sig", "entry", "sink", 90, "critical", True, ("app.py",))
+    ]
+    checks = [
+        CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1),
+        CheckResult("reachable_data_paths", FAIL, "new route reaches sensitive code", 1),
+    ]
+    verdict = decide(checks, [], PROV, findings=[low_finding], risk_deltas=risk_deltas)
+    assert verdict.primary_reason == REASON_CONFIRMED_REGRESSION
+
+    out = format_verdict(verdict)
+    headline = out.splitlines()[2]
+    assert "Confirmed" in headline
+    assert label_for("sql_construction") in headline
+    assert label_for("reachable_data_paths") not in headline

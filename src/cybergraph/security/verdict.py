@@ -21,6 +21,9 @@ from pathlib import Path
 from cybergraph.graph import UNVERIFIED_SUFFIX, Finding, GraphStore
 from cybergraph.security.assurance import (
     ASSURANCE_BENCHMARKED,
+    ASSURANCE_BETA,
+    ASSURANCE_INVENTORY,
+    ASSURANCE_UNSUPPORTED,
     EVIDENCE_NONE,
     EVIDENCE_PARTIAL,
     EVIDENCE_STRONG,
@@ -32,6 +35,7 @@ from cybergraph.security.assurance import (
     STATUS_UNRESOLVED,
     STATUS_UNSUPPORTED,
     assurance_for,
+    effective_trust,
     has_epistemic_upgrade,
     phrase_for,
 )
@@ -123,6 +127,25 @@ _REASON_CLASS_RANK = {
     REASON_UNRESOLVED: 1,
     REASON_UNSUPPORTED: 0,
 }
+
+# Effective-trust tiers as a rank, mirroring assurance's own evidence/assurance
+# scale pairing index-for-index (Law 3): none/unsupported=0 ... strong/
+# benchmark_backed=3. Used to rank a reason by how *substantiated* it is,
+# independent of its nominal impact -- an inventory-grade "possible" reason
+# must never out-headline a benchmark-backed "confirmed" one just because its
+# impact label happens to read higher (design §4).
+_TRUST_RANK: dict[str, int] = {
+    EVIDENCE_NONE: 0, ASSURANCE_UNSUPPORTED: 0,
+    EVIDENCE_WEAK: 1, ASSURANCE_INVENTORY: 1,
+    EVIDENCE_PARTIAL: 2, ASSURANCE_BETA: 2,
+    EVIDENCE_STRONG: 3, ASSURANCE_BENCHMARKED: 3,
+}
+
+
+def _trust_rank(reason: Reason) -> int:
+    """0-3: how substantiated ``reason`` is -- the weaker of its evidence
+    strength and capability assurance (``assurance.effective_trust``, Law 3)."""
+    return _TRUST_RANK.get(effective_trust(reason.evidence, reason.assurance), -1)
 
 
 def _language_for(file_path: str) -> str | None:
@@ -231,10 +254,12 @@ def _reason_for_check(
 
 
 def _primary_reason(reasons: list[Reason], protected_flags: list[bool]) -> str:
-    """The reason maximizing ``(impact_rank, protected_boundary, reason_severity)``.
-
-    Not a fixed enum-order pick (design §4): a critical unsupported change on a
-    protected boundary can outrank a low-impact confirmed regression.
+    """The reason maximizing ``(protected_boundary, effective_trust, impact_rank,
+    reason_severity)`` -- trust-first, not impact-first, once protected_boundary
+    ties (design §4): an inventory-grade "possible" reason must never out-headline
+    a benchmark-backed "confirmed" one just because its nominal impact reads
+    higher. ``protected_boundary`` still outranks everything else: a critical
+    unsupported change on a declared boundary leads regardless of trust.
     """
     candidates = [
         (reason, protected)
@@ -246,8 +271,9 @@ def _primary_reason(reasons: list[Reason], protected_flags: list[bool]) -> str:
     best_reason, _ = max(
         candidates,
         key=lambda pair: (
-            _IMPACT_RANK.get(pair[0].impact, -1),
             pair[1],
+            _trust_rank(pair[0]),
+            _IMPACT_RANK.get(pair[0].impact, -1),
             _REASON_CLASS_RANK.get(pair[0].reason_class, -1),
         ),
     )
@@ -379,10 +405,10 @@ def _claim_text(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
 
 
 def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
-    """The reason ``decide`` already ranked highest (impact x protected-boundary
-    x severity), re-found by its ``reason_class`` across the FULL epistemic set --
-    confirmed, unresolved, and unsupported reasons alike (falling back to impact
-    alone if none match).
+    """The reason ``decide`` already ranked highest (protected-boundary x
+    effective-trust x impact x severity), re-found by its ``reason_class``
+    across the FULL epistemic set -- confirmed, unresolved, and unsupported
+    reasons alike (falling back to the whole set if none match).
 
     A thin reason can rank above a low-impact confirmed one -- a CRITICAL
     unsupported/unresolved change on a protected boundary outranks a low-impact
@@ -390,9 +416,22 @@ def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
     headline the reader sees must say so: searching only the confirmed subset
     here would silently downgrade that top risk to a secondary "gap" line
     whenever any confirmed reason -- however minor -- also happened to exist.
+
+    ``reason_class`` alone does not always pick a single reason (two FAILed
+    checks are both ``confirmed_regression``, say) -- ties within the pool are
+    broken trust-first, then by impact, mirroring ``decide``'s own key minus
+    ``protected_boundary`` (already baked into which class ``decide`` picked;
+    a specific reason's own protected status isn't carried on ``Reason``).
     """
     pool = [r for r in epistemic if r.reason_class == primary_reason] or epistemic
-    return max(pool, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
+    return max(
+        pool,
+        key=lambda r: (
+            _trust_rank(r),
+            _IMPACT_RANK.get(r.impact, -1),
+            _REASON_CLASS_RANK.get(r.reason_class, -1),
+        ),
+    )
 
 
 def _trust_gap(reason: Reason) -> str:
