@@ -520,13 +520,27 @@ _FRAMEWORK_DEPENDENCY_NAMES = {
 }
 
 
-def _detect_framework(store: GraphStore) -> str | None:
+# Last-resort signal for languages (Python) whose route decorators don't
+# self-report a framework and that declare no dependency manifest CyberGraph
+# parses: a literal import keyword in the entrypoint-bearing source file
+# itself. Order matters -- checked in this sequence, first match wins.
+_FRAMEWORK_IMPORT_HINTS = (
+    ("fastapi", "fastapi"),
+    ("flask", "flask"),
+    ("django", "django"),
+)
+
+
+def _detect_framework(repo: Path, store: GraphStore) -> str | None:
     """Best-effort framework name for the ``cybergraph .`` start summary.
 
-    No new analysis: reuses the ``framework`` property analyzers already
-    attach to route nodes (JS/C#/Java/Django/Terraform) and to FastAPI's
-    ``Depends()`` guard edges, falling back to a declared dependency name
-    when nothing in the graph itself names one.
+    Reuses the ``framework`` property analyzers already attach to route nodes
+    (JS/C#/Java/Django/Terraform) and to FastAPI's ``Depends()`` guard edges,
+    then a declared dependency name, then -- because a repo with neither of
+    those two signals is common for Python -- a literal import keyword read
+    straight from the entrypoint-bearing source files the graph already
+    identified. Returns ``None`` only when none of these find anything; the
+    caller renders that as ``unknown``, never a false "no framework" claim.
     """
     tags: Counter[str] = Counter()
     for row in store.conn.execute(
@@ -545,14 +559,35 @@ def _detect_framework(store: GraphStore) -> str | None:
             if mapped:
                 tags[mapped] += 1
     if not tags:
+        tags.update(_framework_hints_from_entrypoint_sources(repo, store))
+    if not tags:
         return None
     key = tags.most_common(1)[0][0]
     return _FRAMEWORK_LABELS.get(key, key.capitalize())
 
 
+def _framework_hints_from_entrypoint_sources(repo: Path, store: GraphStore) -> Counter[str]:
+    hits: Counter[str] = Counter()
+    rows = store.conn.execute(
+        "SELECT DISTINCT source FROM edges WHERE kind = ?", (EDGE_EXPOSES_ENTRYPOINT,)
+    ).fetchall()
+    for row in rows:
+        try:
+            text = (repo / row["source"]).read_text(encoding="utf-8", errors="ignore").lower()
+        except OSError:
+            continue
+        for needle, key in _FRAMEWORK_IMPORT_HINTS:
+            if needle in text:
+                hits[key] += 1
+                break
+    return hits
+
+
 def _start_summary(repo: Path) -> str:
     """One line: detected framework, route count, sink count -- all counted
-    straight off the graph ``check_change`` just (re)built, never invented."""
+    straight off the graph ``check_change``/the scan just (re)built, never
+    invented. ``framework: unknown`` when detection genuinely finds nothing --
+    never a false "no framework" claim on a repo that plainly has one."""
     store = GraphStore.open_for_repo(repo)
     try:
         routes = store.conn.execute(
@@ -561,10 +596,10 @@ def _start_summary(repo: Path) -> str:
         sinks = store.conn.execute(
             "SELECT COUNT(*) FROM edges WHERE kind = ?", (EDGE_REACHES_SINK,)
         ).fetchone()[0]
-        framework = _detect_framework(store)
+        framework = _detect_framework(repo, store)
     finally:
         store.close()
-    label = framework or "No web framework detected"
+    label = f"Framework: {framework}" if framework else "Framework: unknown"
     return f"{label} | {routes} route(s) | {sinks} sink(s)"
 
 
@@ -580,10 +615,95 @@ def _next_step_suggestion(verdict: Verdict) -> str:
     )
 
 
+def _scan_next_step_suggestion(result) -> str:
+    if result.top_risks:
+        return (
+            'Next: cybergraph explain "<question>" for cited evidence on a specific risk, '
+            "or cybergraph visualize for the full report."
+        )
+    return (
+        "Next: cybergraph visualize for the full report. Make a change and re-run "
+        "cybergraph . to get a change verdict for just that diff."
+    )
+
+
+def _scan_coverage_note(result) -> str:
+    """Named explicitly so a scan can never be mistaken for a change verdict
+    (Laws 1 & 5): this ran CyberGraph's analyzers over the code as committed,
+    not a diff, and says so instead of implying a clean bill of health."""
+    lines = [
+        "This is a standing-code scan, not a change verdict -- there was no "
+        "pending change to check against, so CyberGraph analyzed the code as "
+        "committed instead. The risks above are what its analyzers found; "
+        "run `cybergraph check` again after your next change for a "
+        "change-scoped verdict.",
+    ]
+    if result.errors:
+        lines.append(
+            "Some analyses could not run and are not reflected above: "
+            + ", ".join(sorted(result.errors)) + "."
+        )
+    return "\n".join(lines)
+
+
+def _has_pending_change(repo: Path) -> bool:
+    """Whether there is a change for ``check_change`` to actually verify.
+
+    ``check_change`` compares the worktree/HEAD to a base; on a clean tree
+    with nothing to diff against (or no git history at all) that comparison
+    is HEAD-against-itself, which prints a bare ACCEPT that reads as "your
+    code is secure" even when the *existing* code was never checked. Fail
+    toward the honest answer: treat "could not establish a diff" the same as
+    "no diff" -- both mean there is nothing to verify a change *against*, so
+    ``_run_start`` scans the standing code instead.
+    """
+    from .security.revisions import resolve_revisions
+
+    return bool(resolve_revisions(repo).changed_files)
+
+
+def _run_start_change(repo: Path) -> int:
+    """A pending change exists: run the same change-verdict `check` runs,
+    collapsed to its default view."""
+    verdict = check_change(repo)
+    print(f"Verdict: {verdict.state.upper()}")
+    print(format_verdict(verdict))
+    print()
+    print(_start_summary(repo))
+    print()
+    print(_next_step_suggestion(verdict))
+    return 0
+
+
+def _run_start_scan(repo: Path) -> int:
+    """No pending change to verify: scan the standing code and rank its real
+    risks instead of printing a false "nothing changed" ACCEPT (the exact
+    false-reassurance the verdict layer exists to forbid)."""
+    from .orchestrator import run_full_analysis
+    from .output import render_text, should_color
+
+    result = run_full_analysis(repo)
+    print("No pending change to verify -- scanned the current code instead:")
+    print()
+    print(render_text(result, color=should_color()))
+    print()
+    print(_scan_coverage_note(result))
+    print()
+    print(_start_summary(repo))
+    print()
+    print(_scan_next_step_suggestion(result))
+    return 0
+
+
 def _run_start(repo: Path) -> int:
     """``cybergraph .`` / ``cybergraph <path>`` / ``cybergraph`` (cwd): the
-    golden-path, no-subcommand entry point -- detect, build if needed, check,
-    and print the collapsed verdict plus what to run next.
+    golden-path, no-subcommand entry point.
+
+    Dispatches on whether there is a pending change: a change gets the
+    collapsed change-verdict (``check_change``); a clean tree (or no base to
+    diff against) gets a standing-code risk scan instead, because a
+    HEAD-against-itself "diff" is empty by construction and printing that as
+    ACCEPT would claim the existing code was verified when it never was.
 
     Advisory by default, matching the hook's default: a REVIEW never fails
     this exit code on its own, since there is no ``--fail-on-review`` to opt
@@ -594,14 +714,9 @@ def _run_start(repo: Path) -> int:
         return 1
     if not _graph_built(repo):
         build_graph(repo)
-    verdict = check_change(repo)
-    print(f"Verdict: {verdict.state.upper()}")
-    print(format_verdict(verdict))
-    print()
-    print(_start_summary(repo))
-    print()
-    print(_next_step_suggestion(verdict))
-    return 0
+    if _has_pending_change(repo):
+        return _run_start_change(repo)
+    return _run_start_scan(repo)
 
 
 def _run_hook(args) -> int:
