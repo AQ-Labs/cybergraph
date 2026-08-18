@@ -443,6 +443,23 @@ def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
     )
 
 
+def select_primary_reason(verdict: Verdict) -> Reason | None:
+    """The single reason every presentation surface must headline for ``verdict``.
+
+    A thin, public wrapper around :func:`_select_primary` so a second surface
+    (the PR comment, the MCP tool, ...) can pick the identical reason the CLI's
+    ``format_verdict`` headlines for the same ``Verdict`` -- without either
+    duplicating the trust/impact tiebreak here or reaching across modules for
+    a private name (Law 4: a projection surface renders this decision, it
+    never re-derives it). Returns ``None`` only when ``verdict`` has no
+    epistemic reason at all (an all-policy or empty-reason Verdict).
+    """
+    epistemic = [r for r in verdict.reasons if r.reason_class]
+    if not epistemic:
+        return None
+    return _select_primary(epistemic, verdict.primary_reason)
+
+
 def _trust_gap(reason: Reason) -> str:
     """What keeps a lone confirmed reason short of full ``confirmed`` trust --
     used only when no other reason names a sharper gap. Guarded like every
@@ -537,8 +554,11 @@ def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
         if confirmed:
             # Headline honors decide()'s FULL-reason-set ranking, not "any
             # confirmed reason wins": a protected-boundary CRITICAL unsupported
-            # change must still lead over a low-impact confirmed one.
-            primary = _select_primary(epistemic, verdict.primary_reason)
+            # change must still lead over a low-impact confirmed one. Routed
+            # through the public select_primary_reason so every surface that
+            # headlines a Verdict picks the identical reason (Law 4).
+            primary = select_primary_reason(verdict)
+            assert primary is not None, "confirmed reasons imply a non-empty epistemic pool"
             lines.append(_claim_text(primary, verdict.checks))
             gap = _top_gap(epistemic, primary, verdict.checks)
             if gap:

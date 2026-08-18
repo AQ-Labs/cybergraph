@@ -21,7 +21,7 @@ from cybergraph.security.check import check_change
 from cybergraph.security.layers import summarize_layers
 from cybergraph.security.policy_gate import GATE_BLOCK, gate_for, load_verification_config
 from cybergraph.security.review import review_security_delta
-from cybergraph.security.verdict import STATE_REVIEW, Reason, Verdict
+from cybergraph.security.verdict import STATE_REVIEW, Reason, Verdict, select_primary_reason
 
 
 def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
@@ -166,7 +166,12 @@ def _verdict_block(verdict: Verdict) -> list[str]:
     never a comment-local re-derivation of risk (Law 4)."""
     lines = [f"**Decision:** `{verdict.state.upper()}`"]
 
-    primary = _primary_reason_object(verdict)
+    # select_primary_reason is verdict.py's own tiebreak (trust x impact x
+    # severity across the FULL epistemic pool, not insertion order) -- reused
+    # here rather than re-implemented, so the PR headline and `cybergraph
+    # check`'s headline are guaranteed to pick the identical reason for the
+    # identical Verdict (Law 4: a projection never re-derives the decision).
+    primary = select_primary_reason(verdict)
     if primary is not None:
         lines.append("")
         lines.append(_reason_line(primary))
@@ -183,25 +188,13 @@ def _verdict_block(verdict: Verdict) -> list[str]:
         noun = "item" if len(remaining) == 1 else "items"
         lines.append("")
         lines.append(
-            f"_{len(remaining)} more {noun} surfaced by this check -- see the full "
-            "report for detail._"
+            f"_{len(remaining)} more {noun} surfaced by this check -- run "
+            "`cybergraph check --json` for the full list._"
         )
 
     lines.append("")
     lines.append(_gate_line(verdict))
     return lines
-
-
-def _primary_reason_object(verdict: Verdict) -> Reason | None:
-    """The reason ``decide`` already ranked highest, re-found by the
-    ``reason_class`` string ``Verdict.primary_reason`` carries. A projection,
-    not a re-ranking: this module never recomputes which reason leads."""
-    if not verdict.primary_reason:
-        return None
-    for reason in verdict.reasons:
-        if reason.reason_class == verdict.primary_reason:
-            return reason
-    return None
 
 
 def _reason_line(reason: Reason) -> str:

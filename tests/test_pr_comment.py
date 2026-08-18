@@ -4,14 +4,24 @@ from unittest.mock import patch
 
 from cybergraph.pr_comment import _reason_line, generate_pr_comment, write_pr_comment
 from cybergraph.security.assurance import (
+    ASSURANCE_BENCHMARKED,
     ASSURANCE_BETA,
+    ASSURANCE_UNSUPPORTED,
+    EVIDENCE_NONE,
     EVIDENCE_PARTIAL,
+    EVIDENCE_STRONG,
     REASON_UNRESOLVED,
     STATUS_UNRESOLVED,
     has_epistemic_upgrade,
     phrase_for,
 )
-from cybergraph.security.verdict import STATE_REVIEW, Provenance, Reason, Verdict
+from cybergraph.security.verdict import (
+    STATE_REVIEW,
+    Provenance,
+    Reason,
+    Verdict,
+    select_primary_reason,
+)
 
 
 def test_generate_pr_comment_returns_markdown_for_non_git_repo(tmp_path: Path) -> None:
@@ -155,3 +165,65 @@ def test_generate_pr_comment_beta_stack_finding_has_no_forbidden_upgrade(
 
     assert rendered_reason_line in comment
     assert has_epistemic_upgrade(rendered_reason_line, beta_reason.status) is False
+
+
+def test_generate_pr_comment_headlines_the_same_reason_as_select_primary_reason(
+    tmp_path: Path,
+) -> None:
+    """Regression for a Law-4 divergence: two reasons share ``reason_class ==
+    "unresolved"``, inserted low-priority-first. The primary line must be the
+    one ``verdict.py``'s own trust x impact tiebreak (``select_primary_reason``)
+    picks -- NOT the first one in insertion order -- so the PR comment can
+    never headline a lower-priority finding than `cybergraph check` would for
+    the identical Verdict."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    low_priority = Reason(
+        headline="A low-priority thing CyberGraph could not fully evaluate.",
+        file_path="a.py",
+        line=1,
+        rule_id="cloud_configuration",
+        kind="check_unknown",
+        status=STATUS_UNRESOLVED,
+        evidence=EVIDENCE_NONE,
+        assurance=ASSURANCE_UNSUPPORTED,
+        impact="low",
+        reason_class=REASON_UNRESOLVED,
+        protected=False,
+    )
+    high_priority = Reason(
+        headline="A high-priority thing CyberGraph could not fully evaluate.",
+        file_path="b.py",
+        line=2,
+        rule_id="declared_login_rules",
+        kind="check_unknown",
+        status=STATUS_UNRESOLVED,
+        evidence=EVIDENCE_STRONG,
+        assurance=ASSURANCE_BENCHMARKED,
+        impact="critical",
+        reason_class=REASON_UNRESOLVED,
+        protected=False,
+    )
+    # Inserted low-priority first: a naive "first reason of this class" pick
+    # would wrongly headline `low_priority`.
+    verdict = Verdict(
+        state=STATE_REVIEW,
+        reasons=(low_priority, high_priority),
+        checks=(),
+        not_evaluated=(),
+        provenance=Provenance(),
+        gate="",
+        primary_reason=REASON_UNRESOLVED,
+    )
+
+    expected = select_primary_reason(verdict)
+    assert expected is high_priority  # sanity: verdict.py itself picks the high one
+
+    with patch("cybergraph.pr_comment.check_change", return_value=verdict):
+        comment = generate_pr_comment(repo, base="HEAD~1")
+
+    assert high_priority.headline in comment
+    assert "b.py:2" in comment
+    assert low_priority.headline not in comment
+    assert "a.py:1" not in comment
