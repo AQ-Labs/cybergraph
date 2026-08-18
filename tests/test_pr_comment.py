@@ -1,7 +1,17 @@
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
-from cybergraph.pr_comment import generate_pr_comment, write_pr_comment
+from cybergraph.pr_comment import _reason_line, generate_pr_comment, write_pr_comment
+from cybergraph.security.assurance import (
+    ASSURANCE_BETA,
+    EVIDENCE_PARTIAL,
+    REASON_UNRESOLVED,
+    STATUS_UNRESOLVED,
+    has_epistemic_upgrade,
+    phrase_for,
+)
+from cybergraph.security.verdict import STATE_REVIEW, Provenance, Reason, Verdict
 
 
 def test_generate_pr_comment_returns_markdown_for_non_git_repo(tmp_path: Path) -> None:
@@ -53,3 +63,95 @@ def test_generate_pr_comment_includes_reachable_risk_deltas(tmp_path: Path) -> N
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def _dropped_guard_and_beta_stack_verdict() -> Verdict:
+    """A hand-built Verdict: a dropped-auth-guard policy reason (before/after
+    boundary story, reason_class == "") plus a beta-stack epistemic reason
+    (unresolved, low-assurance language) that must never read as "confirmed"."""
+    boundary_reason = Reason(
+        headline=(
+            "`/admin/users` no longer has a login check. "
+            "It had one on the base branch."
+        ),
+        rule_id="/admin/users",
+        kind="promise_broken",
+    )
+    beta_reason = Reason(
+        headline="Unsafe database queries: string-built SQL reaches a Go handler.",
+        file_path="services/orders/handler.go",
+        line=42,
+        rule_id="sql_construction",
+        kind="check_unknown",
+        status=STATUS_UNRESOLVED,
+        evidence=EVIDENCE_PARTIAL,
+        assurance=ASSURANCE_BETA,
+        impact="high",
+        reason_class=REASON_UNRESOLVED,
+        protected=False,
+    )
+    return Verdict(
+        state=STATE_REVIEW,
+        reasons=(boundary_reason, beta_reason),
+        checks=(),
+        not_evaluated=(),
+        provenance=Provenance(),
+        gate="",
+        primary_reason=REASON_UNRESOLVED,
+    )
+
+
+def test_generate_pr_comment_is_a_projection_of_the_verdict(tmp_path: Path) -> None:
+    """Law 4: the PR comment renders check_change's Verdict, it never re-derives
+    its own decision. Mock check_change and assert its reasons show up verbatim."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text("def app():\n    return 1\n", encoding="utf-8")
+    verdict = _dropped_guard_and_beta_stack_verdict()
+    boundary_reason, beta_reason = verdict.reasons
+
+    with patch("cybergraph.pr_comment.check_change", return_value=verdict) as mock_check:
+        comment = generate_pr_comment(repo, base="HEAD~1")
+
+    mock_check.assert_called_once_with(repo.resolve(), base="HEAD~1")
+
+    # Decision, driven by verdict.state.
+    assert "`REVIEW`" in comment
+
+    # primary_reason worded via assurance.phrase_for -- never hand-written.
+    phrase = phrase_for(beta_reason.status, beta_reason.evidence, beta_reason.assurance)
+    assert phrase.capitalize() in comment
+    assert beta_reason.headline in comment
+
+    # Evidence citation: file_path:line for the primary reason.
+    assert "services/orders/handler.go:42" in comment
+
+    # Before/after boundary line for the dropped-guard policy reason.
+    assert boundary_reason.headline in comment
+
+    # Gate line: the CLI's exact policy layer, applied here since check_change
+    # always returns gate="" (Law 7). Two REVIEW reasons and no protected
+    # boundary hit -> the default verification config gates this "warn", and a
+    # non-blocking gate over a REVIEW must say so explicitly, never read ACCEPT.
+    assert "`warn`" in comment
+    assert "not blocking per policy" in comment
+
+
+def test_generate_pr_comment_beta_stack_finding_has_no_forbidden_upgrade(
+    tmp_path: Path,
+) -> None:
+    """The rendered line for the beta-stack (unresolved) finding must never
+    contain an epistemic-upgrade word -- checked against that finding's own
+    rendered text, not generic reviewer-checklist boilerplate elsewhere in
+    the comment that isn't a claim about this finding's status."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    verdict = _dropped_guard_and_beta_stack_verdict()
+    beta_reason = verdict.reasons[1]
+    rendered_reason_line = _reason_line(beta_reason)
+
+    with patch("cybergraph.pr_comment.check_change", return_value=verdict):
+        comment = generate_pr_comment(repo, base="HEAD~1")
+
+    assert rendered_reason_line in comment
+    assert has_epistemic_upgrade(rendered_reason_line, beta_reason.status) is False
