@@ -71,16 +71,19 @@ def test_auth_guard_regression_case_should_review(tmp_path):
     )
 
 
-def test_tainted_sql_sink_case_should_review():
+def test_tainted_sql_sink_case_should_review(tmp_path):
     """A head state that interpolates user input into `execute(...)` must
-    REVIEW. If this comes back ACCEPT, that is a real false-ACCEPT finding in
-    the engine, not a test to weaken."""
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as tmp:
-        verdict = run_patch_pair(TAINTED_SQL_INJECTION, Path(tmp))
+    REVIEW, driven by a confirmed regression (today: `sql_construction`) --
+    not an incidental/unrelated review. If this comes back ACCEPT, or REVIEWs
+    only via an unresolved/unsupported reason, that is a real false-ACCEPT-
+    adjacent finding in the engine, not a test to weaken."""
+    verdict = run_patch_pair(TAINTED_SQL_INJECTION, tmp_path)
     assert verdict.state == STATE_REVIEW
+    outcome = classify_verdict(TAINTED_SQL_INJECTION, verdict)
+    assert outcome.confirmed_regression, (
+        "the tainted-SQL-sink injection must be a CONFIRMED regression, not a "
+        f"thin abstention; verdict reasons: {verdict.reasons}"
+    )
 
 
 def test_policy_preserving_refactor_case_should_accept(tmp_path):

@@ -170,12 +170,16 @@ class Metrics:
     real regressions the tool called ACCEPT.
     ``false_accept_rate`` = (# ``expected==regression`` cases ACCEPTed)
                              / (# ``expected==regression`` cases)
+    Guarded against divide-by-zero: 0 regression cases -> ``0.0`` (there is no
+    regression to have falsely accepted).
 
     ``recall`` -- the complement, reported explicitly rather than left for the
     reader to compute: ``recall == 1 - false_accept_rate`` over regression
     cases. Both are always printed; neither is allowed to stand alone.
     ``recall`` = (# ``expected==regression`` cases REVIEWed)
                  / (# ``expected==regression`` cases)
+    Guarded against divide-by-zero: 0 regression cases -> ``1.0`` (vacuously
+    complete, and consistent with ``false_accept_rate``'s ``0.0`` above).
 
     ``review_precision`` -- of everything the tool sent to REVIEW, how much of
     it was a real regression (versus reviewing safe changes needlessly).
