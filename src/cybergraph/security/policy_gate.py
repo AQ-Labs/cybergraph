@@ -27,11 +27,16 @@ from cybergraph.security.assurance import (
     REASON_UNSUPPORTED,
 )
 from cybergraph.security.policy import POLICY_FILE
-from cybergraph.security.verdict import Verdict
+from cybergraph.security.verdict import GATE_BLOCK, GATE_INFO, GATE_WARN, Verdict
 
-GATE_BLOCK = "block"
-GATE_WARN = "warn"
-GATE_INFO = "info"
+# Re-exported, not redefined: ``verdict`` is the single canonical source for
+# these three literals (see its module for why -- the import direction can't
+# run the other way without a cycle). Existing ``policy_gate.GATE_BLOCK``
+# imports elsewhere in the codebase keep working unchanged.
+__all__ = [
+    "GATE_BLOCK", "GATE_INFO", "GATE_WARN",
+    "VerificationConfig", "gate_for", "load_verification_config",
+]
 
 _UNKNOWN_CLASSES = (REASON_UNRESOLVED, REASON_UNSUPPORTED)
 

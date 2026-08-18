@@ -673,6 +673,8 @@ def _run_start_change(repo: Path) -> int:
     """A pending change exists: run the same change-verdict `check` runs,
     collapsed to its default view."""
     verdict = check_change(repo)
+    config = load_verification_config(repo)
+    verdict = replace(verdict, gate=gate_for(verdict, config))
     print(f"Verdict: {verdict.state.upper()}")
     print(format_verdict(verdict))
     print()

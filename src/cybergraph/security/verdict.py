@@ -55,11 +55,16 @@ from cybergraph.security.policy import PolicyChange, ProtectedSet
 STATE_ACCEPT = "accept"
 STATE_REVIEW = "review"
 
-# Mirrors ``policy_gate.GATE_BLOCK`` by value, not by import: ``policy_gate``
-# imports ``Verdict``/``Reason`` from this module, so importing back from it
-# here would be a cycle. This module only ever needs the one literal to keep
-# the default projection honest about a non-blocking gate (Law 7).
-_GATE_BLOCK = "block"
+# Canonical gate values (Law 7: policy sets the gate, never the decision).
+# Defined HERE, not in ``policy_gate``, because ``policy_gate`` already
+# imports ``Verdict``/``Reason`` from this module -- importing back from it
+# there would be a cycle. ``policy_gate`` imports and re-exports these three
+# names so existing ``policy_gate.GATE_BLOCK``-style imports keep working
+# unchanged, with a single source of truth instead of two literals kept equal
+# only by convention.
+GATE_BLOCK = "block"
+GATE_WARN = "warn"
+GATE_INFO = "info"
 
 _POLICY_HEADLINES = {
     "policy_deleted": "Your security policy file was deleted in this change.",
@@ -428,14 +433,16 @@ def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
 
     ``reason_class`` alone does not always pick a single reason (two FAILed
     checks are both ``confirmed_regression``, say) -- ties within the pool are
-    broken trust-first, then by impact, mirroring ``decide``'s own key minus
-    ``protected_boundary`` (already baked into which class ``decide`` picked;
-    a specific reason's own protected status isn't carried on ``Reason``).
+    broken protected-first, then trust, then by impact, mirroring ``decide``'s
+    own key exactly: ``Reason.protected`` is carried on every reason, so two
+    same-class reasons that differ in protected status must resolve the same
+    way here as they did in ``decide``'s cross-reason ranking.
     """
     pool = [r for r in epistemic if r.reason_class == primary_reason] or epistemic
     return max(
         pool,
         key=lambda r: (
+            r.protected,
             _trust_rank(r),
             _IMPACT_RANK.get(r.impact, -1),
             _REASON_CLASS_RANK.get(r.reason_class, -1),
@@ -574,7 +581,7 @@ def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
         for reason in policy_reasons:
             lines.append(_guarded(f"  - {reason.headline}{_where(reason)}", reason.status))
 
-        if verdict.gate and verdict.gate != _GATE_BLOCK:
+        if verdict.gate and verdict.gate != GATE_BLOCK:
             # A REVIEW policy chose not to block must never read like an
             # ACCEPT (Law 7: policy sets the gate, it never launders the
             # decision) -- say so explicitly rather than staying silent.

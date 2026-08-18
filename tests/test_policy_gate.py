@@ -199,6 +199,18 @@ def test_load_verification_config_defaults_when_table_absent(tmp_path):
     assert load_verification_config(tmp_path) == VerificationConfig()
 
 
+def test_gate_constants_are_the_single_canonical_source():
+    """FIX 1: ``policy_gate``'s gate constants must be the SAME objects as
+    ``verdict``'s canonical ones, not a separately-maintained duplicate that
+    could drift and cause ``format_verdict`` to misjudge a blocking gate as
+    non-blocking (false reassurance on the exact axis this branch protects)."""
+    from cybergraph.security import verdict as verdict_module
+
+    assert GATE_BLOCK is verdict_module.GATE_BLOCK == "block"
+    assert GATE_WARN is verdict_module.GATE_WARN == "warn"
+    assert GATE_INFO is verdict_module.GATE_INFO == "info"
+
+
 def test_load_verification_config_ignores_unknown_keys(tmp_path):
     from cybergraph.security.policy import POLICY_FILE
     from cybergraph.security.policy_gate import load_verification_config

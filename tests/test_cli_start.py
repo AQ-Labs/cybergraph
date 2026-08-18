@@ -193,6 +193,74 @@ def test_non_git_directory_takes_the_scan_path_not_a_bare_accept(tmp_path, capsy
     assert "No issues found in the checks CyberGraph ran." not in out
 
 
+# --- FIX 2: `_run_start_change` applies the policy gate before rendering ----
+
+
+def _write_pending_general_unknown_change(repo: Path) -> Path:
+    """A committed clean baseline, then an *untracked* Ruby file -- a language
+    CyberGraph has no analyzer for. This is a general-unknown (unsupported,
+    not on any protected boundary) reason: under default `VerificationConfig`
+    (``block_general_unknown=False``, no routes so nothing is "protected"),
+    the resulting REVIEW is non-blocking (gate=warn), which is exactly the
+    framing `_run_start_change` must apply the same way `_run_check` does."""
+    (repo / "app.py").write_text(CLEAN_APP, encoding="utf-8")
+    _git_init_commit(repo)
+    (repo / "worker.rb").write_text("def run\n  1\nend\n", encoding="utf-8")
+    return repo
+
+
+def test_bare_path_applies_the_same_gate_framing_check_does_for_a_non_blocking_review(
+    tmp_path, capsys
+):
+    """FIX 2: `cybergraph .` must apply `gate_for` before `format_verdict`,
+    same as `cybergraph check` -- the identical non-blocking REVIEW must carry
+    the identical "not blocking per policy" advisory framing on both surfaces,
+    and neither may print a bare ACCEPT / "No issues found" (Law 1 & 7)."""
+    repo = _write_pending_general_unknown_change(tmp_path)
+
+    rc_start = main([str(repo)])
+    out_start = capsys.readouterr().out
+
+    rc_check = main(["check", str(repo)])
+    out_check = capsys.readouterr().out
+
+    assert rc_start == 0
+    assert rc_check == 0
+    assert "Verdict: REVIEW" in out_start
+    assert "attention before shipping" in out_check
+
+    advisory = "not blocking per policy"
+    assert advisory in out_start, out_start
+    assert advisory in out_check, out_check
+
+    for out in (out_start, out_check):
+        assert "No issues found in the checks CyberGraph ran." not in out
+        assert "Verdict: ACCEPT" not in out
+
+
+def test_bare_path_start_change_verdict_carries_a_nonempty_gate(tmp_path, capsys):
+    """Strongest deterministic assertion available directly on the rendered
+    Verdict object (not just its printed text): `_run_start_change` must have
+    applied `gate_for` before formatting, so the gate is never left at the
+    unset `""` `check_change` always returns on its own."""
+    from cybergraph.security.check import check_change
+    from cybergraph.security.policy_gate import gate_for, load_verification_config
+
+    repo = _write_pending_general_unknown_change(tmp_path)
+
+    raw = check_change(repo)
+    assert raw.gate == "", "check_change itself must not apply the gate"
+
+    config = load_verification_config(repo)
+    expected_gate = gate_for(raw, config)
+    assert expected_gate, "fixture must produce reasons so the gate is non-empty"
+
+    main([str(repo)])
+    out = capsys.readouterr().out
+    assert "not blocking per policy" in out
+    assert expected_gate != "block"
+
+
 def test_frameworkless_repo_reports_framework_unknown(tmp_path, capsys):
     """A repo with no web framework and no dependency manifest renders the
     new fallback label ``"Framework: unknown"`` -- not just the absence of

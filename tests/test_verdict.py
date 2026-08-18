@@ -620,3 +620,54 @@ def test_format_verdict_unset_gate_does_not_print_the_advisory_line():
     """Gate not yet computed (``""``): unchanged from pre-Task-7 behavior."""
     out = format_verdict(_sample_review_verdict())
     assert "not blocking per policy" not in out
+
+
+# --- FIX 3: _select_primary must honor Reason.protected, mirroring
+# decide()._primary_reason's (protected, trust, impact, reason_class) key ---
+
+
+def test_select_primary_reason_prefers_the_protected_reason_over_higher_trust_impact():
+    """Two CONFIRMED reasons of the same reason_class: the protected one has
+    strictly LOWER trust and impact than the non-protected one. decide()'s own
+    cross-reason ranking puts ``protected`` first, so select_primary_reason
+    must pick the protected reason -- not the higher-trust/impact one -- or a
+    surface could headline a different specific reason than decide() deemed
+    top (the latent divergence FIX 3 closes)."""
+    from cybergraph.security.verdict import select_primary_reason
+
+    protected_low = Reason(
+        headline="Protected boundary regression, lower trust and impact.",
+        file_path="admin.py",
+        line=5,
+        rule_id="declared_login_rules",
+        kind="check_failed",
+        status=STATUS_CONFIRMED,
+        evidence=EVIDENCE_WEAK,
+        assurance=ASSURANCE_INVENTORY,
+        impact="low",
+        reason_class=REASON_CONFIRMED_REGRESSION,
+        protected=True,
+    )
+    unprotected_high = Reason(
+        headline="Unprotected regression, higher trust and impact.",
+        file_path="app.py",
+        line=7,
+        rule_id="sql_construction",
+        kind="check_failed",
+        status=STATUS_CONFIRMED,
+        evidence=EVIDENCE_STRONG,
+        assurance=ASSURANCE_BENCHMARKED,
+        impact="critical",
+        reason_class=REASON_CONFIRMED_REGRESSION,
+        protected=False,
+    )
+    verdict = Verdict(
+        STATE_REVIEW,
+        (protected_low, unprotected_high),
+        (),
+        (),
+        PROV,
+        primary_reason=REASON_CONFIRMED_REGRESSION,
+    )
+
+    assert select_primary_reason(verdict) is protected_low
