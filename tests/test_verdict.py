@@ -549,3 +549,74 @@ def test_trust_outranks_impact_when_neither_reason_is_protected():
     assert "Confirmed" in headline
     assert label_for("sql_construction") in headline
     assert label_for("reachable_data_paths") not in headline
+
+
+# --- Task 7: policy/enforcement gate -- `protected` flag + gate-aware
+# default projection (Law 7: policy sets the gate, never the decision) ------
+
+
+def test_reason_protected_defaults_false():
+    assert Reason(headline="x").protected is False
+
+
+def test_decide_sets_protected_true_for_check_reason_on_protected_boundary():
+    protected = ProtectedSet(
+        {"app.py::h": ProtectedEntity("app.py::h", "/x", "app.py", 1, False)}
+    )
+    checks = [CheckResult("declared_login_rules", FAIL, "no login check", 1)]
+    verdict = decide(checks, [], PROV, protected_set=protected, changed_files=("app.py",))
+    assert verdict.reasons[0].protected is True
+
+
+def test_decide_sets_protected_false_for_check_reason_off_boundary():
+    checks = [CheckResult("sql_construction", FAIL, "unsafe query", evidence_count=1)]
+    verdict = decide(checks, [], PROV)
+    assert verdict.reasons[0].protected is False
+
+
+def test_decide_policy_change_reasons_are_never_protected():
+    change = PolicyChange("coverage_shrunk", "/admin/x", "no rule covers it any more")
+    verdict = decide(PASSING, [change], PROV)
+    assert verdict.reasons[0].protected is False
+
+
+def test_verdict_to_dict_carries_protected_per_reason():
+    d = verdict_to_dict(_sample_review_verdict())
+    assert d["reasons"][0]["protected"] is False
+
+
+def test_verdict_to_dict_carries_policy_action_alongside_gate():
+    from dataclasses import replace
+
+    v = replace(_sample_review_verdict(), gate="block")
+    d = verdict_to_dict(v)
+    assert d["gate"] == "block"
+    assert d["policy"]["action"] == "block"
+
+
+def test_format_verdict_never_reads_as_accept_under_non_blocking_gate():
+    from dataclasses import replace
+
+    from cybergraph.security.policy_gate import GATE_WARN
+
+    v = replace(_sample_review_verdict(), gate=GATE_WARN)
+    out = format_verdict(v)
+    assert "No issues found in the checks CyberGraph ran." not in out
+    assert "Verdict: ACCEPT" not in out
+    assert "1 item(s) surfaced — not blocking per policy." in out
+
+
+def test_format_verdict_blocking_gate_does_not_print_the_advisory_line():
+    from dataclasses import replace
+
+    from cybergraph.security.policy_gate import GATE_BLOCK
+
+    v = replace(_sample_review_verdict(), gate=GATE_BLOCK)
+    out = format_verdict(v)
+    assert "not blocking per policy" not in out
+
+
+def test_format_verdict_unset_gate_does_not_print_the_advisory_line():
+    """Gate not yet computed (``""``): unchanged from pre-Task-7 behavior."""
+    out = format_verdict(_sample_review_verdict())
+    assert "not blocking per policy" not in out

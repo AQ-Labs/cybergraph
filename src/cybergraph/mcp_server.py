@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json as _json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from .graph import GraphStore
 from .rag import answer_grounded, answer_question, format_grounded_answer
 from .security import find_attack_paths, format_attack_paths, load_scanner_findings
 from .security.check import check_change
+from .security.policy_gate import gate_for, load_verification_config
 from .security.verdict import verdict_to_dict
 
 try:
@@ -133,7 +135,13 @@ if FastMCP is not None:
         An "accept" means the checks that ran found nothing — read
         `not_evaluated` before treating it as broader assurance.
         """
-        verdict = check_change(Path(repo_root).resolve(), base=base or None)
+        repo = Path(repo_root).resolve()
+        verdict = check_change(repo, base=base or None)
+        # Same gate wiring `cli._run_check` applies before printing -- both
+        # surfaces call the same pure `gate_for`, over the same repo's
+        # `[verification]` config, so they can never drift (Law 7: policy
+        # sets the gate, it never mutates `verdict.state` above).
+        verdict = replace(verdict, gate=gate_for(verdict, load_verification_config(repo)))
         # `cybergraph check --json` prints this same dict through `json.dumps`,
         # which turns dataclass tuple fields (e.g. `provenance.capabilities`)
         # into lists. Round-tripping here keeps this tool byte-identical to

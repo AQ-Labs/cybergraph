@@ -42,9 +42,42 @@ def test_risky_change_reviews_but_exits_zero(tmp_path: Path, capsys):
 
 
 def test_fail_on_review_opts_into_gating(tmp_path: Path):
+    """A confirmed regression still blocks by default (block_confirmed_regressions
+    defaults True), so --fail-on-review keeps exiting 1 for this case."""
     repo = _repo(tmp_path)
     (repo / "app.py").write_text(RISKY, encoding="utf-8")
     assert main(["check", str(repo), "--fail-on-review"]) == 1
+
+
+def test_fail_on_review_does_not_block_a_non_blocking_review(tmp_path: Path, capsys):
+    """Task 7: --fail-on-review is gate-driven, not state-driven -- a REVIEW
+    that policy does not block must exit 0, not 1 (Law 7: policy sets the
+    gate, it never launders the decision, and a non-blocking gate must not
+    be enforced as if it were a block either)."""
+    from cybergraph.security.policy import POLICY_FILE
+
+    repo = _repo(tmp_path)
+    (repo / "app.py").write_text(RISKY, encoding="utf-8")
+    (repo / POLICY_FILE).write_text(
+        "version = 1\n\n"
+        "[verification]\n"
+        "block_confirmed_regressions = false\n"
+        "block_unknown_on_protected_routes = false\n"
+        "block_general_unknown = false\n",
+        encoding="utf-8",
+    )
+    assert main(["check", str(repo), "--fail-on-review"]) == 0
+    out = capsys.readouterr().out
+    assert "attention before shipping" in out
+
+
+def test_json_carries_gate_and_policy_action(tmp_path: Path, capsys):
+    repo = _repo(tmp_path)
+    (repo / "app.py").write_text(RISKY, encoding="utf-8")
+    main(["check", str(repo), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gate"] in {"block", "warn", "info"}
+    assert payload["policy"]["action"] == payload["gate"]
 
 
 def test_json_carries_provenance(tmp_path: Path, capsys):

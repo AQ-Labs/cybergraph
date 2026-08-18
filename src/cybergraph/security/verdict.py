@@ -55,6 +55,12 @@ from cybergraph.security.policy import PolicyChange, ProtectedSet
 STATE_ACCEPT = "accept"
 STATE_REVIEW = "review"
 
+# Mirrors ``policy_gate.GATE_BLOCK`` by value, not by import: ``policy_gate``
+# imports ``Verdict``/``Reason`` from this module, so importing back from it
+# here would be a cycle. This module only ever needs the one literal to keep
+# the default projection honest about a non-blocking gate (Law 7).
+_GATE_BLOCK = "block"
+
 _POLICY_HEADLINES = {
     "policy_deleted": "Your security policy file was deleted in this change.",
     "policy_problem": "CyberGraph could not understand one of your security rules "
@@ -87,6 +93,7 @@ class Reason:
     assurance: str = ""
     impact: str = ""
     reason_class: str = ""
+    protected: bool = False
 
 
 # --- Epistemics: map a `CheckResult` the engine already produced onto the
@@ -240,6 +247,7 @@ def _reason_for_check(
     # assurance_for is case-sensitive and fails closed -- lowercase before calling
     # it even though our own language table already only yields lowercase names.
     assurance = assurance_for(check.capability_id, (language or "").lower() or None, None)
+    protected = _protected_boundary(check, finding, changed_files, protected_set)
     reason = Reason(
         headline=headline,
         rule_id=check.capability_id,
@@ -249,8 +257,9 @@ def _reason_for_check(
         assurance=assurance,
         impact=_impact_for(check, finding, risk_deltas),
         reason_class=_REASON_CLASS_BY_STATUS[status],
+        protected=protected,
     )
-    return reason, _protected_boundary(check, finding, changed_files, protected_set)
+    return reason, protected
 
 
 def _primary_reason(reasons: list[Reason], protected_flags: list[bool]) -> str:
@@ -545,6 +554,12 @@ def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
         for reason in policy_reasons:
             lines.append(_guarded(f"  - {reason.headline}{_where(reason)}", reason.status))
 
+        if verdict.gate and verdict.gate != _GATE_BLOCK:
+            # A REVIEW policy chose not to block must never read like an
+            # ACCEPT (Law 7: policy sets the gate, it never launders the
+            # decision) -- say so explicitly rather than staying silent.
+            lines.append(f"{count} item(s) surfaced — not blocking per policy.")
+
         lines.append("")
         lines.append(
             "[Why?] Pass verbose=True (or --verbose) for the full evidence, "
@@ -562,15 +577,20 @@ def verdict_to_dict(verdict: Verdict) -> dict:
 
     Schema v2: adds ``schema_version``, ``decision`` (alias of ``state``),
     ``gate``, and ``primary_reason`` at the top level, and epistemic fields
-    (``status``, ``evidence``, ``assurance``, ``impact``, ``reason_class``)
-    on each reason. All v1 keys are kept unchanged so existing consumers
-    don't break (spec open-Q4 compatibility window).
+    (``status``, ``evidence``, ``assurance``, ``impact``, ``reason_class``,
+    ``protected``) on each reason. All v1 keys are kept unchanged so existing
+    consumers don't break (spec open-Q4 compatibility window).
+
+    ``policy.action`` is additive: it mirrors ``gate`` so the enforcement
+    input is inspectable on its own (Law 5) without implying a second,
+    independent decision -- policy sets the gate, it never re-decides.
     """
     return {
         "schema_version": 2,
         "state": verdict.state,
         "decision": verdict.state,
         "gate": verdict.gate,
+        "policy": {"action": verdict.gate},
         "primary_reason": verdict.primary_reason,
         "reasons": [
             {
@@ -584,6 +604,7 @@ def verdict_to_dict(verdict: Verdict) -> dict:
                 "assurance": r.assurance,
                 "impact": r.impact,
                 "reason_class": r.reason_class,
+                "protected": r.protected,
             }
             for r in verdict.reasons
         ],

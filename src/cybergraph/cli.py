@@ -6,6 +6,7 @@ import argparse
 import json as _json
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -26,6 +27,7 @@ from .security.check import check_change
 from .security.layers import format_layer_summary, summarize_layers
 from .security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REACHES_SINK
 from .security.policy import POLICY_FILE, extract_baseline
+from .security.policy_gate import GATE_BLOCK, gate_for, load_verification_config
 from .security.review import format_security_review, review_security_delta
 from .security.verdict import STATE_REVIEW, Verdict, format_verdict, verdict_to_dict
 from .security.vulnerabilities import import_vulnerability_report
@@ -474,11 +476,16 @@ def _run_check(args) -> int:
         return 0
 
     verdict = check_change(repo, base=args.base, mode=args.mode)
+    config = load_verification_config(repo)
+    verdict = replace(verdict, gate=gate_for(verdict, config))
     print(
         _json.dumps(verdict_to_dict(verdict), indent=2) if args.json
         else format_verdict(verdict)
     )
-    return 1 if (args.fail_on_review and verdict.state == STATE_REVIEW) else 0
+    # Gate-driven, not state-driven (Law 7): a REVIEW policy chose not to
+    # block must exit 0 even with --fail-on-review, and a config can never
+    # turn this into a laundered accept -- verdict.state above is untouched.
+    return 1 if (args.fail_on_review and verdict.gate == GATE_BLOCK) else 0
 
 
 def _command_names(parser: argparse.ArgumentParser) -> set[str]:
