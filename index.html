@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="description" content="CyberGraph is an offline, deterministic security verifier for AI-generated code changes: it returns an ACCEPT or REVIEW verdict with cited evidence — no cloud upload, no mandatory LLM, and no per-check token cost.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AI writes. CyberGraph verifies.">
+<meta property="og:description" content="CyberGraph is an offline, deterministic security verifier for AI-generated code changes: it returns an ACCEPT or REVIEW verdict with cited evidence — no cloud upload, no mandatory LLM, and no per-check token cost.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AI writes. CyberGraph verifies.">
+<meta name="twitter:description" content="CyberGraph is an offline, deterministic security verifier for AI-generated code changes: it returns an ACCEPT or REVIEW verdict with cited evidence — no cloud upload, no mandatory LLM, and no per-check token cost.">
+<title>CyberGraph — Independent security verifier for code changes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* ============ Tokens — dark-first (product is dark-mode-first) ============ */
+:root{
+  --ground:#0c111b; --surface:#111826; --surface-2:#182234; --surface-3:#1f2c42;
+  --border:#26344b; --border-soft:#1c273a;
+  --ink:#e7eef8; --ink-dim:#a4b4c9; --ink-faint:#6f8298;
+  --accent:#45d3c4; --accent-deep:#7ff0e4; --accent-ghost:rgba(69,211,196,.12);
+  --accept:#57c98a; --review:#e2ab48; --critical:#f2685f; --state-mute:#8ba0b8;
+  --shadow:0 24px 60px -28px rgba(0,0,0,.75);
+  --maxw:1120px;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --r:14px; --r-sm:9px;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --ground:#eef2f7; --surface:#ffffff; --surface-2:#f3f6fa; --surface-3:#e9eef5;
+    --border:#d5deea; --border-soft:#e4ebf3;
+    --ink:#101a2b; --ink-dim:#45566c; --ink-faint:#6d7f95;
+    --accent:#0d9488; --accent-deep:#0a6d64; --accent-ghost:rgba(13,148,136,.10);
+    --accept:#1a874f; --review:#b06a12; --critical:#d13b32; --state-mute:#5f7188;
+    --shadow:0 22px 50px -30px rgba(28,48,80,.35);
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#eef2f7; --surface:#ffffff; --surface-2:#f3f6fa; --surface-3:#e9eef5;
+  --border:#d5deea; --border-soft:#e4ebf3;
+  --ink:#101a2b; --ink-dim:#45566c; --ink-faint:#6d7f95;
+  --accent:#0d9488; --accent-deep:#0a6d64; --accent-ghost:rgba(13,148,136,.10);
+  --accept:#1a874f; --review:#b06a12; --critical:#d13b32; --state-mute:#5f7188;
+  --shadow:0 22px 50px -30px rgba(28,48,80,.35);
+  color-scheme:light;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; letter-spacing:.005em;
+  overflow-x:hidden;
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{animation:none!important;transition:none!important}}
+
+.wrap{max-width:var(--maxw); margin-inline:auto; padding-inline:clamp(20px,5vw,40px)}
+section{padding-block:clamp(56px,8vw,104px)}
+a{color:var(--accent); text-decoration:none}
+a:hover{color:var(--accent-deep)}
+:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:4px}
+
+h1,h2,h3{font-family:var(--mono); font-weight:600; text-wrap:balance; line-height:1.12; margin:0}
+h2{font-size:clamp(1.5rem,3.4vw,2.15rem); letter-spacing:-.01em}
+h3{font-size:1.06rem; letter-spacing:0}
+p{margin:0}
+.lede{color:var(--ink-dim); font-size:1.08rem; max-width:62ch}
+
+.eyebrow{
+  font-family:var(--mono); font-size:.72rem; font-weight:600; letter-spacing:.22em;
+  text-transform:uppercase; color:var(--accent);
+}
+.sec-head{display:flex; flex-direction:column; gap:14px; margin-bottom:38px; max-width:70ch}
+.sec-head p{color:var(--ink-dim)}
+
+/* ============ Top bar ============ */
+.topbar{
+  position:sticky; top:0; z-index:50; backdrop-filter:blur(12px);
+  background:color-mix(in oklab,var(--ground) 82%, transparent);
+  border-bottom:1px solid var(--border-soft);
+}
+.topbar .wrap{display:flex; align-items:center; justify-content:space-between; padding-block:14px}
+.brand{display:flex; align-items:center; gap:11px; font-family:var(--mono); font-weight:600; letter-spacing:-.01em}
+.brand .glyph{
+  width:26px;height:26px;flex:none;border-radius:7px;
+  background:linear-gradient(145deg,var(--accent),color-mix(in oklab,var(--accent) 40%, var(--surface-3)));
+  display:grid;place-items:center;color:#04211d;font-size:.8rem;box-shadow:0 0 18px var(--accent-ghost)
+}
+.nav-links{display:flex; gap:26px; align-items:center; font-size:.9rem}
+.nav-links a{color:var(--ink-dim)} .nav-links a:hover{color:var(--ink)}
+.nav-links .mono{font-family:var(--mono)}
+.theme-btn{
+  font-family:var(--mono); font-size:.78rem; cursor:pointer; color:var(--ink-dim);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:99px;
+  padding:6px 13px; display:inline-flex; gap:7px; align-items:center;
+}
+.theme-btn:hover{color:var(--ink); border-color:var(--accent)}
+@media(max-width:720px){.nav-links a:not(.mono){display:none}}
+
+/* ============ Hero ============ */
+.hero{position:relative; overflow:hidden; padding-block:clamp(64px,10vw,120px)}
+.hero-grid{position:absolute; inset:0; z-index:0; opacity:.55; pointer-events:none}
+.hero .wrap{position:relative; z-index:1; display:grid; grid-template-columns:1.05fr .95fr; gap:clamp(32px,5vw,64px); align-items:center}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr; gap:40px}}
+.hero h1{font-size:clamp(2.3rem,6vw,3.9rem); letter-spacing:-.02em; margin-top:18px}
+.hero h1 .v{color:var(--accent)}
+.hero .lede{margin-top:20px; font-size:1.14rem}
+.hero-cta{display:flex; flex-wrap:wrap; gap:12px; margin-top:30px}
+.btn{
+  font-family:var(--mono); font-size:.9rem; font-weight:600; border-radius:10px;
+  padding:12px 20px; cursor:pointer; display:inline-flex; gap:9px; align-items:center; border:1px solid transparent;
+}
+.btn-primary{background:var(--accent); color:#04211d}
+.btn-primary:hover{background:var(--accent-deep); color:#04211d}
+.btn-ghost{background:transparent; border-color:var(--border); color:var(--ink)}
+.btn-ghost:hover{border-color:var(--accent); color:var(--accent)}
+.trust-row{display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:28px; font-family:var(--mono); font-size:.78rem; color:var(--ink-faint)}
+.trust-row span{display:inline-flex; align-items:center; gap:7px}
+.trust-row b{color:var(--accent); font-weight:700}
+
+/* ============ Terminal card ============ */
+.term{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
+  box-shadow:var(--shadow); overflow:hidden; font-family:var(--mono);
+}
+.term-bar{display:flex; align-items:center; gap:8px; padding:11px 15px; border-bottom:1px solid var(--border-soft); background:var(--surface-2)}
+.dot{width:11px;height:11px;border-radius:50%}
+.term-bar .t{margin-left:8px; font-size:.76rem; color:var(--ink-faint); letter-spacing:.02em}
+.term-body{padding:20px; font-size:.88rem; line-height:1.75; overflow-x:auto}
+.term-body .cmd{color:var(--ink-faint)} .term-body .cmd b{color:var(--accent); font-weight:600}
+.term-body .head{color:var(--ink); display:block; margin-bottom:6px}
+.tag{font-weight:700}
+.tag.c{color:var(--critical)} .tag.p{color:var(--review)} .tag.a{color:var(--accept)} .tag.n{color:var(--state-mute)}
+.term-body .muted{color:var(--ink-faint)}
+.term-body .why{color:var(--ink-faint); margin-top:10px; display:block}
+
+/* ============ Generic cards ============ */
+.grid{display:grid; gap:16px}
+.g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:820px){.g3,.g2{grid-template-columns:1fr}}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
+  padding:24px; display:flex; flex-direction:column; gap:10px; transition:border-color .2s,transform .2s;
+}
+.card:hover{border-color:color-mix(in oklab,var(--accent) 50%, var(--border))}
+.card h3{display:flex; align-items:center; gap:10px}
+.card p{color:var(--ink-dim); font-size:.96rem}
+.card .k{font-family:var(--mono); color:var(--accent); font-size:.8rem}
+
+/* ============ State chips ============ */
+.states{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px}
+.state{
+  border:1px solid var(--border); border-radius:var(--r-sm); padding:16px 18px;
+  background:var(--surface); display:flex; flex-direction:column; gap:8px; border-left-width:3px;
+}
+.chip{
+  font-family:var(--mono); font-weight:700; font-size:.74rem; letter-spacing:.1em; text-transform:uppercase;
+  align-self:flex-start; padding:4px 10px; border-radius:99px;
+}
+.state p{font-size:.9rem; color:var(--ink-dim); line-height:1.5}
+.s-pass{border-left-color:var(--accept)} .s-pass .chip{background:color-mix(in oklab,var(--accept) 16%,transparent); color:var(--accept)}
+.s-fail{border-left-color:var(--critical)} .s-fail .chip{background:color-mix(in oklab,var(--critical) 16%,transparent); color:var(--critical)}
+.s-unk{border-left-color:var(--review)} .s-unk .chip{background:color-mix(in oklab,var(--review) 16%,transparent); color:var(--review)}
+.s-na{border-left-color:var(--state-mute)} .s-na .chip{background:color-mix(in oklab,var(--state-mute) 16%,transparent); color:var(--state-mute)}
+.s-ns{border-left-color:var(--state-mute)} .s-ns .chip{background:color-mix(in oklab,var(--state-mute) 16%,transparent); color:var(--state-mute)}
+
+/* ============ Trust-language comparison ============ */
+.compare{display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch}
+@media(max-width:820px){.compare{grid-template-columns:1fr}}
+.vcard{background:var(--surface); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; display:flex; flex-direction:column}
+.vcard .vhead{padding:14px 18px; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:.82rem}
+.badge{font-family:var(--mono); font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:4px 9px; border-radius:99px}
+.badge.bench{background:color-mix(in oklab,var(--accept) 16%,transparent); color:var(--accept)}
+.badge.beta{background:color-mix(in oklab,var(--review) 16%,transparent); color:var(--review)}
+.vcode{padding:16px 18px; font-family:var(--mono); font-size:.82rem; color:var(--ink-dim); border-bottom:1px solid var(--border-soft); overflow-x:auto; white-space:pre}
+.vcode .var{color:var(--critical)}
+.vverdict{padding:16px 18px; font-family:var(--mono); font-size:.9rem}
+.compare-note{margin-top:18px; color:var(--ink-dim); font-size:.98rem; max-width:66ch}
+.compare-note b{color:var(--ink)}
+
+/* ============ Table ============ */
+.tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--r); background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:.92rem; min-width:640px}
+th,td{padding:14px 18px; text-align:left; border-bottom:1px solid var(--border-soft); vertical-align:top}
+thead th{font-family:var(--mono); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); font-weight:600}
+tbody tr:last-child td{border-bottom:none}
+td .lang{font-family:var(--mono); font-weight:600; color:var(--ink)}
+.val{font-family:var(--mono); font-size:.78rem; font-weight:700; letter-spacing:.03em}
+.val.bench{color:var(--accept)} .val.beta{color:var(--review)}
+tr.py{background:color-mix(in oklab,var(--accent) 6%, transparent)}
+
+/* ============ Attack path SVG ============ */
+.path-panel{background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:26px; box-shadow:var(--shadow)}
+.pathsvg{width:100%; height:auto; display:block}
+.pathsvg text{font-family:var(--mono)}
+@keyframes pulse{0%,100%{opacity:.35} 50%{opacity:.9}}
+.sink-glow{animation:pulse 2.6s ease-in-out infinite}
+.flow{stroke-dasharray:5 7; animation:flow 1.4s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-24}}
+
+/* ============ Code / install ============ */
+pre.code{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
+  padding:20px 22px; overflow-x:auto; font-family:var(--mono); font-size:.86rem; line-height:1.85; color:var(--ink-dim);
+}
+pre.code .c{color:var(--ink-faint)} pre.code b{color:var(--accent); font-weight:600} pre.code .o{color:var(--ink)}
+
+.two{display:grid; grid-template-columns:1fr 1fr; gap:26px; align-items:start}
+@media(max-width:820px){.two{grid-template-columns:1fr}}
+
+/* interop */
+.interop{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px}
+.io{border:1px solid var(--border); border-radius:var(--r-sm); padding:18px; background:var(--surface)}
+.io .lbl{font-family:var(--mono); font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:700}
+.io p{margin-top:8px; font-size:.9rem; color:var(--ink-dim)}
+
+.callout{border:1px solid var(--border); border-left:3px solid var(--accent); background:var(--accent-ghost); border-radius:var(--r-sm); padding:18px 22px; font-size:.98rem; color:var(--ink-dim)}
+.callout b{color:var(--ink)}
+
+footer{border-top:1px solid var(--border-soft); padding-block:44px; color:var(--ink-faint); font-size:.86rem}
+footer .wrap{display:flex; flex-wrap:wrap; gap:20px; justify-content:space-between; align-items:center}
+footer .mono{font-family:var(--mono)}
+.divider{height:1px;background:var(--border-soft);border:none;margin:0}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand"><span class="glyph">◆</span> CyberGraph</div>
+    <nav class="nav-links">
+      <a href="#verify">How it verifies</a>
+      <a href="#honesty">Honesty</a>
+      <a href="#languages">Coverage</a>
+      <a href="#install" class="mono">$ install</a>
+      <button class="theme-btn" id="themeBtn" aria-label="Toggle color theme"><span id="themeIcon">☾</span> theme</button>
+    </nav>
+  </div>
+</header>
+
+<!-- ======================= HERO ======================= -->
+<section class="hero">
+  <canvas class="hero-grid" id="graphCanvas" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">Independent security verifier · for code changes</span>
+      <h1>AI writes.<br><span class="v">CyberGraph</span> verifies.</h1>
+      <p class="lede">Your coding agent wrote the change. Should the same AI be the only thing that reviews it? CyberGraph checks each change against your app's security rules and returns an <b>ACCEPT</b> or <b>REVIEW</b> verdict with cited evidence — computed deterministically on your machine.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#install">Get started</a>
+        <a class="btn btn-ghost" href="#honesty">Why it's trustworthy</a>
+      </div>
+      <div class="trust-row">
+        <span><b>✓</b> No cloud upload</span>
+        <span><b>✓</b> No mandatory LLM</span>
+        <span><b>✓</b> No per-check token cost</span>
+        <span><b>✓</b> No silent blind spots</span>
+      </div>
+    </div>
+
+    <div class="term" role="img" aria-label="Example CyberGraph verdict output">
+      <div class="term-bar">
+        <span class="dot" style="background:var(--critical)"></span>
+        <span class="dot" style="background:var(--review)"></span>
+        <span class="dot" style="background:var(--accept)"></span>
+        <span class="t">cybergraph&nbsp;.</span>
+      </div>
+      <div class="term-body">
+        <span class="cmd">$ <b>cybergraph</b> .</span><br><br>
+        <span class="head">2 things need your attention before shipping.</span>
+        <span class="tag c">Confirmed:</span> Unsafe database queries: <span class="muted">`execute` sends this value to the database as part of a query</span><br>
+        <span class="tag p">Possible:</span> New routes from the internet to sensitive code: <span class="muted">data a user controls can now reach `execute`</span>
+        <span class="why">[Why?] Pass --verbose for the full evidence, coverage, and impact detail.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ======================= WHY ======================= -->
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Why it exists</span>
+      <h2>Agents generate code faster than anyone can review it.</h2>
+      <p>Having the same class of model that wrote the code also review it is nondeterministic, spends tokens on every turn, and doesn't scale. Traditional scanners are noisy and flat — a file, a line, a rule — leaving the hard questions to you.</p>
+    </div>
+    <div class="grid g2">
+      <div class="card"><h3>Questions on every change</h3><p>Is this issue reachable from production code? Is there a login check before this sensitive action? Did this change move something across a trust boundary? Which findings matter first?</p></div>
+      <div class="card"><h3>An answer, made independently</h3><p>CyberGraph connects the dots and turns the answer into a decision made <em>independently</em> of the coding model — deterministic and local, cheap enough to run on every commit and every agent turn.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= HOW IT VERIFIES ======================= -->
+<section id="verify" style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">How verification works</span>
+      <h2>Two verdicts — and it never turns “didn’t look” into a pass.</h2>
+      <p>Every capability reports one of five explicit states, so a blind spot is <em>visible</em>, not silent. The distinctions between the last three carry the product's whole credibility.</p>
+    </div>
+    <div class="states">
+      <div class="state s-pass"><span class="chip">PASS</span><p>The check ran on this change and found nothing.</p></div>
+      <div class="state s-fail"><span class="chip">FAIL</span><p>The check ran and found something.</p></div>
+      <div class="state s-na"><span class="chip">NOT&nbsp;APPLICABLE</span><p>Supported, but nothing in this change is in its scope. Can honestly ACCEPT.</p></div>
+      <div class="state s-unk"><span class="chip">UNKNOWN</span><p>Supported, but it couldn't run here — a blind spot. Forces REVIEW.</p></div>
+      <div class="state s-ns"><span class="chip">NOT&nbsp;SUPPORTED</span><p>The capability doesn't exist yet for this language/surface. Forces REVIEW — accepting here would be false assurance.</p></div>
+    </div>
+    <div class="callout" style="margin-top:22px"><b>A false ACCEPT is worse than a false positive.</b> A capability passes only when there is positive evidence it was analyzed. A README-only change is <span class="val" style="color:var(--state-mute)">NOT_APPLICABLE</span> everywhere and can honestly ACCEPT; a change to a language with no analyzer is <span class="val" style="color:var(--state-mute)">NOT_SUPPORTED</span> and reviews — the two look alike and are not.</div>
+  </div>
+</section>
+
+<!-- ======================= HONESTY ======================= -->
+<section id="honesty">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Compress complexity · never compress uncertainty</span>
+      <h2>The wording never outruns the evidence.</h2>
+      <p>Each finding is described only as strongly as it has been validated. The wording is bounded by the weaker of two axes — how strong the evidence is, and how mature the capability is for that language (<span class="val" style="color:var(--accent)">effective_trust = min(evidence, assurance)</span>).</p>
+    </div>
+
+    <div class="compare">
+      <div class="vcard">
+        <div class="vhead"><span>Python · FastAPI</span><span class="badge bench">Benchmark-backed</span></div>
+        <div class="vcode">query = f"select * from users
+        where name = '<span class="var">{name}</span>'"</div>
+        <div class="vverdict"><span class="tag c">Confirmed:</span> Unsafe database query</div>
+      </div>
+      <div class="vcard">
+        <div class="vhead"><span>JavaScript · Express</span><span class="badge beta">Beta</span></div>
+        <div class="vcode">db.query(`select * from users
+        where id = ${<span class="var">id</span>}`)</div>
+        <div class="vverdict"><span class="tag p">Possible:</span> Unsafe database query</div>
+      </div>
+    </div>
+    <p class="compare-note">Same tainted query. <b>Different word</b> — because the JavaScript verdict isn't held to a labelled benchmark yet, so its claim language stays bounded to “Possible.” No configuration, surface, or phrasing step can upgrade a reason above what its evidence supports. <b>Uncertainty never becomes safety:</b> when unsure, CyberGraph abstains and reviews, rather than issue a false ACCEPT.</p>
+
+    <div class="callout" style="margin-top:26px"><b>The cardinal rule, in every language:</b> only a provably all-literal construction can read SAFE. A value built from a variable is UNSAFE when taint confirms it, UNKNOWN otherwise; native deserialization is never SAFE. Anything the classifier can't read is UNKNOWN — never SAFE.</div>
+  </div>
+</section>
+
+<!-- ======================= REACHABILITY ======================= -->
+<section id="graph" style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">The knowledge graph</span>
+      <h2>Not “a dangerous call exists.” <br>“User input can reach it — with no guard in between.”</h2>
+      <p>CyberGraph parses your repo into a cybersecurity knowledge graph — routes, guards, validators, sinks, secrets, cloud resources, and the edges between them — then traces interprocedural attack paths from entrypoint to sink, each with confidence, taint, a risk score, and fix guidance.</p>
+    </div>
+    <div class="path-panel">
+      <svg class="pathsvg" viewBox="0 0 900 190" role="img" aria-label="Attack path: internet request reaches a database sink through a route with a missing guard">
+        <defs>
+          <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <!-- edges -->
+        <line x1="150" y1="95" x2="250" y2="95" stroke="var(--accent)" stroke-width="2" class="flow"/>
+        <line x1="410" y1="95" x2="510" y2="95" stroke="var(--critical)" stroke-width="2" class="flow"/>
+        <line x1="670" y1="95" x2="740" y2="95" stroke="var(--critical)" stroke-width="2" class="flow"/>
+        <!-- nodes -->
+        <g>
+          <rect x="20" y="68" width="130" height="54" rx="10" fill="var(--surface-3)" stroke="var(--border)"/>
+          <text x="85" y="90" text-anchor="middle" fill="var(--ink-dim)" font-size="12">Internet</text>
+          <text x="85" y="108" text-anchor="middle" fill="var(--ink-faint)" font-size="10">GET /admin/export</text>
+        </g>
+        <g>
+          <rect x="250" y="68" width="160" height="54" rx="10" fill="var(--surface-3)" stroke="var(--review)" stroke-dasharray="4 4"/>
+          <text x="330" y="90" text-anchor="middle" fill="var(--review)" font-size="12">Guard</text>
+          <text x="330" y="108" text-anchor="middle" fill="var(--ink-faint)" font-size="10">missing / dropped</text>
+        </g>
+        <g>
+          <rect x="510" y="68" width="160" height="54" rx="10" fill="var(--surface-3)" stroke="var(--border)"/>
+          <text x="590" y="90" text-anchor="middle" fill="var(--ink-dim)" font-size="12">Handler</text>
+          <text x="590" y="108" text-anchor="middle" fill="var(--ink-faint)" font-size="10">list_users(name)</text>
+        </g>
+        <g class="sink-glow" filter="url(#glow)">
+          <rect x="740" y="66" width="140" height="58" rx="10" fill="color-mix(in oklab,var(--critical) 22%, var(--surface))" stroke="var(--critical)"/>
+          <text x="810" y="90" text-anchor="middle" fill="var(--critical)" font-size="12" font-weight="700">SINK</text>
+          <text x="810" y="108" text-anchor="middle" fill="var(--ink)" font-size="10">db.execute()</text>
+        </g>
+        <text x="450" y="160" text-anchor="middle" fill="var(--ink-faint)" font-size="11">reachable · data-tainted · CRITICAL 95/100 · REVIEW</text>
+      </svg>
+    </div>
+    <div class="grid g3" style="margin-top:18px">
+      <div class="card"><span class="k">reachability</span><p>Cross-file, interprocedural paths (route → service → repository → sink) with a <code>--shallow</code> mode for comparison.</p></div>
+      <div class="card"><span class="k">resolution honesty</span><p>Cross-file call resolution degrades to <em>low confidence · ambiguous</em> rather than asserting certainty.</p></div>
+      <div class="card"><span class="k">offline report</span><p>One self-contained HTML file: a neon graph explorer, security-zones view, and a guided top-attack-path narrative.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= LANGUAGES ======================= -->
+<section id="languages">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Languages &amp; coverage</span>
+      <h2>Five languages — and it says how far each is validated.</h2>
+      <p>Assurance isn't uniform across the five, and CyberGraph won't imply parity it hasn't earned. Python carries the strongest validated coverage; the others grade sink arguments the same way and stay <b>Beta</b> until each earns its own labelled benchmark.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Language</th><th>Frameworks</th><th>Injection verdicts</th><th>Validation</th></tr></thead>
+        <tbody>
+          <tr class="py"><td><span class="lang">Python</span></td><td>FastAPI · Flask · Django</td><td>SQL · command · path · code-exec · deserialization · template</td><td><span class="val bench">Benchmark ✓</span></td></tr>
+          <tr><td><span class="lang">JavaScript / TS</span></td><td>Express · Next.js</td><td>SQL · command · code-exec · path</td><td><span class="val beta">Beta</span></td></tr>
+          <tr><td><span class="lang">Go</span></td><td>net/http · Gin · Echo</td><td>SQL · command · path</td><td><span class="val beta">Beta</span></td></tr>
+          <tr><td><span class="lang">Java</span></td><td>Spring · JDBC</td><td>SQL · command · path · deserialization</td><td><span class="val beta">Beta</span></td></tr>
+          <tr><td><span class="lang">C#</span></td><td>ASP.NET Core · ADO.NET</td><td>SQL · command · path · deserialization · code-exec</td><td><span class="val beta">Beta</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="compare-note">Only Python is held to a labelled precision/recall/abstention benchmark that gates every change. Each verdict is computed from <b>construction provenance</b> — <code>"SELECT " + userId</code> is UNSAFE, an all-literal <code>"SELECT 1"</code> is SAFE — never a keyword match.</p>
+  </div>
+</section>
+
+<!-- ======================= ENFORCEMENT ======================= -->
+<section id="enforce" style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Automatic verification &amp; the policy gate</span>
+      <h2>Runs the moment code is accepted — enforcement kept separate from the verdict.</h2>
+      <p>Install a hook and the verdict fires on every agent turn or commit, whether or not the agent chooses to check itself. A separate policy layer decides what CI does about a verdict — it never rewrites it.</p>
+    </div>
+    <div class="two">
+      <div>
+        <div class="grid g2" style="gap:14px">
+          <div class="card"><h3 style="color:var(--accept)">block</h3><p>A confirmed regression, or an unknown on a declared-protected route (by default). Stops the build.</p></div>
+          <div class="card"><h3 style="color:var(--review)">warn</h3><p>Surfaced, advisory. The change proceeds; the reviewer is told.</p></div>
+        </div>
+        <div class="callout" style="margin-top:14px"><b>No policy can turn a REVIEW into an ACCEPT.</b> The gate only decides whether CI stops; the verdict is reported unchanged beside it. <code>--fail-on-review</code> now fails the build only when the gate blocks.</div>
+      </div>
+      <pre class="code"><span class="c"># run automatically on every agent turn or commit</span>
+<b>cybergraph</b> hook install claude-code
+<b>cybergraph</b> hook install pre-commit
+
+<span class="c"># declare enforcement — cybergraph.policy.toml</span>
+<span class="o">[verification]</span>
+block_confirmed_regressions        = <span class="o">true</span>
+block_unknown_on_protected_routes  = <span class="o">true</span>
+block_general_unknown              = <span class="o">false</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= INTEROP ======================= -->
+<section id="interop">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">A hub, not just another scanner</span>
+      <h2>Fits the tools you already run.</h2>
+    </div>
+    <div class="interop">
+      <div class="io"><span class="lbl">Imports</span><p>OSV Scanner, npm audit, Semgrep, SARIF, Gitleaks — all into the same graph.</p></div>
+      <div class="io"><span class="lbl">Exports</span><p>SARIF for GitHub code scanning, JSON graph, BloodHound OpenGraph.</p></div>
+      <div class="io"><span class="lbl">SCA · reachability</span><p>Ranks dependency CVEs by whether the vulnerable code is actually reachable from production routes.</p></div>
+      <div class="io"><span class="lbl">Cloud &amp; IaC</span><p>Correlates Terraform resources to code, so public exposure connects to reachable routes and sinks.</p></div>
+      <div class="io"><span class="lbl">MCP tools</span><p>An interoperability surface for AI assistants — including <code>check_change_tool</code>, byte-identical to the CLI.</p></div>
+      <div class="io"><span class="lbl">AI pentester bridge</span><p>Turns reachable paths into a focused Strix scope; feeds PoC-validated findings back so they rank at the top.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= INSTALL ======================= -->
+<section id="install" style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Get started</span>
+      <h2>Zero API keys · zero signup · zero network calls.</h2>
+      <p>Zero runtime dependencies and fully offline — installable in regulated environments where network-reaching tooling can't go. Python 3.10 – 3.13.</p>
+    </div>
+    <div class="two">
+      <pre class="code"><span class="c"># install (isolated CLI)</span>
+<b>pipx</b> install cybergraph
+
+<span class="c"># one command: verify a pending change,</span>
+<span class="c"># or scan the current code if there's none</span>
+<b>cybergraph</b> .
+
+<span class="c"># the core verdict, machine-readable</span>
+<b>cybergraph</b> check . --json</pre>
+      <pre class="code"><span class="c"># zero-to-report: init, build, analyze, open</span>
+<b>cybergraph</b> quickstart .
+
+<span class="c"># interactive, offline HTML security map</span>
+<b>cybergraph</b> visualize path/to/repo
+
+<span class="c"># evidence-cited answer, works with no LLM</span>
+<b>cybergraph</b> explain "Which routes reach SQL execution?"</pre>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="brand"><span class="glyph">◆</span> CyberGraph</div>
+    <div class="mono" style="color:var(--ink-faint)">offline · deterministic · no tokens · Beta</div>
+    <div class="mono">AI writes. <span style="color:var(--accent)">CyberGraph verifies.</span></div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // ---- theme toggle ----
+  var btn=document.getElementById('themeBtn'), icon=document.getElementById('themeIcon'), root=document.documentElement;
+  function current(){ if(root.dataset.theme) return root.dataset.theme;
+    return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+  function paint(){ icon.textContent = current()==='light' ? '☀' : '☾'; }
+  btn.addEventListener('click',function(){ root.dataset.theme = current()==='light' ? 'dark' : 'light'; paint(); });
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change',paint); paint();
+
+  // ---- hero graph backdrop (subtle node-edge field) ----
+  var c=document.getElementById('graphCanvas'); if(!c) return;
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var ctx=c.getContext('2d'), nodes=[], W,H, DPR=Math.min(devicePixelRatio||1,2);
+  function accent(){ return getComputedStyle(root).getPropertyValue('--accent').trim()||'#45d3c4'; }
+  function size(){ var r=c.getBoundingClientRect(); W=r.width; H=r.height; c.width=W*DPR; c.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0); }
+  function init(){ size(); nodes=[]; var n=Math.max(14,Math.round(W/70));
+    for(var i=0;i<n;i++) nodes.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.18,vy:(Math.random()-.5)*.18}); }
+  function frame(){
+    ctx.clearRect(0,0,W,H); var a=accent();
+    for(var i=0;i<nodes.length;i++){ var p=nodes[i];
+      if(!reduce){ p.x+=p.vx; p.y+=p.vy; if(p.x<0||p.x>W)p.vx*=-1; if(p.y<0||p.y>H)p.vy*=-1; }
+      for(var j=i+1;j<nodes.length;j++){ var q=nodes[j], dx=p.x-q.x, dy=p.y-q.y, d=Math.hypot(dx,dy);
+        if(d<130){ ctx.globalAlpha=(1-d/130)*.28; ctx.strokeStyle=a; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke(); } }
+    }
+    for(var k=0;k<nodes.length;k++){ ctx.globalAlpha=.7; ctx.fillStyle=a; ctx.beginPath(); ctx.arc(nodes[k].x,nodes[k].y,1.8,0,7); ctx.fill(); }
+    ctx.globalAlpha=1; if(!reduce) requestAnimationFrame(frame);
+  }
+  init(); frame(); addEventListener('resize',function(){ init(); if(reduce) frame(); });
+})();
+</script>
+</body>
+</html>
