@@ -105,6 +105,41 @@ This precision is why a verdict is trustworthy enough to gate on. It is computed
 construction provenance — `"SELECT ... " + userId` is UNSAFE, `String.format`/interpolation with
 a variable hole is UNSAFE, an all-literal `"SELECT 1"` is SAFE — not from a keyword match.
 
+### Claim language bounded by assurance
+
+A finding is only ever described as strongly as it has been *validated*. Each reason carries two
+independent axes — how strong the **evidence** is (from none up to a confirmed, taint-backed
+finding) and how mature the **capability** is for that language/framework (inventory → beta →
+benchmark-backed) — and the wording is bounded by the weaker of the two
+(`effective_trust = min(evidence, assurance)`). So the default projection says:
+
+- **"Confirmed:"** only when the finding is confirmed **and** the evidence is strong **and** the
+  capability is benchmark-backed (today: Python injection).
+- **"Possible:"** when the same construction is found on a beta-assured stack — the *identical*
+  tainted query in JavaScript reads "Possible," not "Confirmed," because that capability is not
+  yet benchmark-validated, even though the finding itself is real.
+- **"could not verify" / "not evaluated"** for the honest blind spots.
+
+No configuration, surface, or phrasing step can upgrade a reason above what its evidence and
+assurance support — the projection asserts this (an "epistemic upgrade" is a caught error, not a
+style choice). This is the product principle in one line: *compress complexity, never compress
+uncertainty.* ACCEPT is never a certificate of safety, and "Possible" is never quietly rounded up
+to "Confirmed" or down to "fine."
+
+### The one-command verdict and the collapsed view
+
+`cybergraph .` is the golden path: it detects whether there is a pending change, verifies it, and
+prints a **collapsed** view — a decision line, the single most load-bearing reason (worded as
+above), and the one load-bearing evidence gap, with `--verbose` for the full epistemic block. A
+thin result — no confirmed regression, only things that couldn't be evaluated — is a first-class
+outcome, named explicitly rather than shown as a bare status token. On a clean working tree (or
+where there is no base to diff against) it scans the current code and *says so*, because printing
+a change-shaped ACCEPT over un-diffed committed history would claim a check that never happened.
+
+The same collapsed verdict is what the PR comment renders — it is a **projection** of the one
+canonical verdict object, not a second, re-derived opinion, so the CLI and the PR comment lead
+with the identical decision and reason.
+
 ---
 
 ## 3. Languages & coverage
@@ -162,6 +197,27 @@ cybergraph hook uninstall pre-commit
 
 The hook is what closes the loop for AI-generated code: the verdict runs on **every** agent turn
 or commit regardless of whether the agent chooses to check itself.
+
+### The policy gate — enforcement, kept separate from the verdict
+
+Whether a REVIEW should *stop* a build is a policy decision, not an engine decision, so it lives
+in its own layer. An optional `[verification]` table in `cybergraph.policy.toml` maps a verdict
+to a **gate** — `block`, `warn`, or `info`:
+
+```toml
+[verification]
+block_confirmed_regressions = true        # a confirmed regression blocks (default)
+block_unknown_on_protected_routes = true  # an unknown on a declared-protected route blocks (default)
+block_general_unknown = false             # a general "couldn't verify" is advisory (default)
+```
+
+The invariant is strict: **the gate never rewrites the verdict.** No combination of these settings
+can turn a REVIEW into an ACCEPT — the gate only decides whether CI stops, and the epistemic
+verdict is reported unchanged alongside it. Because enforcement is now gate-driven,
+`cybergraph check --fail-on-review` exits non-zero **only when the gate blocks**: a confirmed
+regression or a protected-route unknown still fails the build by default, but a change that is a
+REVIEW purely because a capability couldn't be evaluated no longer fails it unless you opt in via
+the policy. (This is a behaviour change from the earlier "fail on any REVIEW" flag.)
 
 ---
 
@@ -306,6 +362,15 @@ inlined — no CDN, no network):
   false-positive rate is measured.
 - Python 3.10 – 3.13; ruff-linted; a labelled precision/recall/abstention benchmark and a
   mutation harness that proves the verdicts can actually fail (every seeded fail-open is caught).
+- **Change Assurance benchmark** — a patch-pair harness (`benchmark/change_assurance.py`) runs
+  real changes through `cybergraph check` and reports a metric *suite* with **false-ACCEPT as the
+  primary figure** and **no single blended score**, so a precision gain bought with a missed
+  regression stays visible.
+- **Adversarial "Patch-to-Pass"** (`benchmark/patch_to_pass.py`) — proves surface-only "fixes"
+  don't game the verdict: an alternate SQL construction (`"".join`, `%`-format, `.format`) or a
+  name-only `sanitize()` that changes nothing must **not** flip a REVIEW to ACCEPT, while a
+  genuinely parameterized fix must. Any construction that slips past is recorded as a known gap,
+  not silently tolerated.
 
 ---
 
@@ -313,6 +378,7 @@ inlined — no CDN, no network):
 
 ```text
 cybergraph quickstart .        # zero-to-report: init, build, analyze, open report
+cybergraph .                   # one command: detect the change, verify it, print the collapsed verdict
 cybergraph check .             # ACCEPT/REVIEW verdict for a change (the core command)
 cybergraph hook install ...    # run check automatically on commit / agent turn
 cybergraph policy --repo .     # show the declared security policy

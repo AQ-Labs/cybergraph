@@ -18,7 +18,27 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from cybergraph.graph import Finding, GraphStore
+from cybergraph.graph import UNVERIFIED_SUFFIX, Finding, GraphStore
+from cybergraph.security.assurance import (
+    ASSURANCE_BENCHMARKED,
+    ASSURANCE_BETA,
+    ASSURANCE_INVENTORY,
+    ASSURANCE_UNSUPPORTED,
+    EVIDENCE_NONE,
+    EVIDENCE_PARTIAL,
+    EVIDENCE_STRONG,
+    EVIDENCE_WEAK,
+    REASON_CONFIRMED_REGRESSION,
+    REASON_UNRESOLVED,
+    REASON_UNSUPPORTED,
+    STATUS_CONFIRMED,
+    STATUS_UNRESOLVED,
+    STATUS_UNSUPPORTED,
+    assurance_for,
+    effective_trust,
+    has_epistemic_upgrade,
+    phrase_for,
+)
 from cybergraph.security.capability import (
     FAIL,
     NOT_SUPPORTED,
@@ -27,11 +47,24 @@ from cybergraph.security.capability import (
     CheckResult,
     label_for,
     triggers_review,
+    unverified_source_files,
 )
-from cybergraph.security.policy import PolicyChange
+from cybergraph.security.checks import backing_finding, capability_files, escalated_risk_deltas
+from cybergraph.security.policy import PolicyChange, ProtectedSet
 
 STATE_ACCEPT = "accept"
 STATE_REVIEW = "review"
+
+# Canonical gate values (Law 7: policy sets the gate, never the decision).
+# Defined HERE, not in ``policy_gate``, because ``policy_gate`` already
+# imports ``Verdict``/``Reason`` from this module -- importing back from it
+# there would be a cycle. ``policy_gate`` imports and re-exports these three
+# names so existing ``policy_gate.GATE_BLOCK``-style imports keep working
+# unchanged, with a single source of truth instead of two literals kept equal
+# only by convention.
+GATE_BLOCK = "block"
+GATE_WARN = "warn"
+GATE_INFO = "info"
 
 _POLICY_HEADLINES = {
     "policy_deleted": "Your security policy file was deleted in this change.",
@@ -60,6 +93,205 @@ class Reason:
     line: int = 0
     rule_id: str = ""
     kind: str = ""
+    status: str = ""
+    evidence: str = ""
+    assurance: str = ""
+    impact: str = ""
+    reason_class: str = ""
+    protected: bool = False
+
+
+# --- Epistemics: map a `CheckResult` the engine already produced onto the
+# vocabulary in `cybergraph.security.assurance`. No new analysis: every input
+# below (a `Finding`, a `RiskDelta`, the changed files, the declared
+# `ProtectedSet`) is a signal `evaluate_capabilities` already computed.
+
+_STATUS_BY_CHECK_STATUS = {
+    FAIL: STATUS_CONFIRMED,
+    UNKNOWN: STATUS_UNRESOLVED,
+    NOT_SUPPORTED: STATUS_UNSUPPORTED,
+}
+
+_REASON_CLASS_BY_STATUS = {
+    STATUS_CONFIRMED: REASON_CONFIRMED_REGRESSION,
+    STATUS_UNRESOLVED: REASON_UNRESOLVED,
+    STATUS_UNSUPPORTED: REASON_UNSUPPORTED,
+}
+
+# Extension -> language, exactly the cells the brief names. Anything else
+# (`.jsx`, `.tsx`, an unrecognised extension, no backing finding at all)
+# stays `None` and lands on `assurance_for`'s own beta fallback -- today's
+# matrix already treats every non-Python injection language as beta, so no
+# language here is under- or over-claimed by staying unmapped.
+_LANGUAGE_BY_EXTENSION = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".go": "go",
+    ".java": "java",
+    ".cs": "csharp",
+}
+
+_VALID_IMPACTS = ("critical", "high", "medium", "low")
+_IMPACT_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0, "": -1}
+_REASON_CLASS_RANK = {
+    REASON_CONFIRMED_REGRESSION: 2,
+    REASON_UNRESOLVED: 1,
+    REASON_UNSUPPORTED: 0,
+}
+
+# Effective-trust tiers as a rank, mirroring assurance's own evidence/assurance
+# scale pairing index-for-index (Law 3): none/unsupported=0 ... strong/
+# benchmark_backed=3. Used to rank a reason by how *substantiated* it is,
+# independent of its nominal impact -- an inventory-grade "possible" reason
+# must never out-headline a benchmark-backed "confirmed" one just because its
+# impact label happens to read higher (design §4).
+_TRUST_RANK: dict[str, int] = {
+    EVIDENCE_NONE: 0, ASSURANCE_UNSUPPORTED: 0,
+    EVIDENCE_WEAK: 1, ASSURANCE_INVENTORY: 1,
+    EVIDENCE_PARTIAL: 2, ASSURANCE_BETA: 2,
+    EVIDENCE_STRONG: 3, ASSURANCE_BENCHMARKED: 3,
+}
+
+
+def _trust_rank(reason: Reason) -> int:
+    """0-3: how substantiated ``reason`` is -- the weaker of its evidence
+    strength and capability assurance (``assurance.effective_trust``, Law 3)."""
+    return _TRUST_RANK.get(effective_trust(reason.evidence, reason.assurance), -1)
+
+
+def _language_for(file_path: str) -> str | None:
+    return _LANGUAGE_BY_EXTENSION.get(Path(file_path).suffix.lower())
+
+
+def _evidence_for(finding: Finding | None) -> str:
+    if finding is None:
+        return EVIDENCE_NONE
+    if finding.rule_id.endswith(UNVERIFIED_SUFFIX):
+        return EVIDENCE_PARTIAL
+    return EVIDENCE_STRONG if finding.evidence else EVIDENCE_WEAK
+
+
+def _normalize_impact(value: str) -> str:
+    lowered = (value or "").strip().lower()
+    return lowered if lowered in _VALID_IMPACTS else "medium"
+
+
+def _impact_for(check: CheckResult, finding: Finding | None, risk_deltas: list) -> str:
+    if finding is not None:
+        return _normalize_impact(finding.severity)
+    if check.capability_id == "reachable_data_paths" and check.status == FAIL:
+        escalated = escalated_risk_deltas(risk_deltas)
+        if escalated:
+            return _normalize_impact(escalated[0].risk_label)
+    if check.capability_id == "declared_login_rules" and check.status == FAIL:
+        # A declared login rule with nothing guarding it is broken access
+        # control by definition -- there is no lesser-severity reading of it.
+        return "critical"
+    if check.status in (UNKNOWN, NOT_SUPPORTED):
+        # Impact-if-true, not a certainty claim: an unresolved or unsupported
+        # change could hide anything up to the worst case, so it is never
+        # allowed to rank milder than a confirmed regression of known impact.
+        return "critical"
+    return ""
+
+
+def _protected_boundary(
+    check: CheckResult,
+    finding: Finding | None,
+    changed_files: tuple[str, ...],
+    protected_set: ProtectedSet,
+) -> bool:
+    """Whether the file behind this reason is one the declared policy protects."""
+    entity_files = {e.file_path for e in protected_set.entities.values() if e.file_path}
+    if not entity_files:
+        return False
+    if check.capability_id == "declared_login_rules" and check.status == FAIL:
+        return True
+    if finding is not None:
+        return finding.file_path in entity_files
+    if check.status == NOT_SUPPORTED:
+        files = unverified_source_files(capability_files(check.capability_id, changed_files))
+        if not files:
+            files = capability_files(check.capability_id, changed_files)
+        return any(file in entity_files for file in files)
+    return False
+
+
+def _reason_for_check(
+    check: CheckResult,
+    findings: list[Finding],
+    changed_files: tuple[str, ...],
+    protected_set: ProtectedSet,
+    risk_deltas: list,
+) -> tuple[Reason | None, bool]:
+    """Build the reason (plus its protected-boundary flag) for one check result.
+
+    Returns ``(None, False)`` for PASS/NOT_APPLICABLE, the two statuses that
+    already produce no reason at all in ``decide``'s check loop.
+    """
+    status = _STATUS_BY_CHECK_STATUS.get(check.status)
+    if status is None:
+        return None, False
+
+    label = label_for(check.capability_id)
+    if check.status == FAIL:
+        headline, kind = f"{label}: {check.detail}", "check_failed"
+    elif check.status == UNKNOWN:
+        detail = f" {check.detail}" if check.detail else ""
+        headline = f"CyberGraph could not check {label.lower()}.{detail}"
+        kind = "check_unknown"
+    else:
+        headline = (
+            f"This change touches things CyberGraph cannot verify yet ({label.lower()})."
+        )
+        kind = "check_unsupported"
+
+    finding = backing_finding(check.capability_id, findings)
+    language = _language_for(finding.file_path) if finding is not None else None
+    # assurance_for is case-sensitive and fails closed -- lowercase before calling
+    # it even though our own language table already only yields lowercase names.
+    assurance = assurance_for(check.capability_id, (language or "").lower() or None, None)
+    protected = _protected_boundary(check, finding, changed_files, protected_set)
+    reason = Reason(
+        headline=headline,
+        rule_id=check.capability_id,
+        kind=kind,
+        status=status,
+        evidence=_evidence_for(finding),
+        assurance=assurance,
+        impact=_impact_for(check, finding, risk_deltas),
+        reason_class=_REASON_CLASS_BY_STATUS[status],
+        protected=protected,
+    )
+    return reason, protected
+
+
+def _primary_reason(reasons: list[Reason], protected_flags: list[bool]) -> str:
+    """The reason maximizing ``(protected_boundary, effective_trust, impact_rank,
+    reason_severity)`` -- trust-first, not impact-first, once protected_boundary
+    ties (design §4): an inventory-grade "possible" reason must never out-headline
+    a benchmark-backed "confirmed" one just because its nominal impact reads
+    higher. ``protected_boundary`` still outranks everything else: a critical
+    unsupported change on a declared boundary leads regardless of trust.
+    """
+    candidates = [
+        (reason, protected)
+        for reason, protected in zip(reasons, protected_flags, strict=True)
+        if reason.reason_class
+    ]
+    if not candidates:
+        return ""
+    best_reason, _ = max(
+        candidates,
+        key=lambda pair: (
+            pair[1],
+            _trust_rank(pair[0]),
+            _IMPACT_RANK.get(pair[0].impact, -1),
+            _REASON_CLASS_RANK.get(pair[0].reason_class, -1),
+        ),
+    )
+    return best_reason.reason_class
 
 
 @dataclass(frozen=True)
@@ -79,15 +311,31 @@ class Verdict:
     checks: tuple[CheckResult, ...] = ()
     not_evaluated: tuple[str, ...] = ()
     provenance: Provenance = Provenance()
+    gate: str = ""
+    primary_reason: str = ""
 
 
 def decide(
     checks: list[CheckResult],
     policy_changes: list[PolicyChange],
     provenance: Provenance,
+    findings: list[Finding] = (),
+    protected_set: ProtectedSet = ProtectedSet(),
+    changed_files: tuple[str, ...] = (),
+    risk_deltas: list = (),
 ) -> Verdict:
-    """Combine capability results and policy changes into one decision."""
+    """Combine capability results and policy changes into one decision.
+
+    ``findings``/``protected_set``/``changed_files``/``risk_deltas`` are the
+    same signals ``evaluate_capabilities`` already consumed to produce
+    ``checks`` -- passed again here only so each reason's epistemics
+    (``status``/``evidence``/``assurance``/``impact``/``reason_class``) and
+    ``primary_reason`` can be derived from them. All default to empty, so
+    existing callers keep working; without them every check-based reason
+    simply carries the least it can honestly claim (``evidence=none``).
+    """
     reasons: list[Reason] = []
+    protected_flags: list[bool] = []
 
     for change in policy_changes:
         template = _POLICY_HEADLINES.get(change.kind, "")
@@ -102,69 +350,289 @@ def decide(
                 kind=change.kind,
             )
         )
+        protected_flags.append(False)
 
     for check in checks:
-        label = label_for(check.capability_id)
-        if check.status == FAIL:
-            reasons.append(
-                Reason(headline=f"{label}: {check.detail}",
-                       rule_id=check.capability_id, kind="check_failed")
-            )
-        elif check.status == UNKNOWN:
-            detail = f" {check.detail}" if check.detail else ""
-            reasons.append(
-                Reason(headline=f"CyberGraph could not check {label.lower()}.{detail}",
-                       rule_id=check.capability_id, kind="check_unknown")
-            )
-        elif check.status == NOT_SUPPORTED:
-            reasons.append(
-                Reason(
-                    headline=f"This change touches things CyberGraph cannot verify yet "
-                             f"({label.lower()}).",
-                    rule_id=check.capability_id, kind="check_unsupported",
-                )
-            )
+        reason, protected = _reason_for_check(
+            check, findings, changed_files, protected_set, risk_deltas
+        )
+        if reason is None:
+            continue
+        reasons.append(reason)
+        protected_flags.append(protected)
 
     state = STATE_REVIEW if (reasons or triggers_review(checks)) else STATE_ACCEPT
     not_evaluated = tuple(
         label_for(check.capability_id) for check in checks if check.status == NOT_SUPPORTED
     )
-    return Verdict(state, tuple(reasons), tuple(checks), not_evaluated, provenance)
+    return Verdict(
+        state, tuple(reasons), tuple(checks), not_evaluated, provenance,
+        primary_reason=_primary_reason(reasons, protected_flags),
+    )
 
 
-def format_verdict(verdict: Verdict) -> str:
-    """Render for a terminal reader. Never claims more than was checked."""
+_THIN_STATUSES = (STATUS_UNRESOLVED, STATUS_UNSUPPORTED)
+
+
+def _where(reason: Reason) -> str:
+    return f" ({reason.file_path}:{reason.line})" if reason.file_path else ""
+
+
+def _guarded(text: str, status: str) -> str:
+    """Assert Law 1 holds before a reason line is ever handed back to a caller.
+
+    ``has_epistemic_upgrade`` is always False for ``STATUS_CONFIRMED`` (that
+    language is warranted there) -- this only ever fires for a non-confirmed
+    reason, and only when a forbidden verb has slipped past ``phrase_for``.
+    A regression here is a bug in this module, not bad input, so it asserts
+    rather than degrading the text.
+    """
+    assert not has_epistemic_upgrade(text, status), (
+        f"Law 1 violation: epistemic upgrade in a non-confirmed reason line: {text!r}"
+    )
+    return text
+
+
+def _detail_for(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
+    """The reason string behind an unresolved/unsupported reason.
+
+    Always ``CheckResult.detail`` when one exists -- never the bare
+    ``UNKNOWN``/``NOT_SUPPORTED`` status token -- falling back to the
+    reason's own headline only when no matching check is found.
+    """
+    for check in checks:
+        if check.capability_id == reason.rule_id and check.detail:
+            return check.detail
+    return reason.headline
+
+
+def _claim_text(reason: Reason, checks: tuple[CheckResult, ...]) -> str:
+    """`<Phrase>: <what happened>` -- the verb is always ``assurance.phrase_for``'s,
+    never hand-written, so it can never claim more than ``status``/``evidence``/
+    ``assurance`` warrant (Laws 1 & 3)."""
+    phrase = phrase_for(reason.status, reason.evidence, reason.assurance)
+    if reason.status == STATUS_CONFIRMED:
+        body = f"{reason.headline}{_where(reason)}"
+    else:
+        body = f"{label_for(reason.rule_id)}: {_detail_for(reason, checks)}{_where(reason)}"
+    return _guarded(f"{phrase.capitalize()}: {body}", reason.status)
+
+
+def _select_primary(epistemic: list[Reason], primary_reason: str) -> Reason:
+    """The reason ``decide`` already ranked highest (protected-boundary x
+    effective-trust x impact x severity), re-found by its ``reason_class``
+    across the FULL epistemic set -- confirmed, unresolved, and unsupported
+    reasons alike (falling back to the whole set if none match).
+
+    A thin reason can rank above a low-impact confirmed one -- a CRITICAL
+    unsupported/unresolved change on a protected boundary outranks a low-impact
+    confirmed regression (spec §4, ``decide``'s own ``_primary_reason``). The
+    headline the reader sees must say so: searching only the confirmed subset
+    here would silently downgrade that top risk to a secondary "gap" line
+    whenever any confirmed reason -- however minor -- also happened to exist.
+
+    ``reason_class`` alone does not always pick a single reason (two FAILed
+    checks are both ``confirmed_regression``, say) -- ties within the pool are
+    broken protected-first, then trust, then by impact, mirroring ``decide``'s
+    own key exactly: ``Reason.protected`` is carried on every reason, so two
+    same-class reasons that differ in protected status must resolve the same
+    way here as they did in ``decide``'s cross-reason ranking.
+    """
+    pool = [r for r in epistemic if r.reason_class == primary_reason] or epistemic
+    return max(
+        pool,
+        key=lambda r: (
+            r.protected,
+            _trust_rank(r),
+            _IMPACT_RANK.get(r.impact, -1),
+            _REASON_CLASS_RANK.get(r.reason_class, -1),
+        ),
+    )
+
+
+def select_primary_reason(verdict: Verdict) -> Reason | None:
+    """The single reason every presentation surface must headline for ``verdict``.
+
+    A thin, public wrapper around :func:`_select_primary` so a second surface
+    (the PR comment, the MCP tool, ...) can pick the identical reason the CLI's
+    ``format_verdict`` headlines for the same ``Verdict`` -- without either
+    duplicating the trust/impact tiebreak here or reaching across modules for
+    a private name (Law 4: a projection surface renders this decision, it
+    never re-derives it). Returns ``None`` only when ``verdict`` has no
+    epistemic reason at all (an all-policy or empty-reason Verdict).
+    """
+    epistemic = [r for r in verdict.reasons if r.reason_class]
+    if not epistemic:
+        return None
+    return _select_primary(epistemic, verdict.primary_reason)
+
+
+def _trust_gap(reason: Reason) -> str:
+    """What keeps a lone confirmed reason short of full ``confirmed`` trust --
+    used only when no other reason names a sharper gap. Guarded like every
+    other rendered reason line even though these fixed strings never trip the
+    Law 1 lint today -- the check should be universal, not case-by-case."""
+    if reason.assurance != ASSURANCE_BENCHMARKED:
+        return _guarded(
+            "CyberGraph has not benchmarked this analysis for this language yet.",
+            reason.status,
+        )
+    if reason.evidence != EVIDENCE_STRONG:
+        return _guarded("The evidence trail behind this finding is incomplete.", reason.status)
+    return ""
+
+
+def _top_gap(
+    epistemic: list[Reason], primary: Reason, checks: tuple[CheckResult, ...]
+) -> str:
+    """The single most load-bearing thing left unsaid by the headline: the
+    highest-impact reason other than the primary one -- confirmed or thin
+    alike, so a secondary confirmed regression is never dropped just because
+    a thin reason led the headline -- or, when there is no other reason, what
+    keeps a confirmed primary itself short of full confirmation."""
+    others = [r for r in epistemic if r is not primary]
+    if others:
+        top = max(others, key=lambda r: _IMPACT_RANK.get(r.impact, -1))
+        return _claim_text(top, checks)
+    if primary.status == STATUS_CONFIRMED:
+        return _trust_gap(primary)
+    return ""
+
+
+def _verbose_block(verdict: Verdict) -> list[str]:
+    """The full epistemic block behind ``[Why?]`` (Law 5: drill-down, never hidden).
+
+    Every field a reason carries, plus the confirmed/not-established evidence
+    split -- passed checks and the capabilities this change touched but
+    CyberGraph could not evaluate.
+    """
+    lines = ["", "[Why?]", f"  Decision: {verdict.state.upper()}"]
+    if verdict.primary_reason:
+        lines.append(f"  Primary reason: {verdict.primary_reason}")
+    for reason in verdict.reasons:
+        lines.append(
+            f"  - Status: {reason.status or 'n/a'}  Evidence: {reason.evidence or 'n/a'}  "
+            f"Assurance: {reason.assurance or 'n/a'}  Impact: {reason.impact or 'n/a'}"
+        )
+        lines.append(f"      {reason.headline}{_where(reason)}")
+
+    passed = [check for check in verdict.checks if check.status == PASS]
+    if passed:
+        lines.extend(["", "Confirmed (checks that ran and found nothing):"])
+        lines.extend(f"  ok  {label_for(check.capability_id)}" for check in passed)
+
+    if verdict.not_evaluated:
+        lines.extend(["", "Not established (CyberGraph could not evaluate these):"])
+        lines.extend(f"  --  {label}" for label in verdict.not_evaluated)
+
+    return lines
+
+
+def format_verdict(verdict: Verdict, *, verbose: bool = False) -> str:
+    """Render for a terminal reader. Never claims more than was checked.
+
+    Collapsed by default (spec §3): a decision line, then a single warranted
+    reason (``primary_reason``, worded via ``assurance.phrase_for`` so the verb
+    is always bounded by trust) plus the single most load-bearing evidence gap,
+    then a ``[Why?]`` affordance. A thin result -- no confirmed regression, only
+    unresolved/unsupported checks -- is a first-class outcome: every gap is
+    named with its own reason string, never a bare status token.
+
+    Pass ``verbose=True`` for the full epistemic block (status/evidence/
+    assurance/impact plus the confirmed/not-established evidence split).
+    Detail collapses; a limitation is never hidden even in the default view
+    (Law 5) -- a declared-policy regression is always listed, and the default
+    view always names *some* warranted reason when one exists.
+    """
     lines: list[str] = []
     if verdict.state == STATE_ACCEPT:
         lines.append("No issues found in the checks CyberGraph ran.")
     else:
+        epistemic = [r for r in verdict.reasons if r.reason_class]
+        policy_reasons = [r for r in verdict.reasons if not r.reason_class]
+        confirmed = [r for r in epistemic if r.status == STATUS_CONFIRMED]
+        thin = [r for r in epistemic if r.status in _THIN_STATUSES]
+
         count = len(verdict.reasons)
         noun = "thing needs" if count == 1 else "things need"
         lines.append(f"{count} {noun} your attention before shipping.")
         lines.append("")
-        for reason in verdict.reasons:
-            where = f" ({reason.file_path}:{reason.line})" if reason.file_path else ""
-            lines.append(f"  - {reason.headline}{where}")
 
-    passed = [check for check in verdict.checks if check.status == PASS]
-    if passed:
-        lines.extend(["", "Verified:"])
-        lines.extend(f"  ok  {label_for(check.capability_id)}" for check in passed)
+        if confirmed:
+            # Headline honors decide()'s FULL-reason-set ranking, not "any
+            # confirmed reason wins": a protected-boundary CRITICAL unsupported
+            # change must still lead over a low-impact confirmed one. Routed
+            # through the public select_primary_reason so every surface that
+            # headlines a Verdict picks the identical reason (Law 4).
+            primary = select_primary_reason(verdict)
+            assert primary is not None, "confirmed reasons imply a non-empty epistemic pool"
+            lines.append(_claim_text(primary, verdict.checks))
+            gap = _top_gap(epistemic, primary, verdict.checks)
+            if gap:
+                lines.append(gap)
+        elif thin:
+            plural = "thing" if len(thin) == 1 else "things"
+            lines.append(
+                f"Verification incomplete: no confirmed regressions, but {len(thin)} "
+                f"{plural} could not be fully evaluated:"
+            )
+            lines.extend(f"  - {_claim_text(reason, verdict.checks)}" for reason in thin)
 
-    if verdict.not_evaluated:
-        lines.extend(["", "Not evaluated:"])
-        lines.extend(f"  --  {label}" for label in verdict.not_evaluated)
+        for reason in policy_reasons:
+            lines.append(_guarded(f"  - {reason.headline}{_where(reason)}", reason.status))
+
+        if verdict.gate and verdict.gate != GATE_BLOCK:
+            # A REVIEW policy chose not to block must never read like an
+            # ACCEPT (Law 7: policy sets the gate, it never launders the
+            # decision) -- say so explicitly rather than staying silent.
+            lines.append(f"{count} item(s) surfaced — not blocking per policy.")
+
+        lines.append("")
+        lines.append(
+            "[Why?] Pass verbose=True (or --verbose) for the full evidence, "
+            "coverage, and impact detail."
+        )
+
+    if verbose:
+        lines.extend(_verbose_block(verdict))
 
     return "\n".join(lines)
 
 
 def verdict_to_dict(verdict: Verdict) -> dict:
-    """Machine-readable form. Identical for the CLI and the MCP tool."""
+    """Machine-readable form. Identical for the CLI and the MCP tool.
+
+    Schema v2: adds ``schema_version``, ``decision`` (alias of ``state``),
+    ``gate``, and ``primary_reason`` at the top level, and epistemic fields
+    (``status``, ``evidence``, ``assurance``, ``impact``, ``reason_class``,
+    ``protected``) on each reason. All v1 keys are kept unchanged so existing
+    consumers don't break (spec open-Q4 compatibility window).
+
+    ``policy.action`` is additive: it mirrors ``gate`` so the enforcement
+    input is inspectable on its own (Law 5) without implying a second,
+    independent decision -- policy sets the gate, it never re-decides.
+    """
     return {
+        "schema_version": 2,
         "state": verdict.state,
+        "decision": verdict.state,
+        "gate": verdict.gate,
+        "policy": {"action": verdict.gate},
+        "primary_reason": verdict.primary_reason,
         "reasons": [
-            {"headline": r.headline, "file": r.file_path, "line": r.line,
-             "rule": r.rule_id, "kind": r.kind}
+            {
+                "headline": r.headline,
+                "file": r.file_path,
+                "line": r.line,
+                "rule": r.rule_id,
+                "kind": r.kind,
+                "status": r.status,
+                "evidence": r.evidence,
+                "assurance": r.assurance,
+                "impact": r.impact,
+                "reason_class": r.reason_class,
+                "protected": r.protected,
+            }
             for r in verdict.reasons
         ],
         "checks": [asdict(check) for check in verdict.checks],
@@ -181,7 +649,7 @@ def load_changed_findings(repo_root: Path, changed_files: tuple[str, ...]) -> li
     try:
         placeholders = ",".join("?" for _ in changed_files)
         rows = store.conn.execute(
-            f"SELECT rule_id, severity, message, file_path, line_start, cwe "
+            f"SELECT rule_id, severity, message, file_path, line_start, cwe, evidence "
             f"FROM findings WHERE file_path IN ({placeholders})",
             changed_files,
         ).fetchall()
@@ -190,6 +658,6 @@ def load_changed_findings(repo_root: Path, changed_files: tuple[str, ...]) -> li
     return [
         Finding(rule_id=r["rule_id"], severity=r["severity"], message=r["message"],
                 file_path=r["file_path"], line_start=r["line_start"] or 0,
-                cwe=r["cwe"] or "")
+                cwe=r["cwe"] or "", evidence=r["evidence"] or "")
         for r in rows
     ]

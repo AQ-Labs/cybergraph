@@ -1,16 +1,39 @@
-"""Pull request comment generation."""
+"""Pull request comment generation.
+
+The comment is a PROJECTION of the canonical :class:`~cybergraph.security.verdict.Verdict`
+(Law 4): the decision, the primary reason's wording, the before/after boundary
+story for a policy change, the evidence citation, and the gate line all come
+from ``check_change``'s output, never from a comment-local re-derivation of
+"how risky is this". The "what changed" delta sections below the verdict block
+still pair with :func:`review_security_delta` -- that is real, additional
+value (attack-path/entrypoint/sink deltas) the Verdict does not carry, not a
+second decision.
+"""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from cybergraph.graph import GraphStore
+from cybergraph.security.assurance import phrase_for
+from cybergraph.security.check import check_change
 from cybergraph.security.layers import summarize_layers
+from cybergraph.security.policy_gate import GATE_BLOCK, gate_for, load_verification_config
 from cybergraph.security.review import review_security_delta
+from cybergraph.security.verdict import STATE_REVIEW, Reason, Verdict, select_primary_reason
 
 
 def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
     repo_root = repo_root.resolve()
+
+    verdict = check_change(repo_root, base=base)
+    # check_change is policy-free by design (Law 7): it always returns
+    # gate="". The PR surface applies the same policy layer the CLI does
+    # (cli.py::_run_check) so the gate line here is never invented locally.
+    config = load_verification_config(repo_root)
+    verdict = replace(verdict, gate=gate_for(verdict, config))
+
     review = review_security_delta(repo_root, base=base)
     layers = summarize_layers(repo_root)
     store = GraphStore.open_for_repo(repo_root)
@@ -30,12 +53,11 @@ def generate_pr_comment(repo_root: Path, base: str = "HEAD~1") -> str:
     finally:
         store.close()
 
-    risk = _risk(review)
     lines = [
         "<!-- cybergraph-pr-comment -->",
         "## CyberGraph Security Review",
         "",
-        f"**Risk:** `{risk}`",
+        *_verdict_block(verdict),
         "",
         "### What Changed",
         "",
@@ -138,17 +160,65 @@ def write_pr_comment(repo_root: Path, output: Path, base: str = "HEAD~1") -> Pat
     return output
 
 
-def _risk(review) -> str:
-    if any(
-        delta.status in {"added", "worsened"} and delta.risk_score >= 70
-        for delta in review.risk_deltas
-    ):
-        return "high"
-    if review.attack_path_count or review.finding_count > 3:
-        return "high"
-    if review.finding_count or review.changed_sink_edges or review.changed_entrypoints:
-        return "medium"
-    return "low"
+def _verdict_block(verdict: Verdict) -> list[str]:
+    """The verdict-driven headline: decision, primary reason, before/after
+    boundary story, evidence citation, and gate -- a projection of ``Verdict``,
+    never a comment-local re-derivation of risk (Law 4)."""
+    lines = [f"**Decision:** `{verdict.state.upper()}`"]
+
+    # select_primary_reason is verdict.py's own tiebreak (trust x impact x
+    # severity across the FULL epistemic pool, not insertion order) -- reused
+    # here rather than re-implemented, so the PR headline and `cybergraph
+    # check`'s headline are guaranteed to pick the identical reason for the
+    # identical Verdict (Law 4: a projection never re-derives the decision).
+    primary = select_primary_reason(verdict)
+    if primary is not None:
+        lines.append("")
+        lines.append(_reason_line(primary))
+
+    boundary = [reason for reason in verdict.reasons if not reason.reason_class]
+    if boundary:
+        lines.append("")
+        lines.append("**What changed at the boundary:**")
+        lines.extend(f"- {reason.headline}{_citation(reason)}" for reason in boundary)
+
+    shown = {id(primary)} | {id(reason) for reason in boundary}
+    remaining = [reason for reason in verdict.reasons if id(reason) not in shown]
+    if remaining:
+        noun = "item" if len(remaining) == 1 else "items"
+        lines.append("")
+        lines.append(
+            f"_{len(remaining)} more {noun} surfaced by this check -- run "
+            "`cybergraph check --json` for the full list._"
+        )
+
+    lines.append("")
+    lines.append(_gate_line(verdict))
+    return lines
+
+
+def _reason_line(reason: Reason) -> str:
+    """`<Phrase>: <headline>` -- the verb is always ``assurance.phrase_for``'s,
+    never hand-written, so it can never claim more than the reason's own
+    status/evidence/assurance warrant (Law 1)."""
+    phrase = phrase_for(reason.status, reason.evidence, reason.assurance)
+    return f"**{phrase.capitalize()}:** {reason.headline}{_citation(reason)}"
+
+
+def _citation(reason: Reason) -> str:
+    return f" (`{reason.file_path}:{reason.line}`)" if reason.file_path else ""
+
+
+def _gate_line(verdict: Verdict) -> str:
+    if not verdict.gate:
+        return "**Gate:** not evaluated."
+    line = f"**Gate:** `{verdict.gate}`"
+    if verdict.gate != GATE_BLOCK and verdict.state == STATE_REVIEW:
+        # A REVIEW policy chose not to block must never read like an ACCEPT
+        # (Law 7: policy sets the gate, it never launders the decision) --
+        # say so explicitly, mirroring the CLI's own honesty here.
+        line += " -- review surfaced, not blocking per policy."
+    return line
 
 
 def _change_summary(review) -> str:

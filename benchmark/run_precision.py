@@ -58,9 +58,12 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from change_assurance import SEED_CASES, Metrics, evaluate, run_cases  # noqa: E402
 
 from cybergraph.analysis.python import analyze_python_file  # noqa: E402
 from cybergraph.build import build_graph  # noqa: E402
@@ -338,6 +341,46 @@ def _print_class_table(per_class: dict[str, dict]) -> None:
     print("* abstention measured but not gated for this class.")
 
 
+def _print_change_assurance_suite() -> Metrics:
+    """The Change Assurance Benchmark: a separate suite from the detector-precision
+    gates above.
+
+    Where the gates above score *findings* against a labelled corpus,
+    ``change_assurance`` scores a *verdict* against a patch pair (a base repo
+    state and the head state a real change moves it to), through the real
+    ``check_change`` engine. It is printed here, clearly separated, rather
+    than folded into the per-class gate table: the two measure different
+    things (finding-level precision/recall vs. change-level ACCEPT/REVIEW),
+    and are not blended.
+
+    Reports the five-metric assurance suite (see
+    ``benchmark.change_assurance.Metrics``) with ``false_accept_rate`` printed
+    FIRST and labelled PRIMARY -- the dangerous miss this benchmark exists to
+    catch -- and no blended/aggregate score anywhere in the output.
+    """
+    print("=" * 72)
+    print("Change Assurance Benchmark (patch-pair harness)")
+    print("=" * 72)
+    with tempfile.TemporaryDirectory(prefix="cybergraph-cab-") as tmp:
+        outcomes = run_cases(SEED_CASES, Path(tmp))
+    metrics = evaluate(outcomes)
+    print(f"seeded cases: {len(SEED_CASES)} "
+          f"({', '.join(f'{c.name} [{c.expected}]' for c in SEED_CASES)})")
+    print()
+    print(f"  PRIMARY  false_accept_rate  = {metrics.false_accept_rate:.3f}  "
+          "(a real regression the tool called ACCEPT -- the cardinal failure)")
+    print(f"           recall             = {metrics.recall:.3f}  "
+          "(1 - false_accept_rate over regression cases; reported, not blended)")
+    print(f"           review_precision   = {metrics.review_precision:.3f}")
+    print(f"           abstention_rate    = {metrics.abstention_rate:.3f}  "
+          "(REVIEW with no confirmed regression -- an honest 'could not tell')")
+    print(f"           unsupported_rate   = {metrics.unsupported_rate:.3f}")
+    print("  No blended/aggregate score is computed. Compress complexity. "
+          "Never compress uncertainty.")
+    print()
+    return metrics
+
+
 def main() -> int:
     rows = [
         _score_case(case)
@@ -427,6 +470,13 @@ def main() -> int:
 
     print()
     print(f"Wrote {RESULTS}")
+
+    # A separate suite, printed after but never merged into the gate table or
+    # exit status above: it scores verdicts on patch pairs, not findings
+    # against the labelled corpus, and is not (yet) gated.
+    print()
+    _print_change_assurance_suite()
+
     # Both the verdict and the exit status are stated as "did any line print
     # FAIL?" -- see `_gate_state`. A red gate must exit non-zero: the README
     # documents this file as *the* way to run the gate, so a CI step that shells

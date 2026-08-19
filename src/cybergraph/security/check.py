@@ -88,13 +88,14 @@ def check_change(
         changes.extend(diff_configs(base_state.config, load_config(repo)))
 
     findings = load_changed_findings(repo, revisions.changed_files)
+    risk_deltas = list(_risk_deltas(repo, revisions.base_ref, failure))
     checks = evaluate_capabilities(
         changed_files=revisions.changed_files,
         findings=findings,
         coverage=assess_coverage(repo, revisions.changed_files),
         protected_set=current,
         policy=policy,
-        risk_deltas=list(_risk_deltas(repo, revisions.base_ref, failure)),
+        risk_deltas=risk_deltas,
         revisions_failure=failure,
     )
 
@@ -109,6 +110,10 @@ def check_change(
             policy_hash=policy.source_hash,
             capabilities=tuple(c.id for c in CAPABILITIES if c.supported),
         ),
+        findings=findings,
+        protected_set=current,
+        changed_files=revisions.changed_files,
+        risk_deltas=risk_deltas,
     )
 
 
