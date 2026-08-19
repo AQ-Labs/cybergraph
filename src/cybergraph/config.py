@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,22 @@ CONFIG_FILE = ".cybergraph.toml"
 
 
 @dataclass(frozen=True)
+class Suppression:
+    kind: str
+    matcher: str
+    reason: str
+    expires: date | None
+    approver: str = ""
+
+
+@dataclass(frozen=True)
+class SuppressionProblem:
+    kind: str
+    matcher: str
+    message: str
+
+
+@dataclass(frozen=True)
 class CyberGraphConfig:
     ignored_paths: tuple[str, ...] = ()
     custom_sinks: tuple[str, ...] = ()
@@ -25,6 +42,8 @@ class CyberGraphConfig:
     suppressed_rules: tuple[str, ...] = ()
     suppressed_paths: tuple[str, ...] = ()
     severity_overrides: dict[str, str] = field(default_factory=dict)
+    suppressions: tuple[Suppression, ...] = ()
+    suppression_problems: tuple[SuppressionProblem, ...] = ()
 
 
 def load_config(repo_root: Path) -> CyberGraphConfig:
@@ -32,6 +51,7 @@ def load_config(repo_root: Path) -> CyberGraphConfig:
     if not path.exists():
         return CyberGraphConfig()
     data = _load_toml(path)
+    suppressions, suppression_problems = _parse_suppressions(data)
     return CyberGraphConfig(
         ignored_paths=tuple(_list(data, "ignore", "paths")),
         custom_sinks=tuple(_list(data, "security", "sinks")),
@@ -41,7 +61,72 @@ def load_config(repo_root: Path) -> CyberGraphConfig:
         suppressed_rules=tuple(_list(data, "suppressions", "rules")),
         suppressed_paths=tuple(_list(data, "suppressions", "paths")),
         severity_overrides=dict(data.get("severity", {}).get("overrides", {})),
+        suppressions=suppressions,
+        suppression_problems=suppression_problems,
     )
+
+
+def _parse_suppressions(
+    data: dict[str, Any],
+) -> tuple[tuple[Suppression, ...], tuple[SuppressionProblem, ...]]:
+    """Parse the accountable `[[suppressions.rule]]` / `[[suppressions.path]]` tables.
+
+    These array-of-tables entries can only be represented by `tomllib`
+    (Python 3.11+); the hand-rolled `_load_simple_toml` fallback used on
+    Python 3.10 has no notion of array-of-tables, so on that fallback the
+    values below simply won't be lists of dicts and this function yields no
+    accountable entries — it must not crash.
+    """
+    suppressions: list[Suppression] = []
+    problems: list[SuppressionProblem] = []
+    suppressions_section = data.get("suppressions", {})
+    if not isinstance(suppressions_section, dict):
+        return (), ()
+
+    for kind, matcher_key in (("rule", "id"), ("path", "pattern")):
+        entries = suppressions_section.get(kind, [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            _parse_suppression_entry(kind, matcher_key, entry, suppressions, problems)
+
+    return tuple(suppressions), tuple(problems)
+
+
+def _parse_suppression_entry(
+    kind: str,
+    matcher_key: str,
+    entry: dict[str, Any],
+    suppressions: list[Suppression],
+    problems: list[SuppressionProblem],
+) -> None:
+    matcher = str(entry.get(matcher_key, "") or "").strip()
+    if not matcher:
+        problems.append(
+            SuppressionProblem(kind, matcher, f"missing '{matcher_key}' for {kind} suppression")
+        )
+        return
+
+    reason = str(entry.get("reason", "") or "").strip()
+    if not reason:
+        problems.append(SuppressionProblem(kind, matcher, "missing required 'reason'"))
+        return
+
+    expires: date | None = None
+    raw_expires = entry.get("expires")
+    if raw_expires is not None:
+        try:
+            expires = date.fromisoformat(str(raw_expires))
+        except ValueError:
+            problems.append(
+                SuppressionProblem(kind, matcher, f"invalid 'expires' value: {raw_expires!r}")
+            )
+            return
+
+    approver = str(entry.get("approver", "") or "")
+    suppressions.append(Suppression(kind, matcher, reason, expires, approver))
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
