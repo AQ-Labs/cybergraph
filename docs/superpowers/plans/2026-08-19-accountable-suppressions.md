@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Commits authored as `azizur100389` via the repo git config (GitHub noreply email already set); no AI-attribution/`Co-Authored-By` trailer; never squash; push only to `AQ-Labs/cybergraph`.
-- **No work/session email (`azizur@sirio-strategies.com`) in any file** — use neutral placeholders (e.g. `security-team`, `alice@example.com`) in examples/tests.
+- **No work/session email in any file** — use neutral placeholders (e.g. `security-team`, `alice@example.com`) in examples/tests.
 - Fail-open is mandatory: invalid/expired/malformed suppression must NEVER keep suppressing.
 - Backward compatibility: repos using only `[suppressions] rules`/`paths` must behave exactly as before.
 - `today` defaults to `date.today()` so existing callers are unchanged; tests always pass an explicit `today`.
