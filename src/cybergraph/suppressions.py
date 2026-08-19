@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
 from fnmatch import fnmatch
 
-from cybergraph.config import CyberGraphConfig
+from cybergraph.config import CyberGraphConfig, Suppression, SuppressionProblem
 from cybergraph.graph import UNVERIFIED_SUFFIX, Finding
 
 INLINE_MARKER = "cybergraph: ignore"
@@ -38,12 +39,45 @@ def is_inline_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
     return False
 
 
-def filter_suppressed_findings(findings: list[Finding], config: CyberGraphConfig) -> list[Finding]:
-    return [finding for finding in findings if not is_config_suppressed(finding, config)]
+def filter_suppressed_findings(
+    findings: list[Finding], config: CyberGraphConfig, today: date | None = None
+) -> list[Finding]:
+    return [finding for finding in findings if not is_config_suppressed(finding, config, today)]
 
 
-def is_config_suppressed(finding: Finding, config: CyberGraphConfig) -> bool:
-    return _rule_suppresses(finding.rule_id, config) or _path_suppresses(finding.file_path, config)
+def is_config_suppressed(
+    finding: Finding, config: CyberGraphConfig, today: date | None = None
+) -> bool:
+    return _rule_suppresses(finding.rule_id, config, today) or _path_suppresses(
+        finding.file_path, config, today
+    )
+
+
+def active_suppressions(config: CyberGraphConfig, today: date | None = None) -> list[Suppression]:
+    """Accountable suppressions that are valid right now: not expired.
+
+    ``expires is None`` never expires; otherwise the entry is active through
+    its expiry date inclusive (``expires >= today``).
+    """
+    today = today or date.today()
+    return [
+        entry
+        for entry in config.suppressions
+        if entry.expires is None or entry.expires >= today
+    ]
+
+
+def suppression_problems(
+    config: CyberGraphConfig, today: date | None = None
+) -> list[SuppressionProblem]:
+    """Parse-time suppression problems plus one per expired accountable entry."""
+    today = today or date.today()
+    problems = list(config.suppression_problems)
+    for entry in config.suppressions:
+        if entry.expires is not None and entry.expires < today:
+            message = f"expired on {entry.expires.isoformat()}"
+            problems.append(SuppressionProblem(entry.kind, entry.matcher, message))
+    return problems
 
 
 #: Labels for the config keys that can make a finding disappear without a line
@@ -56,7 +90,9 @@ CONFIG_KEY_SUPPRESSED_PATHS = "[suppressions] paths"
 CONFIG_KEY_IGNORED_PATHS = "[ignore] paths"
 
 
-def config_conceals(rule_id: str, file_path: str, config: CyberGraphConfig) -> str | None:
+def config_conceals(
+    rule_id: str, file_path: str, config: CyberGraphConfig, today: date | None = None
+) -> str | None:
     """Which configuration key, if any, explains a finding's *absence*.
 
     Returns the key's label, or ``None`` when configuration explains nothing --
@@ -78,22 +114,32 @@ def config_conceals(rule_id: str, file_path: str, config: CyberGraphConfig) -> s
     # analyzer, which imports this module, so a module-scope import is circular.
     from cybergraph.analysis.collector import is_ignored_path
 
-    if _rule_suppresses(rule_id, config):
+    if _rule_suppresses(rule_id, config, today):
         return CONFIG_KEY_SUPPRESSED_RULES
-    if _path_suppresses(file_path, config):
+    if _path_suppresses(file_path, config, today):
         return CONFIG_KEY_SUPPRESSED_PATHS
     if is_ignored_path(file_path, config.ignored_paths):
         return CONFIG_KEY_IGNORED_PATHS
     return None
 
 
-def _rule_suppresses(rule_id: str, config: CyberGraphConfig) -> bool:
+def _rule_suppresses(rule_id: str, config: CyberGraphConfig, today: date | None = None) -> bool:
     aliases = _rule_aliases(rule_id)
-    return any(rule.lower() in aliases for rule in config.suppressed_rules)
+    if any(rule.lower() in aliases for rule in config.suppressed_rules):
+        return True
+    return any(
+        entry.kind == "rule" and entry.matcher.lower() in aliases
+        for entry in active_suppressions(config, today)
+    )
 
 
-def _path_suppresses(file_path: str, config: CyberGraphConfig) -> bool:
-    return any(fnmatch(file_path, pattern) for pattern in config.suppressed_paths)
+def _path_suppresses(file_path: str, config: CyberGraphConfig, today: date | None = None) -> bool:
+    if any(fnmatch(file_path, pattern) for pattern in config.suppressed_paths):
+        return True
+    return any(
+        entry.kind == "path" and fnmatch(file_path, entry.matcher)
+        for entry in active_suppressions(config, today)
+    )
 
 
 def _inline_marker_text(line: str) -> str | None:
