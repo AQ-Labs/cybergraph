@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import date
 
 from cybergraph.config import CyberGraphConfig, Suppression
-from cybergraph.suppressions import _rule_suppresses, active_suppressions, suppression_problems
+from cybergraph.suppressions import (
+    _rule_suppresses,
+    active_suppressed_paths,
+    active_suppressed_rules,
+    active_suppressions,
+    suppression_problems,
+)
 
 TODAY = date(2026, 6, 1)
 
@@ -114,3 +120,35 @@ def test_is_config_suppressed_and_filter_thread_today():
 
     assert filter_suppressed_findings([finding], active_cfg, today=TODAY) == []
     assert filter_suppressed_findings([finding], expired_cfg, today=TODAY) == [finding]
+
+
+def test_active_suppressed_paths_unions_legacy_and_active_accountable():
+    c = CyberGraphConfig(
+        suppressed_paths=("legacy/**",),
+        suppressions=(
+            Suppression("path", "src/legacy/*.py", "x", date(2026, 12, 31), ""),
+            Suppression("path", "gone/*.py", "x", date(2026, 1, 1), ""),  # expired
+            Suppression("rule", "CG-SQL-EXEC", "x", None, ""),  # wrong kind
+        ),
+    )
+    result = active_suppressed_paths(c, today=TODAY)
+    assert "legacy/**" in result
+    assert "src/legacy/*.py" in result
+    assert "gone/*.py" not in result
+    assert "CG-SQL-EXEC" not in result
+
+
+def test_active_suppressed_rules_unions_legacy_and_active_accountable():
+    c = CyberGraphConfig(
+        suppressed_rules=("CG-LEGACY",),
+        suppressions=(
+            Suppression("rule", "CG-SQL-EXEC", "x", date(2026, 12, 31), ""),
+            Suppression("rule", "CG-EXPIRED", "x", date(2026, 1, 1), ""),  # expired
+            Suppression("path", "legacy/**", "x", None, ""),  # wrong kind
+        ),
+    )
+    result = active_suppressed_rules(c, today=TODAY)
+    assert "CG-LEGACY" in result
+    assert "CG-SQL-EXEC" in result
+    assert "CG-EXPIRED" not in result
+    assert "legacy/**" not in result

@@ -19,6 +19,7 @@ from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.investigate import collect_top_risks
 from cybergraph.security.layers import summarize_layers
+from cybergraph.suppressions import active_suppressed_paths
 
 # Visual grouping used by the explorer stylesheet. Keep these keys stable: the
 # Cytoscape stylesheet in the HTML report maps each one to a colour/shape.
@@ -150,7 +151,7 @@ def build_graph_data(repo_root: Path, max_nodes: int = 600) -> dict[str, Any]:
     # and hides suppressed entries. Record that, so a consumer diffing the two
     # keys can tell suppression from a scoring threshold.
     suppression = {
-        "paths": list(load_config(repo_root).suppressed_paths),
+        "paths": list(active_suppressed_paths(load_config(repo_root))),
         "attack_paths_suppressed": False,
         "top_risks_suppressed": True,
     }

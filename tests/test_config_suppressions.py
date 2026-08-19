@@ -95,3 +95,30 @@ def test_missing_matcher_is_a_problem_not_a_suppression(tmp_path):
     cfg = load_config(_write(tmp_path, '[[suppressions.rule]]\nreason = "x"\n'))
     assert cfg.suppressions == ()
     assert any("id" in p.message.lower() for p in cfg.suppression_problems)
+
+
+@requires_tomllib
+def test_single_bracket_typo_is_a_problem_not_silence(tmp_path):
+    """`[suppressions.rule]` (single bracket) is a nested TABLE on real tomllib.
+
+    `data["suppressions"]["rule"]` comes back as a dict, not a list -- the same
+    silent-drop the 3.10 fallback fix closed must not reopen here.
+    """
+    body = '[suppressions.rule]\nid = "CG-SQL-EXEC"\nreason = "fixture only"\n'
+    cfg = load_config(_write(tmp_path, body))
+    assert cfg.suppressions == ()
+    assert any(
+        p.kind == "rule" and ("array-of-tables" in p.message or "table" in p.message.lower())
+        for p in cfg.suppression_problems
+    )
+
+
+@requires_tomllib
+def test_single_bracket_typo_for_path_is_a_problem_not_silence(tmp_path):
+    body = '[suppressions.path]\npattern = "legacy/**"\nreason = "fixture only"\n'
+    cfg = load_config(_write(tmp_path, body))
+    assert cfg.suppressions == ()
+    assert any(
+        p.kind == "path" and ("array-of-tables" in p.message or "table" in p.message.lower())
+        for p in cfg.suppression_problems
+    )

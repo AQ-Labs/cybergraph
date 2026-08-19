@@ -362,6 +362,23 @@ def diff_configs(
     )
     for items, kind, detail in (*additions, *removals):
         changes.extend(PolicyChange(kind, subject, detail) for subject in sorted(items))
+
+    # Accountable suppressions are flagged at declaration time, not by whether
+    # they are currently active: expiry is a runtime fact that changes on its
+    # own as the clock advances, so it must never decide whether *this diff*
+    # counts as a weakening. A newly-declared `[[suppressions.rule/path]]`
+    # entry is a weakening the moment it is added, even one that will expire
+    # tomorrow.
+    base_declared = {(entry.kind, entry.matcher) for entry in base.suppressions}
+    current_declared = {(entry.kind, entry.matcher) for entry in current.suppressions}
+    for kind, matcher in sorted(current_declared - base_declared):
+        changes.append(
+            PolicyChange(
+                "suppression_added", matcher,
+                f"a new accountable {kind} suppression was declared",
+            )
+        )
+
     return tuple(changes)
 
 

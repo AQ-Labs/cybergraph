@@ -96,6 +96,18 @@ def _parse_suppressions(
                 if not isinstance(entry, dict):
                     continue
                 _parse_suppression_entry(kind, matcher_key, entry, suppressions, problems)
+        elif kind in suppressions_section:
+            # `[suppressions.rule]` (single bracket) is a nested TABLE on
+            # 3.11+ tomllib, not an array-of-tables -- `data["suppressions"]
+            # ["rule"]` comes back as a dict. That is the same silent-drop the
+            # 3.10 fallback fingerprint below exists to close, so it gets the
+            # same treatment: fail open (no `Suppression`), but say so.
+            problems.append(
+                SuppressionProblem(
+                    kind, "",
+                    f"expected [[suppressions.{kind}]] array-of-tables, got a table",
+                )
+            )
 
         if f"suppressions.{kind}" in data:
             problems.append(

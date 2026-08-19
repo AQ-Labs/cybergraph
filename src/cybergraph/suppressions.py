@@ -103,6 +103,30 @@ def active_suppressions(config: CyberGraphConfig, today: date | None = None) -> 
     ]
 
 
+def active_suppressed_paths(config: CyberGraphConfig, today: date | None = None) -> tuple[str, ...]:
+    """Effective, currently-active path patterns: legacy union not-expired accountable.
+
+    Legacy ``[suppressions] paths`` entries never expire; accountable
+    ``[[suppressions.path]]`` entries are included only while active (see
+    :func:`active_suppressions`). Any surface that reads path patterns off the
+    legacy field directly sees only half the picture -- this is the union every
+    such surface should read instead.
+    """
+    return tuple(config.suppressed_paths) + tuple(
+        entry.matcher for entry in active_suppressions(config, today) if entry.kind == "path"
+    )
+
+
+def active_suppressed_rules(config: CyberGraphConfig, today: date | None = None) -> tuple[str, ...]:
+    """Effective, currently-active rule patterns: legacy union not-expired accountable.
+
+    The rule-pattern counterpart of :func:`active_suppressed_paths`.
+    """
+    return tuple(config.suppressed_rules) + tuple(
+        entry.matcher for entry in active_suppressions(config, today) if entry.kind == "rule"
+    )
+
+
 def suppression_problems(
     config: CyberGraphConfig, today: date | None = None
 ) -> list[SuppressionProblem]:
