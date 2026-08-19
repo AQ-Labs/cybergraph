@@ -73,24 +73,39 @@ def _parse_suppressions(
 
     These array-of-tables entries can only be represented by `tomllib`
     (Python 3.11+); the hand-rolled `_load_simple_toml` fallback used on
-    Python 3.10 has no notion of array-of-tables, so on that fallback the
-    values below simply won't be lists of dicts and this function yields no
-    accountable entries — it must not crash.
+    Python 3.10 has no notion of array-of-tables. Under that fallback,
+    `[[suppressions.rule]]` mangles into a stray top-level key
+    `data["suppressions.rule"]` (the fallback strips `[`/`]` indiscriminately,
+    so the doubled brackets just leave the dotted name intact) instead of
+    `data["suppressions"]["rule"]`. Rather than silently dropping the entry
+    (fail-open but silent — the whole point of this feature is to never be
+    silent), we detect that fingerprint and surface one `SuppressionProblem`
+    per affected kind so the finding still re-surfaces AND the operator is
+    told why their accountable suppression didn't take effect.
     """
     suppressions: list[Suppression] = []
     problems: list[SuppressionProblem] = []
     suppressions_section = data.get("suppressions", {})
     if not isinstance(suppressions_section, dict):
-        return (), ()
+        suppressions_section = {}
 
     for kind, matcher_key in (("rule", "id"), ("path", "pattern")):
         entries = suppressions_section.get(kind, [])
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            _parse_suppression_entry(kind, matcher_key, entry, suppressions, problems)
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                _parse_suppression_entry(kind, matcher_key, entry, suppressions, problems)
+
+        if f"suppressions.{kind}" in data:
+            problems.append(
+                SuppressionProblem(
+                    kind,
+                    "",
+                    "accountable suppressions require Python 3.11+ (tomllib); "
+                    "this entry was ignored",
+                )
+            )
 
     return tuple(suppressions), tuple(problems)
 

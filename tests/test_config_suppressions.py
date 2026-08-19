@@ -3,6 +3,7 @@ from datetime import date
 
 import pytest
 
+import cybergraph.config
 from cybergraph.config import Suppression, load_config
 
 # Array-of-tables ([[suppressions.rule]]) can only be parsed via `tomllib`,
@@ -60,3 +61,37 @@ def test_legacy_flat_lists_still_parse(tmp_path):
     assert cfg.suppressed_rules == ("CG-SQL-EXEC",)
     assert cfg.suppressed_paths == ("legacy/**",)
     assert cfg.suppressions == ()  # flat lists are not accountable objects
+
+
+def test_fallback_surfaces_a_problem_not_silence(tmp_path, monkeypatch):
+    """On the 3.10 fallback, an accountable entry must be surfaced, not silent.
+
+    This is deterministic on every Python version: it forces the fallback
+    path via monkeypatch instead of relying on the interpreter actually being
+    3.10, so it always runs (no skipif).
+    """
+    monkeypatch.setattr(cybergraph.config, "tomllib", None)
+    body = '[[suppressions.rule]]\nid="CG-SQL-EXEC"\nreason="x"\n'
+    cfg = load_config(_write(tmp_path, body))
+    assert cfg.suppressions == ()
+    assert any("3.11" in p.message for p in cfg.suppression_problems)
+
+
+@requires_tomllib
+def test_accountable_path_parsed(tmp_path):
+    cfg = load_config(_write(tmp_path, '''
+[[suppressions.path]]
+pattern = "legacy/**"
+reason = "fixture only"
+'''))
+    assert cfg.suppressions == (
+        Suppression("path", "legacy/**", "fixture only", None, ""),
+    )
+    assert cfg.suppression_problems == ()
+
+
+@requires_tomllib
+def test_missing_matcher_is_a_problem_not_a_suppression(tmp_path):
+    cfg = load_config(_write(tmp_path, '[[suppressions.rule]]\nreason = "x"\n'))
+    assert cfg.suppressions == ()
+    assert any("id" in p.message.lower() for p in cfg.suppression_problems)
