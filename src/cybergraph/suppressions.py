@@ -28,15 +28,51 @@ def _rule_aliases(rule_id: str) -> set[str]:
     return aliases
 
 
-def is_inline_suppressed(lines: list[str], line_no: int, rule_id: str) -> bool:
-    """Return true when a finding line or previous line suppresses the rule."""
+def is_inline_suppressed(
+    lines: list[str], line_no: int, rule_id: str, today: date | None = None
+) -> bool:
+    """Return true when a finding line or previous line suppresses the rule.
+
+    A marker may carry one ``expires=YYYY-MM-DD`` token. An expiry in the past,
+    or a malformed date, makes that marker fail open -- it is treated as if it
+    were not there, not as if it suppressed everything.
+    """
+    today = today or date.today()
     for index in (line_no - 1, line_no - 2):
         if index < 0 or index >= len(lines):
             continue
         marker = _inline_marker_text(lines[index])
-        if marker is not None and _matches_rule(marker, rule_id):
+        if marker is None:
+            continue
+        marker, expired = _strip_inline_expiry(marker, today)
+        if expired:
+            continue
+        if _matches_rule(marker, rule_id):
             return True
     return False
+
+
+def _strip_inline_expiry(marker: str, today: date) -> tuple[str, bool]:
+    """Remove an ``expires=YYYY-MM-DD`` token from the marker text.
+
+    Returns the marker with that token removed (so it is never mistaken for a
+    rule id or reason word), and whether the marker has expired -- either the
+    date has passed, or the token is malformed. A marker with no ``expires=``
+    token at all is never expired.
+    """
+    tokens = marker.split()
+    kept = []
+    expired = False
+    for token in tokens:
+        if token.startswith("expires="):
+            value = token[len("expires=") :]
+            try:
+                expired = date.fromisoformat(value) < today
+            except ValueError:
+                expired = True
+            continue
+        kept.append(token)
+    return " ".join(kept), expired
 
 
 def filter_suppressed_findings(

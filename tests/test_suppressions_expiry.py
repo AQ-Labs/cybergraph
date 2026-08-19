@@ -25,6 +25,18 @@ def test_expired_does_not_suppress():
     assert any("expired" in p.message.lower() for p in suppression_problems(c, today=TODAY))
 
 
+def test_expires_equal_to_today_still_active():
+    """The boundary is inclusive: an entry expiring today is still active.
+
+    Pins ``entry.expires >= today`` against a future refactor to ``>`` -- an
+    entry that says "good through today" must not vanish at midnight before
+    the day is over.
+    """
+    c = cfg(Suppression("rule", "CG-SQL-EXEC", "x", TODAY, ""))
+    assert _rule_suppresses("CG-SQL-EXEC", c, today=TODAY) is True
+    assert not any("expired" in p.message.lower() for p in suppression_problems(c, today=TODAY))
+
+
 def test_no_expiry_never_expires():
     c = cfg(Suppression("rule", "CG-SQL-EXEC", "x", None, ""))
     assert _rule_suppresses("CG-SQL-EXEC", c, today=TODAY) is True
