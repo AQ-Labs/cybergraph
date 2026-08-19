@@ -209,8 +209,19 @@ drops a guard the policy declares is what turns an ACCEPT into a REVIEW.
   it was built, it reports the `-UNVERIFIED` variant (e.g. `CG-SQL-EXEC-UNVERIFIED`) — an
   explicit abstention that drives REVIEW, never a confident claim.
 - **Inline suppressions:** `# cybergraph: ignore CG-SQL-EXEC <reason>` on the sink line. Naming a
-  rule also accepts its `-UNVERIFIED` variant; the reverse is deliberately not true.
+  rule also accepts its `-UNVERIFIED` variant; the reverse is deliberately not true. An inline
+  marker may carry an expiry — `# cybergraph: ignore CG-SQL-EXEC expires=2026-12-31` — after which
+  it stops suppressing.
 - **Repository suppressions:** `[suppressions] rules = [...]` / `paths = [...]` in config.
+- **Accountable suppressions:** the `[[suppressions.rule]]` / `[[suppressions.path]]` table form
+  carries a required **reason**, an optional **expires** (ISO date), and an optional **approver** —
+  so an accepted risk is never hidden silently or forever. An entry missing a reason, with a
+  malformed `expires`, or past its expiry **fails open**: it stops suppressing and the finding
+  re-surfaces, and the lapse is listed by `cybergraph policy` (never a broken suppression that
+  quietly keeps hiding risk — the same "uncertainty never becomes safety" rule applied to
+  suppressions themselves). The flat `rules`/`paths` lists remain valid, grandfathered as
+  unaccountable and never-expiring. (The table form requires Python 3.11+; on 3.10 it is surfaced
+  as unsupported rather than silently dropped.)
 - **Suppressed ≠ fixed:** suppressions hide findings, but the graph keeps the edges
   (`REACHES_SINK`) so reviewers can still inspect the path. A finding that disappears because a
   suppression now covers it is counted as *hidden by config (hidden, not fixed)* in history, the
