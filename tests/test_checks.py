@@ -7,7 +7,12 @@ from cybergraph.security.capability import (
     PASS,
     UNKNOWN,
 )
-from cybergraph.security.checks import evaluate_capabilities
+from cybergraph.security.checks import (
+    backing_finding,
+    capability_files,
+    escalated_risk_deltas,
+    evaluate_capabilities,
+)
 from cybergraph.security.coverage import FileCoverage
 from cybergraph.security.policy import Policy, PolicyProblem, ProtectedEntity, ProtectedSet
 
@@ -142,3 +147,38 @@ def test_login_rules_unknown_when_no_entities_exist_to_check():
     Same zero-evidence shape reachable_data_paths already guards against.
     """
     assert _status(_run(protected_set=_entities()), "declared_login_rules") == UNKNOWN
+
+
+# --- Task 4 helpers: exposed for `verdict.decide` to derive epistemics -----
+
+def test_backing_finding_prefers_confirmed_over_unverified():
+    confirmed = Finding("CG-SQL-EXEC", "high", "unsafe", "app.py", 1)
+    unverified = Finding("CG-SQL-EXEC-UNVERIFIED", "medium", "maybe", "app.py", 2)
+    assert backing_finding("sql_construction", [unverified, confirmed]) is confirmed
+
+
+def test_backing_finding_falls_back_to_unverified():
+    unverified = Finding("CG-SQL-EXEC-UNVERIFIED", "medium", "maybe", "app.py", 2)
+    assert backing_finding("sql_construction", [unverified]) is unverified
+
+
+def test_backing_finding_is_none_for_capabilities_with_no_finding_rule():
+    assert backing_finding("declared_login_rules", [Finding("X", "high", "m", "a.py")]) is None
+
+
+def test_backing_finding_is_none_when_nothing_matches():
+    unrelated = [Finding("CG-CMD-EXEC", "high", "m", "a.py")]
+    assert backing_finding("sql_construction", unrelated) is None
+
+
+def test_capability_files_scopes_to_the_capabilitys_own_globs():
+    assert capability_files("deserialization", ("app.py", "main.go")) == ("app.py",)
+
+
+def test_escalated_risk_deltas_keeps_only_added_or_worsened():
+    class _Delta:
+        def __init__(self, status):
+            self.status = status
+
+    deltas = [_Delta("added"), _Delta("unchanged"), _Delta("worsened"), _Delta("fixed")]
+    assert [d.status for d in escalated_risk_deltas(deltas)] == ["added", "worsened"]

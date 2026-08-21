@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json as _json
 import sys
+from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -23,9 +25,11 @@ from .security import (
 )
 from .security.check import check_change
 from .security.layers import format_layer_summary, summarize_layers
+from .security.ontology import EDGE_EXPOSES_ENTRYPOINT, EDGE_REACHES_SINK
 from .security.policy import POLICY_FILE, extract_baseline
+from .security.policy_gate import GATE_BLOCK, gate_for, load_verification_config
 from .security.review import format_security_review, review_security_delta
-from .security.verdict import STATE_REVIEW, format_verdict, verdict_to_dict
+from .security.verdict import STATE_REVIEW, Verdict, format_verdict, verdict_to_dict
 from .security.vulnerabilities import import_vulnerability_report
 from .visualize import generate_html_report
 
@@ -37,7 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"cybergraph {__version__}")
 
-    sub = parser.add_subparsers(dest="command", required=True)
+    # Not required: a bare path (or no argument at all) is a valid invocation
+    # too -- ``main`` routes those to ``_run_start`` before argparse ever sees
+    # them, but this also keeps ``cybergraph`` with only ``--version``/``-h``
+    # (no subcommand) from becoming a "command is required" error.
+    sub = parser.add_subparsers(dest="command", required=False)
 
     init = sub.add_parser("init", help="Create CyberGraph config and GitHub Actions workflow")
     init.add_argument("repo", nargs="?", default=".", help="Repository root to initialize")
@@ -468,11 +476,256 @@ def _run_check(args) -> int:
         return 0
 
     verdict = check_change(repo, base=args.base, mode=args.mode)
+    config = load_verification_config(repo)
+    verdict = replace(verdict, gate=gate_for(verdict, config))
     print(
         _json.dumps(verdict_to_dict(verdict), indent=2) if args.json
         else format_verdict(verdict)
     )
-    return 1 if (args.fail_on_review and verdict.state == STATE_REVIEW) else 0
+    # Gate-driven, not state-driven (Law 7): a REVIEW policy chose not to
+    # block must exit 0 even with --fail-on-review, and a config can never
+    # turn this into a laundered accept -- verdict.state above is untouched.
+    return 1 if (args.fail_on_review and verdict.gate == GATE_BLOCK) else 0
+
+
+def _command_names(parser: argparse.ArgumentParser) -> set[str]:
+    """The registered top-level subcommand names (``init``, ``check``, ...).
+
+    Used by ``main`` to tell an existing subcommand apart from a bare path
+    *before* handing argv to argparse -- argparse's subparsers action treats
+    an unrecognized first token as an error regardless of ``required``.
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
+# Framework labels analyzers stamp directly onto route nodes/edges (JS, C#,
+# Java, Django, Terraform) or that a matching dependency name implies.
+_FRAMEWORK_LABELS = {
+    "fastapi": "FastAPI",
+    "flask": "Flask",
+    "django": "Django",
+    "express": "Express",
+    "nextjs": "Next.js",
+    "aspnet": "ASP.NET",
+    "spring": "Spring",
+    "terraform": "Terraform",
+}
+
+# Declared dependency names that reveal the framework for languages (Python)
+# whose route decorators don't self-report one the way the JS/C#/Java/Django
+# analyzers already do on the route node/edge itself.
+_FRAMEWORK_DEPENDENCY_NAMES = {
+    "fastapi": "fastapi",
+    "flask": "flask",
+    "django": "django",
+    "express": "express",
+    "next": "nextjs",
+    "spring-boot-starter-web": "spring",
+}
+
+
+# Last-resort signal for languages (Python) whose route decorators don't
+# self-report a framework and that declare no dependency manifest CyberGraph
+# parses: a literal import keyword in the entrypoint-bearing source file
+# itself. Order matters -- checked in this sequence, first match wins.
+_FRAMEWORK_IMPORT_HINTS = (
+    ("fastapi", "fastapi"),
+    ("flask", "flask"),
+    ("django", "django"),
+)
+
+
+def _detect_framework(repo: Path, store: GraphStore) -> str | None:
+    """Best-effort framework name for the ``cybergraph .`` start summary.
+
+    Reuses the ``framework`` property analyzers already attach to route nodes
+    (JS/C#/Java/Django/Terraform) and to FastAPI's ``Depends()`` guard edges,
+    then a declared dependency name, then -- because a repo with neither of
+    those two signals is common for Python -- a literal import keyword read
+    straight from the entrypoint-bearing source files the graph already
+    identified. Returns ``None`` only when none of these find anything; the
+    caller renders that as ``unknown``, never a false "no framework" claim.
+    """
+    tags: Counter[str] = Counter()
+    for row in store.conn.execute(
+        "SELECT properties FROM nodes WHERE kind IN ('Entrypoint', 'Function')"
+    ):
+        framework = _json.loads(row["properties"] or "{}").get("framework")
+        if framework:
+            tags[framework] += 1
+    for row in store.conn.execute("SELECT properties FROM edges WHERE kind = 'GUARDS'"):
+        framework = _json.loads(row["properties"] or "{}").get("framework")
+        if framework:
+            tags[framework] += 1
+    if not tags:
+        for row in store.conn.execute("SELECT name FROM nodes WHERE kind = 'Dependency'"):
+            mapped = _FRAMEWORK_DEPENDENCY_NAMES.get(row["name"].lower())
+            if mapped:
+                tags[mapped] += 1
+    if not tags:
+        tags.update(_framework_hints_from_entrypoint_sources(repo, store))
+    if not tags:
+        return None
+    key = tags.most_common(1)[0][0]
+    return _FRAMEWORK_LABELS.get(key, key.capitalize())
+
+
+def _framework_hints_from_entrypoint_sources(repo: Path, store: GraphStore) -> Counter[str]:
+    hits: Counter[str] = Counter()
+    rows = store.conn.execute(
+        "SELECT DISTINCT source FROM edges WHERE kind = ?", (EDGE_EXPOSES_ENTRYPOINT,)
+    ).fetchall()
+    for row in rows:
+        try:
+            text = (repo / row["source"]).read_text(encoding="utf-8", errors="ignore").lower()
+        except OSError:
+            continue
+        for needle, key in _FRAMEWORK_IMPORT_HINTS:
+            if needle in text:
+                hits[key] += 1
+                break
+    return hits
+
+
+def _start_summary(repo: Path) -> str:
+    """One line: detected framework, route count, sink count -- all counted
+    straight off the graph ``check_change``/the scan just (re)built, never
+    invented. ``framework: unknown`` when detection genuinely finds nothing --
+    never a false "no framework" claim on a repo that plainly has one."""
+    store = GraphStore.open_for_repo(repo)
+    try:
+        routes = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE kind = ?", (EDGE_EXPOSES_ENTRYPOINT,)
+        ).fetchone()[0]
+        sinks = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE kind = ?", (EDGE_REACHES_SINK,)
+        ).fetchone()[0]
+        framework = _detect_framework(repo, store)
+    finally:
+        store.close()
+    label = f"Framework: {framework}" if framework else "Framework: unknown"
+    return f"{label} | {routes} route(s) | {sinks} sink(s)"
+
+
+def _next_step_suggestion(verdict: Verdict) -> str:
+    if verdict.state == STATE_REVIEW:
+        return (
+            'Next: cybergraph explain "why does this need review?" for cited evidence, '
+            "or cybergraph visualize for the full report."
+        )
+    return (
+        "Next: cybergraph visualize for the full report, or "
+        'cybergraph explain "<question>" to dig into specific findings.'
+    )
+
+
+def _scan_next_step_suggestion(result) -> str:
+    if result.top_risks:
+        return (
+            'Next: cybergraph explain "<question>" for cited evidence on a specific risk, '
+            "or cybergraph visualize for the full report."
+        )
+    return (
+        "Next: cybergraph visualize for the full report. Make a change and re-run "
+        "cybergraph . to get a change verdict for just that diff."
+    )
+
+
+def _scan_coverage_note(result) -> str:
+    """Named explicitly so a scan can never be mistaken for a change verdict
+    (Laws 1 & 5): this ran CyberGraph's analyzers over the code as committed,
+    not a diff, and says so instead of implying a clean bill of health."""
+    lines = [
+        "This is a standing-code scan, not a change verdict -- there was no "
+        "pending change to check against, so CyberGraph analyzed the code as "
+        "committed instead. The risks above are what its analyzers found; "
+        "run `cybergraph check` again after your next change for a "
+        "change-scoped verdict.",
+    ]
+    if result.errors:
+        lines.append(
+            "Some analyses could not run and are not reflected above: "
+            + ", ".join(sorted(result.errors)) + "."
+        )
+    return "\n".join(lines)
+
+
+def _has_pending_change(repo: Path) -> bool:
+    """Whether there is a change for ``check_change`` to actually verify.
+
+    ``check_change`` compares the worktree/HEAD to a base; on a clean tree
+    with nothing to diff against (or no git history at all) that comparison
+    is HEAD-against-itself, which prints a bare ACCEPT that reads as "your
+    code is secure" even when the *existing* code was never checked. Fail
+    toward the honest answer: treat "could not establish a diff" the same as
+    "no diff" -- both mean there is nothing to verify a change *against*, so
+    ``_run_start`` scans the standing code instead.
+    """
+    from .security.revisions import resolve_revisions
+
+    return bool(resolve_revisions(repo).changed_files)
+
+
+def _run_start_change(repo: Path) -> int:
+    """A pending change exists: run the same change-verdict `check` runs,
+    collapsed to its default view."""
+    verdict = check_change(repo)
+    config = load_verification_config(repo)
+    verdict = replace(verdict, gate=gate_for(verdict, config))
+    print(f"Verdict: {verdict.state.upper()}")
+    print(format_verdict(verdict))
+    print()
+    print(_start_summary(repo))
+    print()
+    print(_next_step_suggestion(verdict))
+    return 0
+
+
+def _run_start_scan(repo: Path) -> int:
+    """No pending change to verify: scan the standing code and rank its real
+    risks instead of printing a false "nothing changed" ACCEPT (the exact
+    false-reassurance the verdict layer exists to forbid)."""
+    from .orchestrator import run_full_analysis
+    from .output import render_text, should_color
+
+    result = run_full_analysis(repo)
+    print("No pending change to verify -- scanned the current code instead:")
+    print()
+    print(render_text(result, color=should_color()))
+    print()
+    print(_scan_coverage_note(result))
+    print()
+    print(_start_summary(repo))
+    print()
+    print(_scan_next_step_suggestion(result))
+    return 0
+
+
+def _run_start(repo: Path) -> int:
+    """``cybergraph .`` / ``cybergraph <path>`` / ``cybergraph`` (cwd): the
+    golden-path, no-subcommand entry point.
+
+    Dispatches on whether there is a pending change: a change gets the
+    collapsed change-verdict (``check_change``); a clean tree (or no base to
+    diff against) gets a standing-code risk scan instead, because a
+    HEAD-against-itself "diff" is empty by construction and printing that as
+    ACCEPT would claim the existing code was verified when it never was.
+
+    Advisory by default, matching the hook's default: a REVIEW never fails
+    this exit code on its own, since there is no ``--fail-on-review`` to opt
+    into on a bare invocation.
+    """
+    if not repo.is_dir():
+        print(f"Not a directory: {repo}", file=sys.stderr)
+        return 1
+    if not _graph_built(repo):
+        build_graph(repo)
+    if _has_pending_change(repo):
+        return _run_start_change(repo)
+    return _run_start_scan(repo)
 
 
 def _run_hook(args) -> int:
@@ -502,7 +755,18 @@ def _run_hook(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
+
+    # A bare path (or no argument at all) is not one of the registered
+    # subcommands -- route it to `_run_start` before argparse ever sees it,
+    # since argparse's subparsers action rejects an unrecognized first token
+    # as an error regardless of `required`. An existing subcommand name
+    # (`check`, `build`, ...) always still routes to that subcommand.
+    first_positional = next((token for token in argv if not token.startswith("-")), None)
+    is_bare_path = first_positional is not None and first_positional not in _command_names(parser)
+    if not argv or is_bare_path:
+        return _run_start(Path(first_positional or ".").resolve())
 
     args = parser.parse_args(argv)
     repo = _resolve_repo(args)
@@ -817,6 +1081,12 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:
                 pass
         print(f"\nOpen the report: {result.report_path}")
+    elif args.command is None:
+        # Defense in depth: `main`'s own argv pre-check routes every bare-path
+        # or no-argument invocation to `_run_start` before argparse runs, so
+        # this only fires if some other caller hands `build_parser()` an argv
+        # that still leaves `command` unset.
+        return _run_start(repo)
     else:
         parser.error(f"Unknown command: {args.command}")
     return 0

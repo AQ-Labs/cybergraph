@@ -223,9 +223,14 @@ action; the two never merge (Law 7).
 finding{ reasons, impact, protected_boundary?, epistemics } ──► POLICY LAYER ──► gate ∈ {block, warn, info}
 ```
 
-- `primary_reason` and gate priority are **computed** from `reason × impact × protected_boundary`,
-  not a fixed enum order. A critical `unsupported_change` on a protected auth boundary can outrank
-  a low-impact `confirmed_regression`.
+- `primary_reason` and gate priority are **computed**, not a fixed enum order, using the key
+  `(protected_boundary, effective_trust, impact, reason_severity)` — **trust-first once protected
+  status is equal**. `protected_boundary` is the top factor (a critical `unsupported_change` on a
+  protected auth boundary outranks a low-impact `confirmed_regression`); among reasons of equal
+  protected status the *more-substantiated* one leads, so a benchmark-backed `confirmed` finding is
+  never out-headlined or hidden by a lower-assurance "possible" reason of merely-higher raw impact.
+  (Trust must lead impact here because the collapsed headline's job is to lead with what CyberGraph
+  can *substantiate* — an impact-only order can bury a confirmed finding behind a vaguer one.)
 - Config lives in the committed `cybergraph.policy.toml` (extending today's policy file):
 
 ```toml
