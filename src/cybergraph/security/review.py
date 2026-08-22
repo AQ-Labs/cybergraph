@@ -12,6 +12,7 @@ from cybergraph.build import build_graph
 from cybergraph.config import CONFIG_FILE, CyberGraphConfig, load_config
 from cybergraph.graph import GraphStore
 from cybergraph.security.attack_paths import AttackPath, find_attack_paths, path_is_suppressed
+from cybergraph.suppressions import active_suppressed_paths
 
 #: Traversal cap for the two scans whose difference *is* the delta. Both sides
 #: use it, so neither side is truncated relative to the other.
@@ -135,7 +136,7 @@ def review_security_delta(repo_root: Path, base: str = "HEAD~1") -> SecurityRevi
     if changed_files:
         config_notes = _config_notes(repo_root, current_config, base_config)
         suppressed_risk_count, capped = _hidden_risk_count(
-            repo_root, changed_set, current_config.suppressed_paths
+            repo_root, changed_set, active_suppressed_paths(current_config)
         )
         ignored_changed_files = _ignored_changed_files(changed_files, current_config.ignored_paths)
 

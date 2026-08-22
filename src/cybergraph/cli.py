@@ -1049,6 +1049,7 @@ def main(argv: list[str] | None = None) -> int:
         if not report.established:
             return 1
     elif args.command == "policy":
+        from .config import load_config
         from .security.policy import evaluate_policy, extract_baseline, load_policy
         from .security.policy_report import format_policy_report
 
@@ -1062,7 +1063,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         policy = load_policy(repo)
         protected = evaluate_policy(repo, policy)
-        print(format_policy_report(policy, protected))
+        print(format_policy_report(policy, protected, load_config(repo)))
         return 0
     elif args.command == "quickstart":
         import os

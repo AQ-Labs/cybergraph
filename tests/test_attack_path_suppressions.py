@@ -1,12 +1,21 @@
+import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from cybergraph.build import build_graph
+from cybergraph.config import load_config
 from cybergraph.graph import GraphStore
 from cybergraph.graph_export import build_graph_data
 from cybergraph.security.attack_paths import find_attack_paths
 from cybergraph.security.ontology import EDGE_REACHES_SINK
+from cybergraph.suppressions import active_suppressed_paths
+
+requires_tomllib = pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="array-of-tables suppressions require tomllib (Python 3.11+)",
+)
 
 ROUTE = '''
 @app.get("/r{n}")
@@ -285,3 +294,66 @@ def test_a_path_crossing_out_of_suppressed_code_is_never_hidden(tmp_path: Path):
     assert [path.nodes for path in ranked] == [
         ("fixtures/app.py::cross", "real.py::run_it", "subprocess.run")
     ], ranked
+
+
+# --- Accountable `[[suppressions.path]]` must hide attack paths too -----------
+
+
+@requires_tomllib
+def test_active_accountable_path_suppression_hides_the_attack_path(tmp_path: Path):
+    """An active `[[suppressions.path]]` hides an attack path, same as legacy."""
+    (tmp_path / "fixtures").mkdir()
+    (tmp_path / "fixtures" / "app.py").write_text(HEADER + ROUTE.format(n=0), encoding="utf-8")
+    (tmp_path / ".cybergraph.toml").write_text(
+        '[[suppressions.path]]\npattern = "fixtures/*"\nreason = "fixture only"\n'
+        'expires = "2099-12-31"\n',
+        encoding="utf-8",
+    )
+    build_graph(tmp_path)
+
+    assert find_attack_paths(tmp_path) == []
+    assert find_attack_paths(tmp_path, apply_suppressions=False)
+
+
+@requires_tomllib
+def test_expired_accountable_path_suppression_does_not_hide_the_attack_path(tmp_path: Path):
+    (tmp_path / "fixtures").mkdir()
+    (tmp_path / "fixtures" / "app.py").write_text(HEADER + ROUTE.format(n=0), encoding="utf-8")
+    (tmp_path / ".cybergraph.toml").write_text(
+        '[[suppressions.path]]\npattern = "fixtures/*"\nreason = "fixture only"\n'
+        'expires = "2000-01-01"\n',
+        encoding="utf-8",
+    )
+    build_graph(tmp_path)
+
+    assert find_attack_paths(tmp_path) != []
+
+
+def test_active_suppressed_paths_includes_active_and_excludes_expired():
+    """Direct helper check, per FIX 1 step 1: legacy union not-expired accountable."""
+    from cybergraph.config import CyberGraphConfig, Suppression
+
+    today = date(2026, 6, 1)
+    config = CyberGraphConfig(
+        suppressed_paths=("legacy/**",),
+        suppressions=(
+            Suppression("path", "fixtures/*", "fixture only", date(2099, 12, 31), ""),
+            Suppression("path", "gone/*", "fixture only", date(2000, 1, 1), ""),
+        ),
+    )
+    result = active_suppressed_paths(config, today=today)
+    assert "legacy/**" in result
+    assert "fixtures/*" in result
+    assert "gone/*" not in result
+
+
+def test_graph_export_reflects_active_accountable_path_suppression(tmp_path: Path):
+    """Routes the graph-export surface through `active_suppressed_paths`."""
+    (tmp_path / "fixtures").mkdir()
+    (tmp_path / "fixtures" / "app.py").write_text(HEADER + ROUTE.format(n=0), encoding="utf-8")
+    (tmp_path / ".cybergraph.toml").write_text(CONFIG, encoding="utf-8")
+    build_graph(tmp_path)
+
+    config = load_config(tmp_path)
+    data = build_graph_data(tmp_path)
+    assert data["suppression"]["paths"] == list(active_suppressed_paths(config))

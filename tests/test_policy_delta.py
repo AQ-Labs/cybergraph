@@ -1,4 +1,4 @@
-from cybergraph.config import CyberGraphConfig
+from cybergraph.config import CyberGraphConfig, Suppression
 from cybergraph.security.policy import (
     Policy,
     PolicyProblem,
@@ -169,3 +169,46 @@ def test_config_deltas():
         CyberGraphConfig(custom_sinks=("send_money",)), CyberGraphConfig()
     )} == {"custom_sink_removed"}
     assert diff_configs(CyberGraphConfig(), CyberGraphConfig(auth_markers=("x",))) == ()
+
+
+def test_declared_accountable_suppression_is_flagged():
+    """A newly-declared `[[suppressions.rule]]` is a weakening at declaration time.
+
+    Expiry is deliberately irrelevant here: even a suppression that expires
+    tomorrow is flagged, because it was declared today.
+    """
+    base = CyberGraphConfig()
+    current = CyberGraphConfig(
+        suppressions=(Suppression("rule", "CG-SQL-EXEC", "fixture only", None, ""),)
+    )
+    changes = diff_configs(base, current)
+    assert {c.kind for c in changes} == {"suppression_added"}
+    assert any(c.subject == "CG-SQL-EXEC" for c in changes)
+
+
+def test_declared_accountable_path_suppression_is_flagged():
+    base = CyberGraphConfig()
+    current = CyberGraphConfig(
+        suppressions=(Suppression("path", "legacy/**", "fixture only", None, ""),)
+    )
+    changes = diff_configs(base, current)
+    assert {c.kind for c in changes} == {"suppression_added"}
+    assert any(c.subject == "legacy/**" for c in changes)
+
+
+def test_accountable_suppression_present_on_both_sides_is_not_flagged():
+    entry = Suppression("rule", "CG-SQL-EXEC", "fixture only", None, "")
+    base = CyberGraphConfig(suppressions=(entry,))
+    current = CyberGraphConfig(suppressions=(entry,))
+    assert diff_configs(base, current) == ()
+
+
+def test_expired_accountable_suppression_is_still_flagged_when_newly_declared():
+    """Declaration, not activity, drives this: an expired entry still counts."""
+    from datetime import date
+
+    base = CyberGraphConfig()
+    current = CyberGraphConfig(
+        suppressions=(Suppression("rule", "CG-SQL-EXEC", "x", date(2000, 1, 1), ""),)
+    )
+    assert {c.kind for c in diff_configs(base, current)} == {"suppression_added"}

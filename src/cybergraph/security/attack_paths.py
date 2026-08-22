@@ -28,6 +28,7 @@ from cybergraph.security.ontology import (
 )
 from cybergraph.security.remediation import remediation_for_sink
 from cybergraph.security.risk import RiskScore, score_risk
+from cybergraph.suppressions import active_suppressed_paths
 
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 _RANK_CONF = {3: "high", 2: "medium", 1: "low"}
@@ -129,7 +130,7 @@ def find_attack_paths(
         taints = _load_taints(store)
 
         config_root = suppression_root if suppression_root is not None else repo_root
-        patterns = load_config(config_root).suppressed_paths
+        patterns = active_suppressed_paths(load_config(config_root))
         # The patterns are loaded either way now: an exploration surface still
         # has to recognise a suppressed path in order to stop it consuming a
         # slot. With no patterns configured nothing can be suppressed, so the

@@ -217,6 +217,24 @@ rules = ["CG-SQL-EXEC"]
 paths = ["legacy/**"]
 ```
 
+**Accountable suppressions** — give a suppression a **reason** (required), an optional **expiry**,
+and an optional **approver**, so an accepted risk is never hidden *silently* or *forever*:
+
+```toml
+[[suppressions.rule]]
+id       = "CG-SQL-EXEC"
+reason   = "test-only fixture query, not user-reachable"
+expires  = "2026-12-31"
+approver = "security-team"
+```
+
+An entry with no `reason`, a malformed `expires`, or an expiry in the **past fails open** — it
+stops suppressing and the finding re-surfaces (a broken or stale suppression never keeps hiding
+risk), and the lapse is reported by `cybergraph policy`. Inline markers can expire the same way:
+`# cybergraph: ignore CG-SQL-EXEC expires=2026-12-31`. The flat `rules`/`paths` lists above keep
+working unchanged. (The accountable table form needs Python 3.11+; on 3.10 it is reported as
+unsupported rather than silently ignored.)
+
 Naming a rule also covers the `-UNVERIFIED` variant CyberGraph reports when it can see a value reach a sink but cannot confirm how the value was built — accepting `CG-SQL-EXEC` accepts `CG-SQL-EXEC-UNVERIFIED` on the same line or in the same repository. The reverse is deliberately not true: naming `CG-SQL-EXEC-UNVERIFIED` accepts only the unconfirmed case, and a confirmed `CG-SQL-EXEC` is still reported.
 
 Suppressions hide findings, but the graph still keeps edges such as `REACHES_SINK` so reviewers can inspect the real code path.
