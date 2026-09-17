@@ -131,6 +131,9 @@ def _render_html(
         "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
         "__GRAPH_JSON__": _embed_json(graph_data),
         "__CYTOSCAPE_SRC__": _load_cytoscape_source(),
+        "__BRAND_MARK__": (files("cybergraph") / "assets" / "brand-mark.svg").read_text(
+            encoding="utf-8"
+        ),
     }
     for token, value in replacements.items():
         template = template.replace(token, value)
@@ -509,8 +512,13 @@ _HTML_TEMPLATE = """<!doctype html>
               --edge-base: #cbd5e1; --glow-opacity: 0;
               --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-border: #fde68a; --code: #7c2d12; }
     body { margin: 0; background: var(--bg); color: var(--fg); }
-    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617);
+    header { background: #101b24; border-bottom: 3px solid #36d6b0;
       color: white; padding: 32px 36px; position: relative; }
+    .cg-brand { display: flex; align-items: center; gap: 16px; padding-right: 80px; }
+    .cg-brand svg { width: 54px; height: 58px; flex-shrink: 0; }
+    .cg-brand h1 { margin: 0; letter-spacing: 0; }
+    .cg-brand h1 span { display: block; font-size: 14px; font-weight: 400; color: #b9c8cc; }
+    header > div:not(.cg-brand) { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
@@ -656,7 +664,9 @@ _HTML_TEMPLATE = """<!doctype html>
 </head>
 <body>
   <header>
-    <h1>CyberGraph Security Report</h1>
+    <div class="cg-brand">__BRAND_MARK__
+      <h1 aria-label="CyberGraph Security Report">CyberGraph <span>Security Report</span></h1>
+    </div>
     <div>__REPO__</div>
     <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;
       cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;

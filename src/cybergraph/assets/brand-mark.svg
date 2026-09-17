@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="104" viewBox="0 0 96 104" role="img" aria-label="CyberGraph connected shield">
+  <path d="M48 8 84 22v29c0 22-17 36-36 45C29 87 12 73 12 51V22Z" fill="#101b24" stroke="#36d6b0" stroke-width="4"/>
+  <path d="m28 33 24 18-24 20m24-20 20-18m-20 18 20 20" fill="none" stroke="#8aadb4" stroke-width="3"/>
+  <circle cx="28" cy="33" r="7" fill="#38bdf8"/><circle cx="28" cy="71" r="7" fill="#36d6b0"/>
+  <circle cx="52" cy="51" r="8" fill="#fbbf24"/><circle cx="72" cy="33" r="6" fill="#36d6b0"/>
+  <circle cx="72" cy="71" r="7" fill="#fb7185"/>
+</svg>
