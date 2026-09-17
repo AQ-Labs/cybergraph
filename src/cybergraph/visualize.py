@@ -750,6 +750,7 @@ _HTML_TEMPLATE = """<!doctype html>
         <option value="grid">Layout: grid</option>
       </select>
       <label class="cg-toggle"><input id="cg-focus" type="checkbox" disabled>Focus path</label>
+      <label class="cg-toggle"><input id="cg-motion" type="checkbox" disabled>Animate path</label>
       <button id="cg-zoom-in" type="button">+</button>
       <button id="cg-zoom-out" type="button">−</button>
       <button id="cg-reset" type="button">Reset</button>
@@ -1211,9 +1212,29 @@ _HTML_TEMPLATE = """<!doctype html>
       });
 
       const focusControl = document.getElementById('cg-focus');
+      const motionControl = document.getElementById('cg-motion');
       const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
       let focusedIds = null;
       let focusedEdges = null;
+      let motionTimer = null;
+      let dashOffset = 0;
+
+      function stopMotion() {
+        if (motionTimer !== null) window.clearInterval(motionTimer);
+        motionTimer = null;
+        cy.edges().removeStyle('line-dash-offset');
+      }
+
+      function syncMotion() {
+        stopMotion();
+        motionControl.disabled = !focusedIds || reducedMotion.matches;
+        if (motionControl.disabled || !motionControl.checked || document.hidden) return;
+        motionTimer = window.setInterval(function () {
+          dashOffset = (dashOffset - 2) % 140;
+          cy.edges('.cg-focus-edge').style('line-dash-offset', dashOffset);
+        }, 80);
+      }
+
       function visibleCounts() {
         const visible = cy.nodes().filter(function (n) { return n.style('display') !== 'none'; });
         document.getElementById('cg-view-counts').textContent =
@@ -1265,6 +1286,7 @@ _HTML_TEMPLATE = """<!doctype html>
           : 'Highest-risk entrypoint-to-sink paths.';
         applyFilters();
         if (focusedIds) { cy.stop(true, true); positionFocusedPath(); }
+        syncMotion();
       }
 
       focusControl.addEventListener('change', function () {
@@ -1274,6 +1296,10 @@ _HTML_TEMPLATE = """<!doctype html>
           highlightPath(selected);
         } else { focusPath(); }
       });
+      motionControl.addEventListener('change', syncMotion);
+      reducedMotion.addEventListener('change', syncMotion);
+      document.addEventListener('visibilitychange', syncMotion);
+      window.addEventListener('pagehide', stopMotion);
       new ResizeObserver(function () { positionFocusedPath(); })
         .observe(document.getElementById('cy'));
 
@@ -1285,10 +1311,13 @@ _HTML_TEMPLATE = """<!doctype html>
       }
 
       function renderMode(mode) {
+        stopMotion();
         focusedIds = null;
         focusedEdges = null;
         focusControl.checked = false;
         focusControl.disabled = true;
+        motionControl.checked = false;
+        motionControl.disabled = true;
         document.getElementById('cg-layout').disabled = false;
         document.querySelector('.graph-card').classList.remove('cg-focused');
         cy.stop(true, true);
