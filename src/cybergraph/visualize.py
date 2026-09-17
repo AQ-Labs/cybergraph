@@ -597,7 +597,8 @@ _HTML_TEMPLATE = """<!doctype html>
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
       gap: 10px; margin: 0 0 14px; }
-    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px;
+    .risk-card { min-width: 0; overflow-wrap: anywhere;
+      border: 1px solid var(--border); background: var(--panel); border-radius: 8px;
       padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
     .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
@@ -825,7 +826,8 @@ _HTML_TEMPLATE = """<!doctype html>
       function displayLabel(n) {
         const props = (n && n.properties) || {};
         if (n && n.group === 'entrypoint' && props.route) {
-          return String((props.method ? props.method + ' ' : '') + props.route);
+          const route = typeof props.route === 'object' ? props.route.path : props.route;
+          if (route) return String((props.method ? props.method + ' ' : '') + route);
         }
         return (n && n.label) || tail(n && n.id);
       }
@@ -1261,7 +1263,7 @@ _HTML_TEMPLATE = """<!doctype html>
           '</strong> can reach ' +
           '<strong>' + esc(tail(p.sink)) + '</strong>' +
           (p.data_reachable ? ' carrying user-controlled data' : '') +
-          (p.sanitized ? ', passing a sanitizer on the way' : ' with no sanitizer on the way') +
+          (p.sanitized ? ', passing a detected sanitizer' : ' with no detected sanitizer') +
           '.</p>';
         if (risk.label) {
           html += '<div class="kv"><span class="tag" style="background:#dc2626">' +
