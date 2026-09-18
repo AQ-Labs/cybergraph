@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CyberGraph demonstration</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:1920px;height:1080px;overflow:hidden;letter-spacing:0}
+body{font:26px/1.45 "Segoe UI",Arial,sans-serif;background:#101b24;color:#f3f7f8}
+header{position:absolute;left:80px;right:80px;top:48px;display:flex;justify-content:space-between;align-items:center}
+header .brand{display:flex;align-items:center;gap:15px;font-size:25px}header img{width:40px;height:44px}
+header span{color:#afc2c9;font-size:20px}h1{font-size:46px;margin:0 0 28px;line-height:1.2}h2{font-size:30px;margin:0 0 12px}
+main{position:absolute;inset:145px 80px 180px}p{margin:16px 0}code,pre{font-family:Consolas,monospace}
+pre{white-space:pre-wrap;font-size:25px;line-height:1.5;margin:0}.muted{color:#afc2c9}.accent{color:#84e5ca}
+.identity{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding-bottom:70px;background:#101b24;z-index:5;transition:opacity 1s}
+.identity img{width:128px;height:139px;margin-bottom:32px}.identity h1{font-size:80px;margin:0}.identity p{font-size:26px;color:#afc2c9;margin-top:25px}
+.identity .address{position:absolute;bottom:166px;font-size:20px}.identity.gone{opacity:0;pointer-events:none}
+iframe{border:1px solid #33454f;border-radius:6px;width:100%;height:630px;background:#111923}
+.two{display:grid;grid-template-columns:1.55fr 1fr;gap:64px}.terminal{background:#0b1218;border:1px solid #33454f;border-radius:6px;padding:28px}
+.terminal .label{font-size:17px;color:#91aaa9;border-bottom:1px solid #33454f;padding-bottom:12px;margin-bottom:20px}
+.cmd{color:#6fe1c0;transition:opacity .3s}.cmd:not(.active){opacity:.38}.rule{border-top:1px solid #33454f;margin:26px 0;padding-top:24px}
+table{width:100%;border-collapse:collapse;margin-top:30px;font-size:28px}th,td{text-align:left;padding:24px;border-bottom:1px solid #33454f}th{font-size:21px;color:#afc2c9;font-weight:400}td.num{font-size:42px;font-weight:650;color:#88e7cf}tr.highlight{background:#143630}
+.note{font-size:23px;color:#becad0;margin-top:30px;max-width:1600px}.flow{display:grid;grid-template-columns:1fr 80px 1fr 80px 1fr;align-items:center;margin:64px 0 46px}.flow section{border-top:3px solid #78ddc0;padding-top:22px;min-height:150px}.flow .arrow{font-size:44px;text-align:center;color:#afc2c9}.flow p{font-size:25px;color:#becad0}
+.badge{display:inline-block;color:#82e6c5;border-bottom:2px solid #82e6c5;font-size:21px;padding-bottom:8px;margin-bottom:22px}
+footer{position:absolute;left:80px;right:80px;bottom:130px;font-size:19px;color:#9db4bd;display:flex;justify-content:space-between}
+</style></head><body>
+<header><div class="brand"><img src="../../../../src/cybergraph/assets/brand-mark.svg" alt="">CyberGraph</div><span>AAAI-27 System Demonstration</span></header>
+<main id="content"></main><footer><span id="tech"></span><span id="mode"></span></footer>
+<script src="scenes.js"></script></body></html>
