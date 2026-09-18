@@ -1,0 +1,996 @@
+{
+  "protocol": {
+    "question_template": "What sensitive sink is reachable from {entrypoint}?",
+    "cases": "All expected positive paths in the existing 11-case seeded corpus; negative cases have no target pair and are excluded.",
+    "limit_records": 2,
+    "limit_characters": 2000,
+    "ranking": "Unchanged category, lexical-overlap, and kind bonus from grounded.py; ties by kind then title.",
+    "conditions": [
+      "findings_only",
+      "without_path_records",
+      "with_path_records"
+    ],
+    "metric": "Both expected endpoint and sink label occur in returned evidence, case-insensitive substring matching as in the corpus. This does not validate their relationship.",
+    "secondary_metric": "A single returned path citation contains both labels. This directly measures path availability, not independent correctness.",
+    "scope": "Descriptive ablation on seeded examples, not held-out retrieval evaluation, LLM evaluation, or comparison against another tool."
+  },
+  "grounded_py_sha256": "eb79fd1fe723b9820f82ecc9a73166013e54aa22f2a69b03890a036f85528ffa",
+  "summary": {
+    "findings_only": {
+      "questions": 9,
+      "endpoint_pairs": 0,
+      "path_citations": 0,
+      "mean_characters": 136.3
+    },
+    "without_path_records": {
+      "questions": 9,
+      "endpoint_pairs": 8,
+      "path_citations": 0,
+      "mean_characters": 243.2
+    },
+    "with_path_records": {
+      "questions": 9,
+      "endpoint_pairs": 9,
+      "path_citations": 9,
+      "mean_characters": 543.7
+    }
+  },
+  "rows": [
+    {
+      "case": "go_http_cmdi",
+      "question": "What sensitive sink is reachable from runPing?",
+      "expected": {
+        "entrypoint": "runPing",
+        "sink": "exec.command"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 190,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "critical CG-CMD-EXEC",
+          "detail": "`exec.Command` runs a system command built from this value Fix: Avoid shell execution; pass an argv array and validate inputs with an allowlist.",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "CG-CMD-EXEC",
+            "path": []
+          },
+          "score": 3.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_cmdi",
+      "question": "What sensitive sink is reachable from runPing?",
+      "expected": {
+        "entrypoint": "runPing",
+        "sink": "exec.command"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 274,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by runPing",
+          "detail": "`runPing` reaches sensitive sink `exec.Command`",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "critical CG-CMD-EXEC",
+          "detail": "`exec.Command` runs a system command built from this value Fix: Avoid shell execution; pass an argv array and validate inputs with an allowlist.",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "CG-CMD-EXEC",
+            "path": []
+          },
+          "score": 3.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_cmdi",
+      "question": "What sensitive sink is reachable from runPing?",
+      "expected": {
+        "entrypoint": "runPing",
+        "sink": "exec.command"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 539,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by runPing",
+          "detail": "`runPing` reaches sensitive sink `exec.Command`",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path route:/ping:14 -> exec.Command",
+          "detail": "Entry point `main.go::route:/ping:14` reaches `exec.Command` via `main.go::route:/ping:14 -> main.go::runPing -> exec.Command`. Source: host; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (95/100). Recommended fix: Avoid shell execution; pass an argv array and validate inputs with an allowlist.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "main.go::route:/ping:14",
+              "main.go::runPing",
+              "exec.Command"
+            ]
+          },
+          "score": 4.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_pathtrav",
+      "question": "What sensitive sink is reachable from readFile?",
+      "expected": {
+        "entrypoint": "readFile",
+        "sink": "os.open"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 220,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "general",
+          "title": "high CG-PATH-TRAVERSAL",
+          "detail": "`Open` opens a file whose path comes from this value Fix: Normalize the path, reject traversal, and enforce that resolved paths stay under an approved base directory.",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "CG-PATH-TRAVERSAL",
+            "path": []
+          },
+          "score": 1.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_pathtrav",
+      "question": "What sensitive sink is reachable from readFile?",
+      "expected": {
+        "entrypoint": "readFile",
+        "sink": "os.open"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 301,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by readFile",
+          "detail": "`readFile` reaches sensitive sink `os.Open`",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "finding",
+          "category": "general",
+          "title": "high CG-PATH-TRAVERSAL",
+          "detail": "`Open` opens a file whose path comes from this value Fix: Normalize the path, reject traversal, and enforce that resolved paths stay under an approved base directory.",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "CG-PATH-TRAVERSAL",
+            "path": []
+          },
+          "score": 1.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_pathtrav",
+      "question": "What sensitive sink is reachable from readFile?",
+      "expected": {
+        "entrypoint": "readFile",
+        "sink": "os.open"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 546,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by readFile",
+          "detail": "`readFile` reaches sensitive sink `os.Open`",
+          "citation": {
+            "file": "main.go",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path route:/file:14 -> os.Open",
+          "detail": "Entry point `main.go::route:/file:14` reaches `os.Open` via `main.go::route:/file:14 -> main.go::readFile -> os.Open`. Source: name; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (92/100). Recommended fix: Normalize the path, reject traversal, and enforce that resolved paths stay under an approved base directory.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "main.go::route:/file:14",
+              "main.go::readFile",
+              "os.Open"
+            ]
+          },
+          "score": 4.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "db.query"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 196,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`Query` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "main.go",
+            "line": 12,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "db.query"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 280,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by listUsers",
+          "detail": "`listUsers` reaches sensitive sink `db.Query`",
+          "citation": {
+            "file": "main.go",
+            "line": 12,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`Query` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "main.go",
+            "line": 12,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "go_http_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "db.query"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 543,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by listUsers",
+          "detail": "`listUsers` reaches sensitive sink `db.Query`",
+          "citation": {
+            "file": "main.go",
+            "line": 12,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path route:/users:16 -> db.Query",
+          "detail": "Entry point `main.go::route:/users:16` reaches `db.Query` via `main.go::route:/users:16 -> main.go::listUsers -> db.Query`. Source: request; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (94/100). Recommended fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "main.go::route:/users:16",
+              "main.go::listUsers",
+              "db.Query"
+            ]
+          },
+          "score": 4.5
+        }
+      ]
+    },
+    {
+      "case": "java_spring_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "executequery"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 215,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`executeQuery` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "UserController.java",
+            "line": 10,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "java_spring_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "executequery"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 315,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by listUsers",
+          "detail": "`listUsers` reaches sensitive sink `executeQuery`",
+          "citation": {
+            "file": "UserController.java",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`executeQuery` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "UserController.java",
+            "line": 10,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "java_spring_sqli",
+      "question": "What sensitive sink is reachable from listUsers?",
+      "expected": {
+        "entrypoint": "listUsers",
+        "sink": "executequery"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 628,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by listUsers",
+          "detail": "`listUsers` reaches sensitive sink `executeQuery`",
+          "citation": {
+            "file": "UserController.java",
+            "line": 10,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path route:/users:8 -> executeQuery",
+          "detail": "Entry point `UserController.java::route:/users:8` reaches `executeQuery` via `UserController.java::route:/users:8 -> UserController.java::listUsers -> executeQuery`. Source: name; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (95/100). Recommended fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "UserController.java::route:/users:8",
+              "UserController.java::listUsers",
+              "executeQuery"
+            ]
+          },
+          "score": 4.5
+        }
+      ]
+    },
+    {
+      "case": "py_django_sqli",
+      "question": "What sensitive sink is reachable from route:users/?",
+      "expected": {
+        "entrypoint": "route:users/",
+        "sink": "raw"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 207,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`User.objects.raw` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "views.py",
+            "line": 3,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "py_django_sqli",
+      "question": "What sensitive sink is reachable from route:users/?",
+      "expected": {
+        "entrypoint": "route:users/",
+        "sink": "raw"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 301,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by list_users",
+          "detail": "`list_users` reaches sensitive sink `User.objects.raw`",
+          "citation": {
+            "file": "views.py",
+            "line": 3,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        },
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`User.objects.raw` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "views.py",
+            "line": 3,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "py_django_sqli",
+      "question": "What sensitive sink is reachable from route:users/?",
+      "expected": {
+        "entrypoint": "route:users/",
+        "sink": "raw"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 575,
+      "records": [
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path route:users/:6 -> User.objects.raw",
+          "detail": "Entry point `urls.py::route:users/:6` reaches `User.objects.raw` via `urls.py::route:users/:6 -> views.py::list_users -> User.objects.raw`. Source: name; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (92/100). Recommended fix: Validate and constrain user-controlled data before it reaches this sensitive sink.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "urls.py::route:users/:6",
+              "views.py::list_users",
+              "User.objects.raw"
+            ]
+          },
+          "score": 5.5
+        },
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by list_users",
+          "detail": "`list_users` reaches sensitive sink `User.objects.raw`",
+          "citation": {
+            "file": "views.py",
+            "line": 3,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_cmdi",
+      "question": "What sensitive sink is reachable from ping?",
+      "expected": {
+        "entrypoint": "ping",
+        "sink": "subprocess"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 0,
+      "records": []
+    },
+    {
+      "case": "py_fastapi_cmdi",
+      "question": "What sensitive sink is reachable from ping?",
+      "expected": {
+        "entrypoint": "ping",
+        "sink": "subprocess"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 145,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by run_ping",
+          "detail": "`run_ping` reaches sensitive sink `subprocess.run`",
+          "citation": {
+            "file": "app.py",
+            "line": 9,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "entrypoint",
+          "category": "entrypoint_exposure",
+          "title": "Entrypoint ping",
+          "detail": "Exposed entrypoint `app.py::ping`",
+          "citation": {
+            "file": "app.py",
+            "line": 13,
+            "rule": "",
+            "path": []
+          },
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_cmdi",
+      "question": "What sensitive sink is reachable from ping?",
+      "expected": {
+        "entrypoint": "ping",
+        "sink": "subprocess"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 533,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by run_ping",
+          "detail": "`run_ping` reaches sensitive sink `subprocess.run`",
+          "citation": {
+            "file": "app.py",
+            "line": 9,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path ping -> subprocess.run",
+          "detail": "Entry point `app.py::ping` reaches `subprocess.run` via `app.py::ping -> app.py::run_ping -> subprocess.run`. Source: no specific user input identified; the graph shows structural reachability. No sanitizer barrier was detected on the path. Risk is high (72/100). Recommended fix: Avoid shell execution; pass an argv array and validate inputs with an allowlist.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "app.py::ping",
+              "app.py::run_ping",
+              "subprocess.run"
+            ]
+          },
+          "score": 3.5
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_pathtrav",
+      "question": "What sensitive sink is reachable from get_file?",
+      "expected": {
+        "entrypoint": "get_file",
+        "sink": "open"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 0,
+      "records": []
+    },
+    {
+      "case": "py_fastapi_pathtrav",
+      "question": "What sensitive sink is reachable from get_file?",
+      "expected": {
+        "entrypoint": "get_file",
+        "sink": "open"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 145,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by read_file",
+          "detail": "`read_file` reaches sensitive sink `open`",
+          "citation": {
+            "file": "app.py",
+            "line": 7,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        },
+        {
+          "kind": "entrypoint",
+          "category": "entrypoint_exposure",
+          "title": "Entrypoint get_file",
+          "detail": "Exposed entrypoint `app.py::get_file`",
+          "citation": {
+            "file": "app.py",
+            "line": 12,
+            "rule": "",
+            "path": []
+          },
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_pathtrav",
+      "question": "What sensitive sink is reachable from get_file?",
+      "expected": {
+        "entrypoint": "get_file",
+        "sink": "open"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 531,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by read_file",
+          "detail": "`read_file` reaches sensitive sink `open`",
+          "citation": {
+            "file": "app.py",
+            "line": 7,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path get_file -> open",
+          "detail": "Entry point `app.py::get_file` reaches `open` via `app.py::get_file -> app.py::read_file -> open`. Source: no specific user input identified; the graph shows structural reachability. No sanitizer barrier was detected on the path. Risk is high (72/100). Recommended fix: Normalize the path, reject traversal, and enforce that resolved paths stay under an approved base directory.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "app.py::get_file",
+              "app.py::read_file",
+              "open"
+            ]
+          },
+          "score": 3.5
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_sqli",
+      "question": "What sensitive sink is reachable from list_users?",
+      "expected": {
+        "entrypoint": "list_users",
+        "sink": "execute"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 0,
+      "records": []
+    },
+    {
+      "case": "py_fastapi_sqli",
+      "question": "What sensitive sink is reachable from list_users?",
+      "expected": {
+        "entrypoint": "list_users",
+        "sink": "execute"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 151,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by raw_sql",
+          "detail": "`raw_sql` reaches sensitive sink `db.execute`",
+          "citation": {
+            "file": "app.py",
+            "line": 7,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        },
+        {
+          "kind": "entrypoint",
+          "category": "entrypoint_exposure",
+          "title": "Entrypoint list_users",
+          "detail": "Exposed entrypoint `app.py::list_users`",
+          "citation": {
+            "file": "app.py",
+            "line": 11,
+            "rule": "",
+            "path": []
+          },
+          "score": 1.0
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_sqli",
+      "question": "What sensitive sink is reachable from list_users?",
+      "expected": {
+        "entrypoint": "list_users",
+        "sink": "execute"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 542,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by raw_sql",
+          "detail": "`raw_sql` reaches sensitive sink `db.execute`",
+          "citation": {
+            "file": "app.py",
+            "line": 7,
+            "rule": "",
+            "path": []
+          },
+          "score": 4.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path list_users -> db.execute",
+          "detail": "Entry point `app.py::list_users` reaches `db.execute` via `app.py::list_users -> app.py::raw_sql -> db.execute`. Source: no specific user input identified; the graph shows structural reachability. No sanitizer barrier was detected on the path. Risk is high (75/100). Recommended fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "app.py::list_users",
+              "app.py::raw_sql",
+              "db.execute"
+            ]
+          },
+          "score": 3.5
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_tainted_sqli",
+      "question": "What sensitive sink is reachable from search?",
+      "expected": {
+        "entrypoint": "search",
+        "sink": "execute"
+      },
+      "condition": "findings_only",
+      "endpoint_pair_present": false,
+      "path_citation_present": false,
+      "characters": 199,
+      "records": [
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`db.execute` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "app.py",
+            "line": 4,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_tainted_sqli",
+      "question": "What sensitive sink is reachable from search?",
+      "expected": {
+        "entrypoint": "search",
+        "sink": "execute"
+      },
+      "condition": "without_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": false,
+      "characters": 277,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by search",
+          "detail": "`search` reaches sensitive sink `db.execute`",
+          "citation": {
+            "file": "app.py",
+            "line": 4,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "finding",
+          "category": "sink_reachability",
+          "title": "high CG-SQL-EXEC",
+          "detail": "`db.execute` sends this value to the database as part of a query Fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "app.py",
+            "line": 4,
+            "rule": "CG-SQL-EXEC",
+            "path": []
+          },
+          "score": 2.5
+        }
+      ]
+    },
+    {
+      "case": "py_fastapi_tainted_sqli",
+      "question": "What sensitive sink is reachable from search?",
+      "expected": {
+        "entrypoint": "search",
+        "sink": "execute"
+      },
+      "condition": "with_path_records",
+      "endpoint_pair_present": true,
+      "path_citation_present": true,
+      "characters": 456,
+      "records": [
+        {
+          "kind": "sink",
+          "category": "sink_reachability",
+          "title": "Sink reached by search",
+          "detail": "`search` reaches sensitive sink `db.execute`",
+          "citation": {
+            "file": "app.py",
+            "line": 4,
+            "rule": "",
+            "path": []
+          },
+          "score": 5.0
+        },
+        {
+          "kind": "attack_path",
+          "category": "sink_reachability",
+          "title": "Attack path search -> db.execute",
+          "detail": "Entry point `app.py::search` reaches `db.execute` via `app.py::search -> db.execute`. Source: q; user-controlled data reaches the sink. No sanitizer barrier was detected on the path. Risk is critical (95/100). Recommended fix: Use parameterized queries or an ORM query builder; never concatenate user input into SQL.",
+          "citation": {
+            "file": "",
+            "line": 0,
+            "rule": "",
+            "path": [
+              "app.py::search",
+              "db.execute"
+            ]
+          },
+          "score": 4.5
+        }
+      ]
+    }
+  ]
+}
