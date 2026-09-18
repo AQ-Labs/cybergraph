@@ -1,4 +1,17 @@
-# CyberGraph
+<p align="center">
+  <img src="docs/assets/cybergraph-wordmark.svg" alt="CyberGraph - Trace code. Inspect evidence." width="920">
+</p>
+
+<p align="center">
+  <strong>Local security analysis. Connected evidence. Clear review decisions.</strong><br>
+  <a href="#see-it-in-action">Explore the graph</a> &middot;
+  <a href="#install">Install</a> &middot;
+  <a href="docs/tutorial.md">Five-minute tutorial</a>
+</p>
+
+![CyberGraph focused SQL attack path with source evidence from the deliberately vulnerable PyGoat application](docs/assets/report-focus.png)
+
+<p align="center"><sub>Real PyGoat analysis: route &rarr; handler &rarr; SQL sink. Static evidence for review, not proof of exploitability.</sub></p>
 
 ## AI writes. CyberGraph verifies.
 
@@ -22,7 +35,9 @@ AI writes  →  CyberGraph checks  →  ACCEPT / REVIEW  →  shows why (cited e
 
 ## See it in action
 
-CyberGraph turns a codebase into an interactive security map. Below it is analyzing [OWASP PyGoat](https://github.com/adeyosemanputra/pygoat), a deliberately vulnerable app — **826 nodes, 25 attack paths, no API key**. Everything renders in one self-contained, offline HTML file.
+CyberGraph turns a codebase into an interactive security map. The focused preview above analyzes [OWASP PyGoat](https://github.com/adeyosemanputra/pygoat), a deliberately vulnerable training app: **806 stored nodes, 2,634 edges, 14 findings**, with up to 25 ranked attack paths displayed. No API key is required. Everything renders in one self-contained, offline HTML file. [Screenshot provenance](docs/visual-identity.md).
+
+**Focus one path. Keep the evidence.** The optional focused view uses readable, role-labelled nodes and a source-inspection panel. Entrypoints are blue, application functions neutral, guards green, and sensitive sinks red. Directed arrows show relationships; an optional animation follows those arrows, not observed runtime traffic. Filters and visible-node counts remain explicit.
 
 **Security zones — your app as an attack narrative.** Entrypoints flow left-to-right through guards and application logic into sensitive sinks, secrets, and dependencies:
 

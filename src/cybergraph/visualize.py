@@ -131,6 +131,9 @@ def _render_html(
         "__TRUNCATION_BANNER__": _truncation_banner(graph_data),
         "__GRAPH_JSON__": _embed_json(graph_data),
         "__CYTOSCAPE_SRC__": _load_cytoscape_source(),
+        "__BRAND_MARK__": (files("cybergraph") / "assets" / "brand-mark.svg").read_text(
+            encoding="utf-8"
+        ),
     }
     for token, value in replacements.items():
         template = template.replace(token, value)
@@ -509,8 +512,13 @@ _HTML_TEMPLATE = """<!doctype html>
               --edge-base: #cbd5e1; --glow-opacity: 0;
               --warn-bg: #fef3c7; --warn-fg: #92400e; --warn-border: #fde68a; --code: #7c2d12; }
     body { margin: 0; background: var(--bg); color: var(--fg); }
-    header { background: radial-gradient(circle at top left, #1d4ed8, #0b1220 42%, #020617);
+    header { background: #101b24; border-bottom: 3px solid #36d6b0;
       color: white; padding: 32px 36px; position: relative; }
+    .cg-brand { display: flex; align-items: center; gap: 16px; padding-right: 80px; }
+    .cg-brand svg { width: 54px; height: 58px; flex-shrink: 0; }
+    .cg-brand h1 { margin: 0; letter-spacing: 0; }
+    .cg-brand h1 span { display: block; font-size: 14px; font-weight: 400; color: #b9c8cc; }
+    header > div:not(.cg-brand) { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
     main { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 8px; font-size: 30px; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
@@ -536,7 +544,24 @@ _HTML_TEMPLATE = """<!doctype html>
     .toolbar input, .toolbar select, .toolbar button { border: 1px solid var(--input-border);
       border-radius: 6px; padding: 9px 10px; background: var(--input-bg); color: var(--input-fg);
       font-size: 13px; }
-    .toolbar input { min-width: min(360px, 100%); flex: 1; }
+    .toolbar #cg-search { min-width: min(360px, 100%); flex: 1; box-sizing: border-box; }
+    .toolbar select { max-width: 100%; }
+    .cg-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+      white-space: nowrap; }
+    .cg-toggle input { width: 16px; height: 16px; accent-color: #0d9488; }
+    .cg-toggle:has(input:disabled) { opacity: 0.5; }
+    .graph-card.cg-focused #cy { height: 440px; }
+    .graph-card.cg-focused + .details { height: 482px; }
+    @media (max-width: 820px) {
+      .graph-card.cg-focused #cy { height: 640px; }
+      header { padding: 24px; }
+      .cg-brand { padding-right: 0; padding-top: 28px; }
+      .graph-head { flex-wrap: wrap; gap: 8px; }
+      .graph-head > div:first-child { flex: 1 1 180px; }
+      main table { display: block; max-width: 100%; overflow-x: auto; }
+    }
+    .explorer > *, .graph-head > * { min-width: 0; }
+    .graph-badge { flex-shrink: 0; }
     .toolbar button { cursor: pointer; }
     .toolbar button:hover { background: var(--hover); }
     code { color: var(--code); }
@@ -597,7 +622,8 @@ _HTML_TEMPLATE = """<!doctype html>
     .mode-help { margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
     .risk-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
       gap: 10px; margin: 0 0 14px; }
-    .risk-card { border: 1px solid var(--border); background: var(--panel); border-radius: 12px;
+    .risk-card { min-width: 0; overflow-wrap: anywhere;
+      border: 1px solid var(--border); background: var(--panel); border-radius: 8px;
       padding: 11px; cursor: pointer; text-align: left; color: var(--fg); font: inherit; }
     .risk-card:hover { border-color: #93c5fd; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); }
     .risk-card strong { display: block; font-size: 13px; margin-bottom: 5px; }
@@ -655,7 +681,9 @@ _HTML_TEMPLATE = """<!doctype html>
 </head>
 <body>
   <header>
-    <h1>CyberGraph Security Report</h1>
+    <div class="cg-brand">__BRAND_MARK__
+      <h1 aria-label="CyberGraph Security Report">CyberGraph <span>Security Report</span></h1>
+    </div>
     <div>__REPO__</div>
     <button id="cg-theme-toggle" type="button" style="position:absolute;top:20px;right:24px;
       cursor:pointer;border:1px solid rgba(255,255,255,0.4);background:transparent;color:white;
@@ -721,6 +749,8 @@ _HTML_TEMPLATE = """<!doctype html>
         <option value="circle">Layout: circle</option>
         <option value="grid">Layout: grid</option>
       </select>
+      <label class="cg-toggle"><input id="cg-focus" type="checkbox" disabled>Focus path</label>
+      <label class="cg-toggle"><input id="cg-motion" type="checkbox" disabled>Animate path</label>
       <button id="cg-zoom-in" type="button">+</button>
       <button id="cg-zoom-out" type="button">−</button>
       <button id="cg-reset" type="button">Reset</button>
@@ -825,7 +855,8 @@ _HTML_TEMPLATE = """<!doctype html>
       function displayLabel(n) {
         const props = (n && n.properties) || {};
         if (n && n.group === 'entrypoint' && props.route) {
-          return String((props.method ? props.method + ' ' : '') + props.route);
+          const route = typeof props.route === 'object' ? props.route.path : props.route;
+          if (route) return String((props.method ? props.method + ' ' : '') + route);
         }
         return (n && n.label) || tail(n && n.id);
       }
@@ -1159,10 +1190,118 @@ _HTML_TEMPLATE = """<!doctype html>
           { selector: '.cg-dim', style: { 'opacity': 0.12 } },
           { selector: '.cg-hl', style: { 'opacity': 1, 'border-width': 4,
             'border-color': '#f59e0b', 'line-color': '#f59e0b',
-            'target-arrow-color': '#f59e0b', 'z-index': 99 } }
+            'target-arrow-color': '#f59e0b', 'z-index': 99 } },
+          { selector: 'node.cg-focus-node', style: {
+            'shape': 'round-rectangle', 'width': 230, 'height': 98,
+            'background-color': function () { return activeTheme().nodeOutline; },
+            'border-color': function (ele) { return groupColor(ele.data('group')); },
+            'border-width': 3, 'font-size': 14, 'text-valign': 'center',
+            'text-wrap': 'wrap', 'text-max-width': 210, 'text-overflow-wrap': 'anywhere',
+            'text-outline-width': 0, 'label': function (ele) {
+              const label = String(ele.data('label') || '');
+              const compact = label.length > 72 ? label.slice(0, 69) + '...' : label;
+              return String(ele.data('group')).toUpperCase() + '\\n' + compact;
+            }, 'underlay-opacity': 0
+          } },
+          { selector: 'edge.cg-focus-edge', style: {
+            'width': 3, 'curve-style': 'bezier', 'line-style': 'dashed',
+            'line-dash-pattern': [8, 6], 'arrow-scale': 1.1
+          } }
         ],
         layout: { name: 'preset' }
       });
+
+      const focusControl = document.getElementById('cg-focus');
+      const motionControl = document.getElementById('cg-motion');
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      let focusedIds = null;
+      let focusedEdges = null;
+      let motionTimer = null;
+      let dashOffset = 0;
+
+      function stopMotion() {
+        if (motionTimer !== null) window.clearInterval(motionTimer);
+        motionTimer = null;
+        cy.edges().removeStyle('line-dash-offset');
+      }
+
+      function syncMotion() {
+        stopMotion();
+        motionControl.disabled = !focusedIds || reducedMotion.matches;
+        if (motionControl.disabled || !motionControl.checked || document.hidden) return;
+        motionTimer = window.setInterval(function () {
+          dashOffset = (dashOffset - 2) % 140;
+          cy.edges('.cg-focus-edge').style('line-dash-offset', dashOffset);
+        }, 80);
+      }
+
+      function visibleCounts() {
+        const visible = cy.nodes().filter(function (n) { return n.style('display') !== 'none'; });
+        document.getElementById('cg-view-counts').textContent =
+          visible.length + ' of ' + cy.nodes().length + ' nodes / ' +
+          cy.edges().filter(function (e) {
+            return e.style('display') !== 'none';
+          }).length + ' edges';
+      }
+
+      function positionFocusedPath() {
+        if (!focusedIds) return;
+        cy.resize();
+        const vertical = cy.width() < 740;
+        Array.from(focusedIds).forEach(function (id, i) {
+          cy.getElementById(id).position({ x: vertical ? 150 : 150 + i * 330,
+            y: vertical ? 90 + i * 170 : 160 });
+        });
+        const visible = cy.elements().filter(function (e) {
+          return e.style('display') !== 'none';
+        });
+        if (visible.length) cy.fit(visible, 42);
+      }
+
+      function focusPath() {
+        focusedIds = null;
+        focusedEdges = null;
+        cy.elements().removeClass('cg-focus-node cg-focus-edge');
+        const p = attackPaths[Number(document.getElementById('cg-path').value)];
+        if (focusControl.checked && !focusControl.disabled && p) {
+          focusedIds = new Set(p.nodes || []);
+          focusedEdges = new Set();
+          const ids = p.nodes || [];
+          cy.nodes().filter(function (n) { return focusedIds.has(n.id()); })
+            .addClass('cg-focus-node');
+          cy.edges().forEach(function (e) {
+            for (let i = 0; i < ids.length - 1; i++) {
+              if (e.source().id() === ids[i] && e.target().id() === ids[i + 1]) {
+                focusedEdges.add(e.id()); e.addClass('cg-focus-edge');
+              }
+            }
+          });
+        }
+        document.getElementById('cg-layout').disabled = !!focusedIds;
+        document.querySelector('.graph-card').classList.toggle('cg-focused', !!focusedIds);
+        document.getElementById('cg-view-title').textContent = focusedIds
+          ? 'Selected Attack Path' : 'Attack Path Explorer';
+        document.getElementById('cg-view-subtitle').textContent = focusedIds
+          ? 'Static route-to-sink evidence. Inspect each node before deciding.'
+          : 'Highest-risk entrypoint-to-sink paths.';
+        applyFilters();
+        if (focusedIds) { cy.stop(true, true); positionFocusedPath(); }
+        syncMotion();
+      }
+
+      focusControl.addEventListener('change', function () {
+        if (!focusControl.checked) {
+          const selected = document.getElementById('cg-path').value;
+          renderMode('paths');
+          highlightPath(selected);
+        } else { focusPath(); }
+      });
+      motionControl.addEventListener('change', syncMotion);
+      reducedMotion.addEventListener('change', syncMotion);
+      document.addEventListener('visibilitychange', syncMotion);
+      window.addEventListener('pagehide', stopMotion);
+      new ResizeObserver(function () { positionFocusedPath(); })
+        .observe(document.getElementById('cy'));
 
       function updateViewText(view, built) {
         document.getElementById('cg-view-title').textContent = built.title;
@@ -1172,6 +1311,16 @@ _HTML_TEMPLATE = """<!doctype html>
       }
 
       function renderMode(mode) {
+        stopMotion();
+        focusedIds = null;
+        focusedEdges = null;
+        focusControl.checked = false;
+        focusControl.disabled = true;
+        motionControl.checked = false;
+        motionControl.disabled = true;
+        document.getElementById('cg-layout').disabled = false;
+        document.querySelector('.graph-card').classList.remove('cg-focused');
+        cy.stop(true, true);
         const builders = {
           paths: buildAttackPathElements,
           zones: buildZoneElements,
@@ -1244,14 +1393,18 @@ _HTML_TEMPLATE = """<!doctype html>
             const matchText = !q || hay.indexOf(q) !== -1;
             const matchLayer = !layer || n.data('group') === layer;
             const matchSev = (SEV_RANK[n.data('severity')] ?? -1) >= minSev;
-            n.style('display', (matchText && matchLayer && matchSev) ? 'element' : 'none');
+            const matchFocus = !focusedIds || focusedIds.has(n.id());
+            n.style('display', (matchText && matchLayer && matchSev && matchFocus)
+              ? 'element' : 'none');
           });
           cy.edges().forEach(function (e) {
             const vis = e.source().style('display') !== 'none' &&
               e.target().style('display') !== 'none';
-            e.style('display', vis ? 'element' : 'none');
+            e.style('display', vis && (!focusedEdges || focusedEdges.has(e.id()))
+              ? 'element' : 'none');
           });
         });
+        visibleCounts();
       }
 
       function pathNarrative(p, rank) {
@@ -1261,7 +1414,7 @@ _HTML_TEMPLATE = """<!doctype html>
           '</strong> can reach ' +
           '<strong>' + esc(tail(p.sink)) + '</strong>' +
           (p.data_reachable ? ' carrying user-controlled data' : '') +
-          (p.sanitized ? ', passing a sanitizer on the way' : ' with no sanitizer on the way') +
+          (p.sanitized ? ', passing a detected sanitizer' : ' with no detected sanitizer') +
           '.</p>';
         if (risk.label) {
           html += '<div class="kv"><span class="tag" style="background:#dc2626">' +
@@ -1288,7 +1441,11 @@ _HTML_TEMPLATE = """<!doctype html>
           renderMode('paths');
         }
         cy.elements().removeClass('cg-hl cg-dim');
-        if (idx === '' || idx === null) return;
+        focusControl.disabled = idx === '' || idx === null || !attackPaths[Number(idx)];
+        if (focusControl.disabled) {
+          renderMode('paths');
+          return;
+        }
         const p = attackPaths[Number(idx)];
         if (!p) return;
         pathNarrative(p, Number(idx));
@@ -1303,13 +1460,17 @@ _HTML_TEMPLATE = """<!doctype html>
         cy.elements().addClass('cg-dim');
         inPath.removeClass('cg-dim').addClass('cg-hl');
         if (inPath.length) {
-          cy.animate({ fit: { eles: inPath, padding: 60 }, duration: 350 });
+          cy.stop(true, true);
+          if (reducedMotion.matches) cy.fit(inPath, 60);
+          else cy.animate({ fit: { eles: inPath, padding: 60 }, duration: 350 });
           pulse(inPath.nodes());
         }
+        focusPath();
       }
 
       // One soft glow pulse to draw the eye to a freshly highlighted path.
       function pulse(nodes) {
+        if (reducedMotion.matches || focusControl.checked) return;
         try {
           nodes.forEach(function (n) {
             n.animate(
