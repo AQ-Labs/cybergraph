@@ -1,0 +1,19 @@
+{
+  "duration_seconds": 296.981016,
+  "resolution": "1920x1080",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "size_bytes": 28317704,
+  "full_decode": "passed",
+  "captions": 66,
+  "caption_bounds": "passed",
+  "minimal_bookends": "passed",
+  "audio_peak_db": -4.1,
+  "black_intervals": "none >= 0.3 s",
+  "silence_intervals": "none >= 3 s",
+  "v5_preserved": true,
+  "unchanged_substantive_clips": 7,
+  "llm_used": false,
+  "visual_review": "Encoded frames from all twelve chapters inspected on 2026-09-18; real graph views, evidence, comparisons, captions, and minimal bookends checked.",
+  "sha256": "b515f3d7888f9dbd0c2319c71cd2988780ab87339b63f38cdbb4da54a3da0732"
+}

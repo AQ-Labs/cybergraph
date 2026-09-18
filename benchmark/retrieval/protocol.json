@@ -1,0 +1,15 @@
+{
+  "question_template": "What sensitive sink is reachable from {entrypoint}?",
+  "cases": "All expected positive paths in the existing 11-case seeded corpus; negative cases have no target pair and are excluded.",
+  "limit_records": 2,
+  "limit_characters": 2000,
+  "ranking": "Unchanged category, lexical-overlap, and kind bonus from grounded.py; ties by kind then title.",
+  "conditions": [
+    "findings_only",
+    "without_path_records",
+    "with_path_records"
+  ],
+  "metric": "Both expected endpoint and sink label occur in returned evidence, case-insensitive substring matching as in the corpus. This does not validate their relationship.",
+  "secondary_metric": "A single returned path citation contains both labels. This directly measures path availability, not independent correctness.",
+  "scope": "Descriptive ablation on seeded examples, not held-out retrieval evaluation, LLM evaluation, or comparison against another tool."
+}

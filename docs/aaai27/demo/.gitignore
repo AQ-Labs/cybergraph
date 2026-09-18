@@ -1,0 +1,6 @@
+# Keep large renders, speech audio, caches, and generated target reports local.
+*.mp4
+*.webm
+*.mp3
+*.wav
+frames/report.html

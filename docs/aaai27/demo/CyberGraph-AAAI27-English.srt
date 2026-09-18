@@ -1,0 +1,263 @@
+1
+00:00:00,500 --> 00:00:05,105
+Hello, and welcome to CyberGraph. Follow a security finding from its
+
+2
+00:00:05,105 --> 00:00:10,010
+entry point to the code that matters. Inspect the graph, question its evidence,
+
+3
+00:00:10,069 --> 00:00:14,700
+apply a repair, and recheck what remains. This demonstration uses
+
+4
+00:00:14,700 --> 00:00:19,582
+public PyGoat training code, local analysis, and an interactive browser report.
+
+5
+00:00:20,283 --> 00:00:22,213
+No language model is required.
+
+6
+00:00:24,020 --> 00:00:27,366
+Start with Git and Python three point ten or newer.
+
+7
+00:00:28,065 --> 00:00:32,851
+Clone CyberGraph, create and activate a virtual environment, then install the checkout
+
+8
+00:00:32,851 --> 00:00:37,422
+using pip. In your IDE terminal, clone PyGoat and enter
+
+9
+00:00:37,422 --> 00:00:40,971
+its folder. We pin the source for reproducibility.
+
+10
+00:00:41,672 --> 00:00:45,780
+Run doctor to check setup. The dot means this repository.
+
+11
+00:00:46,482 --> 00:00:49,280
+We never install or start the vulnerable application.
+
+12
+00:00:51,100 --> 00:00:56,160
+Quickstart initializes configuration, builds the graph, analyzes risks, and writes a
+
+13
+00:00:56,170 --> 00:01:00,910
+report. Python's abstract syntax tree identifies code structure;
+
+14
+00:01:00,980 --> 00:01:04,090
+security rules and call resolution connect the entities.
+
+15
+00:01:04,790 --> 00:01:06,910
+This run finds fourteen issues.
+
+16
+00:01:07,610 --> 00:01:09,800
+Analyze records a history baseline.
+
+17
+00:01:10,500 --> 00:01:14,490
+We then regenerate the visualization with source snippets and a larger node limit.
+
+18
+00:01:15,190 --> 00:01:16,620
+No code is uploaded.
+
+19
+00:01:18,460 --> 00:01:23,850
+Inside your repository, dot cybergraph contains the SQLite database and HTML report.
+
+20
+00:01:24,550 --> 00:01:27,580
+Dot cybergraph dot TOML holds configuration.
+
+21
+00:01:28,280 --> 00:01:32,650
+Quickstart also creates a GitHub Actions workflow: review it before committing.
+
+22
+00:01:33,350 --> 00:01:37,420
+These export commands additionally create graph JSON and SARIF findings.
+
+23
+00:01:38,120 --> 00:01:40,480
+Open report dot HTML in your browser;
+
+24
+00:01:40,540 --> 00:01:42,130
+no web server is needed.
+
+25
+00:01:43,940 --> 00:01:49,510
+The report uses HTML, CSS, JavaScript, and the bundled Cytoscape visualization
+
+26
+00:01:49,520 --> 00:01:52,690
+library. A node represents a code entity;
+
+27
+00:01:52,760 --> 00:01:54,570
+an edge represents a relationship.
+
+28
+00:01:55,270 --> 00:01:59,860
+Blue marks entry points, green marks guards, and red marks sensitive sinks.
+
+29
+00:02:00,560 --> 00:02:02,740
+Dashed regions group security layers.
+
+30
+00:02:03,440 --> 00:02:06,140
+An amber trail highlights the selected attack path.
+
+31
+00:02:06,840 --> 00:02:12,680
+Switch views for architecture, then use search, filters, and node selection to narrow your investigation.
+
+32
+00:02:14,500 --> 00:02:19,710
+Select the SQL injection path: a Django route, its handler, and a raw database
+
+33
+00:02:19,730 --> 00:02:23,650
+query. Click each node to inspect its role and connections.
+
+34
+00:02:24,350 --> 00:02:28,210
+The path panel reports user-controlled input and no detected sanitizer.
+
+35
+00:02:28,910 --> 00:02:32,670
+Its score prioritizes review, not exploitation probability.
+
+36
+00:02:33,370 --> 00:02:37,460
+Reachability is evidence to investigate, not proof of a successful attack.
+
+37
+00:02:39,300 --> 00:02:44,250
+Now inspect the source. The handler reads a name and password from the request.
+
+38
+00:02:44,950 --> 00:02:48,380
+Line eight hundred and sixty-four concatenates them into SQL.
+
+39
+00:02:49,080 --> 00:02:52,670
+Line eight hundred and seventy-eight sends the query to objects dot raw.
+
+40
+00:02:53,370 --> 00:02:57,540
+An authentication check is present, but it does not prevent SQL injection.
+
+41
+00:02:58,240 --> 00:03:02,020
+The file and line citations let a developer verify the finding directly.
+
+42
+00:03:03,820 --> 00:03:08,190
+Back in the terminal, ask CyberGraph to trace this handler to its SQL sink.
+
+43
+00:03:08,890 --> 00:03:14,590
+Explain returns a confidence level, the connected path, source citations, and repair guidance.
+
+44
+00:03:15,290 --> 00:03:18,650
+This is local graph retrieval, not generated model reasoning.
+
+45
+00:03:19,350 --> 00:03:23,570
+Inspect the cited evidence rather than treating an answer as a security guarantee.
+
+46
+00:03:25,420 --> 00:03:30,049
+We also ran a small evidence ablation. Across nine seeded questions,
+
+47
+00:03:30,132 --> 00:03:34,715
+two ordinary records contained both endpoint labels eight times; adding path records
+
+48
+00:03:34,715 --> 00:03:37,680
+covered all nine and supplied connected citations.
+
+49
+00:03:38,382 --> 00:03:41,954
+Ranking and limits were unchanged, but path records were longer.
+
+50
+00:03:42,656 --> 00:03:47,608
+This measures evidence availability, not detection accuracy, model quality, or developer
+
+51
+00:03:47,608 --> 00:03:48,407
+productivity.
+
+52
+00:03:50,220 --> 00:03:55,420
+In our demonstration copy, replace concatenation with SQL placeholders and pass the values
+
+53
+00:03:55,430 --> 00:03:58,850
+separately. Run analyze again, then history.
+
+54
+00:03:59,550 --> 00:04:04,770
+The finding count falls from fourteen to thirteen: one finding fixed, no new findings.
+
+55
+00:04:05,470 --> 00:04:07,980
+Finally, check the working-tree change.
+
+56
+00:04:08,680 --> 00:04:11,940
+REVIEW flags remaining risks and configuration changes.
+
+57
+00:04:12,650 --> 00:04:16,460
+A successful local repair does not make the entire application safe.
+
+58
+00:04:18,300 --> 00:04:22,976
+Language models are optional. Anthropic, OpenAI, or Kimi
+
+59
+00:04:22,976 --> 00:04:26,108
+can phrase the retrieved evidence and reference its citations.
+
+60
+00:04:26,810 --> 00:04:30,180
+Enable a provider only when sharing that context is acceptable.
+
+61
+00:04:30,881 --> 00:04:33,632
+Today's answers remain deterministic and offline.
+
+62
+00:04:34,333 --> 00:04:39,202
+A model's explanation still needs verification; citation instructions do not guarantee
+
+63
+00:04:39,202 --> 00:04:44,668
+accuracy. MCP and SARIF also support IDE and review integrations.
+
+64
+00:04:46,500 --> 00:04:51,200
+Inspect, question, repair, and recheck. CyberGraph
+
+65
+00:04:51,200 --> 00:04:53,796
+keeps evidence visible and the developer in control.
+
+66
+00:04:54,498 --> 00:04:55,653
+Thank you for watching.

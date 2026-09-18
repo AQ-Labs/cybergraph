@@ -1,0 +1,3 @@
+# Preserve the exact official author-kit bytes on every platform.
+aaai2027.sty -text whitespace=-blank-at-eol
+aaai2027.bst -text whitespace=-blank-at-eol

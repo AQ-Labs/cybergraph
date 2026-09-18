@@ -1,0 +1,62 @@
+[
+  {
+    "chapter": "welcome",
+    "reused_v4": false,
+    "sha256": "317d270f6ef57b7e5ed2666dee7a2651486c870a59bb065c923fda8f98a738e6"
+  },
+  {
+    "chapter": "install",
+    "reused_v4": false,
+    "sha256": "8e05705d2b8fb7f7da5386e4174874021e251d5572882528f7ac9a506ca80213"
+  },
+  {
+    "chapter": "build",
+    "reused_v4": true,
+    "sha256": "3d8cef2199651b2c066ed9c7f8f207543f1c70e3d12828681bd664b28fd2d96b"
+  },
+  {
+    "chapter": "files",
+    "reused_v4": true,
+    "sha256": "b9739494718035505785840b359b61e4a4226a652a51d67eafec5462a7f80d39"
+  },
+  {
+    "chapter": "decode",
+    "reused_v4": true,
+    "sha256": "e705a810a95f65ea6ff4ed99491ce13e9f74318ffdf61e40fd8fde886c1e46c1"
+  },
+  {
+    "chapter": "trace",
+    "reused_v4": true,
+    "sha256": "bf7b3be64ac5390650a883ffe409176686fce3208e71cff67ef4ec323f019060"
+  },
+  {
+    "chapter": "source",
+    "reused_v4": true,
+    "sha256": "dc82ca94c309e0bfee5457206a8ddcf5d911d35d4c8b359dbeae6d7eca21d7e3"
+  },
+  {
+    "chapter": "ask",
+    "reused_v4": true,
+    "sha256": "2497b729b3f4f0dc0553c7929b0650d7ae003a5e94b0a2b4ec9b9e631926975c"
+  },
+  {
+    "chapter": "compare",
+    "reused_v4": false,
+    "sha256": "db09875a6062f69f26a9f70a4090fad68047309c07f798bdf0c075cffa31fb4f"
+  },
+  {
+    "chapter": "repair",
+    "reused_v4": true,
+    "sha256": "6f422c44a0dc6a621bdae4f4b6654bac3e6552ef7aab28b41b24a588f1c2d3de"
+  },
+  {
+    "chapter": "optional",
+    "reused_v4": false,
+    "sha256": "00d47d3ee4a76e90fc00187d2f7b79cbab6203b96609220c2a448cf0cbd1303b"
+  },
+  {
+    "chapter": "thanks",
+    "reused_v4": false,
+    "sha256": "e20b9d90ad404ff42fe3bd1053a8eec7c857c626fb3f206b8d4df97d2d5c9efa"
+  }
+]

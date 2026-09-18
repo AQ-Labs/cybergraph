@@ -405,6 +405,7 @@ See:
 - [Architecture](docs/architecture.md)
 - [Getting started](docs/getting-started.md)
 - [Five-minute tutorial](docs/tutorial.md)
+- [AAAI-27 demo paper and evidence (draft)](docs/aaai27/README.md)
 - [Security ontology](docs/security-ontology.md)
 - [Product plan](docs/product-plan.md)
 - [GitHub Action](docs/github-action.md)

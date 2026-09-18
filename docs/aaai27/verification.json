@@ -1,0 +1,103 @@
+{
+  "paper": "CyberGraph-AAAI27-Draft.pdf",
+  "page_count": 3,
+  "content_pages": [
+    1,
+    2
+  ],
+  "references_only_pages": [
+    3
+  ],
+  "page_size": "US Letter, 612 x 792 pt",
+  "template_source": "https://aaai.org/authorkit27/",
+  "unmodified_template_sha256": {
+    "aaai2027.sty": "391bce82815bf698b8e382dd3ae7e30c75d7ab46df140cb295b1266016bc8623",
+    "aaai2027.bst": "5db7765ba99de5c1e4686f9b3940a0add9c5e702f2164514462bec130ccb6e3c"
+  },
+  "pdf_sha256": "8e85a36f72c3a1fa9ec29a5fee8979ffc59cadec9a18740e599340d1d6a21712",
+  "pdf_bytes": 296697,
+  "fonts": {
+    "/KWHWRG+TeXGyreTermesX-Bold": {
+      "embedded": true,
+      "type": "/Type1"
+    },
+    "/HSYDWP+TeXGyreTermesX-Regular": {
+      "embedded": true,
+      "type": "/Type1"
+    },
+    "/BPCOIQ+NimbusMonL-Regu": {
+      "embedded": true,
+      "type": "/Type1"
+    },
+    "/RIHSAN+TeXGyreTermesX-Italic": {
+      "embedded": true,
+      "type": "/Type1"
+    }
+  },
+  "all_fonts_embedded": true,
+  "type3_fonts": false,
+  "unresolved_references": false,
+  "overfull_boxes": false,
+  "bibliography_entries": 11,
+  "benchmark": {
+    "cases": 11,
+    "tp": 9,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0
+  },
+  "retrieval_ablation": {
+    "findings_only": {
+      "questions": 9,
+      "endpoint_pairs": 0,
+      "path_citations": 0,
+      "mean_characters": 136.3
+    },
+    "without_path_records": {
+      "questions": 9,
+      "endpoint_pairs": 8,
+      "path_citations": 0,
+      "mean_characters": 243.2
+    },
+    "with_path_records": {
+      "questions": 9,
+      "endpoint_pairs": 9,
+      "path_citations": 9,
+      "mean_characters": 543.7
+    }
+  },
+  "llm_evaluation_performed": false,
+  "authors": [
+    "Azizur Rahman",
+    "Laraib Hasan",
+    "Rushikesh Hiray",
+    "Shubham Srivastava",
+    "Mohammad Hijjawi",
+    "Jafar Rahman",
+    "Harshit Taneja"
+  ],
+  "author_emails": {
+    "Azizur Rahman": "er.azizurrahman@gmail.com",
+    "Laraib Hasan": "laraib.hasan45@gmail.com",
+    "Rushikesh Hiray": "rhiray03@gmail.com",
+    "Shubham Srivastava": "shubham03workplace@gmail.com",
+    "Mohammad Hijjawi": "mohammad.hijjawi1997@gmail.com",
+    "Jafar Rahman": "rahmanjafar2004@gmail.com",
+    "Harshit Taneja": "hxt532@student.bham.ac.uk"
+  },
+  "affiliations": {
+    "Azizur Rahman": "University of Birmingham",
+    "Laraib Hasan": "University of Birmingham",
+    "Rushikesh Hiray": "University of Birmingham",
+    "Shubham Srivastava": "University of Birmingham",
+    "Mohammad Hijjawi": "University of Birmingham",
+    "Jafar Rahman": "Independent Researcher",
+    "Harshit Taneja": "University of Birmingham"
+  },
+  "affiliations_and_email_pending": false,
+  "corresponding_author_designation_pending": true,
+  "submission_made": false,
+  "visual_review": "All three final pages rendered at 1300px and visually inspected on 2026-09-18; author block, figure, columns, and references checked with no overflow."
+}
